@@ -21,7 +21,7 @@ from bpy.props import (
     IntVectorProperty,
     StringProperty,
 )
-from mathutils import Vector
+from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 from .edit import connected_components, edit_asset
@@ -35,6 +35,9 @@ from .voxel import VoxelAsset, VoxelSocket
 ASSET_PROPERTY = "voxtart_asset_json"
 SCHEMA_PROPERTY = "voxtart_schema_version"
 MESH_BACKEND_PROPERTY = "voxtart_mesh_backend"
+COMPONENT_SELECTION_PROPERTY = "voxtart_component_selection"
+COMPONENT_OVERLAY_PROPERTY = "voxtart_component_overlay"
+PROTECTED_OVERLAY_PROPERTY = "voxtart_protected_overlay"
 
 
 def _store_asset(obj: bpy.types.Object, asset: VoxelAsset) -> None:
@@ -87,6 +90,7 @@ def _create_asset_object(context: bpy.types.Context, name: str, asset: VoxelAsse
     _store_asset(obj, asset)
     obj[MESH_BACKEND_PROPERTY] = "greedy"
     _link_object(context, obj)
+    _update_visual_overlays(obj, asset)
     return obj
 
 
@@ -97,8 +101,113 @@ def _replace_asset_mesh(obj: bpy.types.Object, asset: VoxelAsset, backend: str |
     _palette_materials(obj, asset)
     _store_asset(obj, asset)
     obj[MESH_BACKEND_PROPERTY] = backend
+    _update_visual_overlays(obj, asset)
     if old_mesh.users == 0:
         bpy.data.meshes.remove(old_mesh)
+
+
+def _overlay_cells(obj: bpy.types.Object, property_name: str) -> tuple[tuple[int, int, int], ...]:
+    raw = obj.get(property_name)
+    if raw is None:
+        return ()
+    encoded = json.loads(raw) if isinstance(raw, str) else raw
+    if not isinstance(encoded, list):
+        raise ValueError(f"{property_name} must be a JSON list")
+    cells = set()
+    for cell in encoded:
+        if not isinstance(cell, (list, tuple)) or len(cell) != 3:
+            raise ValueError(f"{property_name} contains an invalid cell")
+        normalized = tuple(int(axis) for axis in cell)
+        cells.add(normalized)
+    return tuple(sorted(cells))
+
+
+def _wire_mesh(name: str, asset: VoxelAsset, cells) -> bpy.types.Mesh:
+    corners = (
+        (0, 0, 0),
+        (1, 0, 0),
+        (1, 1, 0),
+        (0, 1, 0),
+        (0, 0, 1),
+        (1, 0, 1),
+        (1, 1, 1),
+        (0, 1, 1),
+    )
+    edge_pairs = (
+        (0, 1), (1, 2), (2, 3), (3, 0),
+        (4, 5), (5, 6), (6, 7), (7, 4),
+        (0, 4), (1, 5), (2, 6), (3, 7),
+    )
+    vertices = []
+    edges = []
+    for cell in sorted(set(cells)):
+        offset = len(vertices)
+        vertices.extend(
+            tuple(
+                (cell[axis] + corner[axis]) * asset.grid_size
+                for axis in range(3)
+            )
+            for corner in corners
+        )
+        edges.extend((offset + first, offset + second) for first, second in edge_pairs)
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(vertices, edges, [])
+    mesh.update()
+    return mesh
+
+
+def _update_overlay(
+    obj: bpy.types.Object,
+    asset: VoxelAsset,
+    property_name: str,
+    cells,
+    kind: str,
+    color: tuple[float, float, float, float],
+) -> None:
+    overlay_name = obj.get(property_name)
+    overlay = bpy.data.objects.get(overlay_name) if isinstance(overlay_name, str) else None
+    mesh = _wire_mesh(f"{obj.name} {kind} Mesh", asset, cells)
+    if overlay is None or overlay.type != 'MESH':
+        overlay = bpy.data.objects.new(f"{obj.name} {kind} Overlay", mesh)
+        collection = obj.users_collection[0] if obj.users_collection else bpy.context.scene.collection
+        collection.objects.link(overlay)
+        obj[property_name] = overlay.name
+    else:
+        old_mesh = overlay.data
+        overlay.data = mesh
+        if old_mesh.users == 0:
+            bpy.data.meshes.remove(old_mesh)
+    overlay.parent = obj
+    overlay.matrix_parent_inverse = Matrix.Identity(4)
+    overlay.display_type = 'WIRE'
+    overlay.hide_render = True
+    overlay.hide_viewport = not bool(cells)
+    overlay.color = color
+    overlay["voxtart_overlay_source"] = obj.name
+    overlay["voxtart_overlay_kind"] = kind
+    overlay.select_set(False)
+
+
+def _update_visual_overlays(obj: bpy.types.Object, asset: VoxelAsset | None = None) -> None:
+    asset = asset or _load_asset(obj)
+    selected = tuple(cell for cell in _overlay_cells(obj, COMPONENT_SELECTION_PROPERTY) if cell in asset.voxels)
+    protected = tuple(sorted(_protected_cells(obj)))
+    _update_overlay(
+        obj,
+        asset,
+        COMPONENT_OVERLAY_PROPERTY,
+        selected,
+        "Component",
+        (0.1, 0.6, 1.0, 1.0),
+    )
+    _update_overlay(
+        obj,
+        asset,
+        PROTECTED_OVERLAY_PROPERTY,
+        protected,
+        "Protected",
+        (1.0, 0.15, 0.1, 1.0),
+    )
 
 
 def _inside_bvh(tree: BVHTree, point: Vector, _minimum_x: float, maximum_x: float, step: float) -> bool:
@@ -380,6 +489,7 @@ class VOXTART_OT_select_component(bpy.types.Operator):
             )
             obj["voxtart_component_index"] = self.component_index
             obj["voxtart_component_count"] = len(components)
+            _update_visual_overlays(obj)
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
@@ -412,6 +522,7 @@ class VOXTART_OT_set_protected_voxel(bpy.types.Operator):
                 [list(cell) for cell in sorted(protected)],
                 separators=(",", ":"),
             )
+            _update_visual_overlays(obj)
             obj["voxtart_protection_report"] = json.dumps({
                 "protected": self.protected,
                 "cell": list(self.cell),
