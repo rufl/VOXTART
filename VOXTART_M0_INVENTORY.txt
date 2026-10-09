@@ -1,0 +1,58 @@
+VOXTART M0 baseline inventory
+==============================
+
+Upstream
+--------
+- Repository: https://projects.blender.org/blender/blender.git
+- Pinned checkout: v5.2.2 / d13f752e3b9c4f8c261cda552b1021f8bcc0382c
+- Local branch: voxtart/redux-m0
+- Provenance record: UPSTREAM.lock
+
+Build entrypoints
+-----------------
+- Root CMakeLists.txt: compiler checks, feature options, dependency gates, and add_subdirectory graph.
+- make.bat: Windows dependency discovery, compiler detection, CMake generation, and MSBuild/Ninja build.
+- build_files/cmake/config/blender_release.cmake: official-release feature preset.
+- build_files/windows/*.cmd: Windows dependency and compiler helpers.
+- build_files/utils/make_update.py: Git LFS, library checkout, and submodule update utility.
+
+Top-level build graph
+---------------------
+- intern/: reusable Blender internals and engines (memory, geometry, mesh, GPU, drawing, windowing, render, etc.).
+- extern/: bundled third-party and bridge libraries.
+- source/blender/: application/runtime modules, editors, data model, I/O, Python, rendering, and UI.
+- source/creator/: Blender executable entry point.
+- tests/: CMake test targets and behavior fixtures.
+- scripts/: startup Python, add-ons, templates, presets, and extension-facing runtime scripts.
+- assets/ and release/: shipped data, startup files, icons, packaging, and release metadata.
+- lib/windows_x64/: precompiled Windows dependencies, initialized by the upstream update flow.
+
+Surface to preserve for the voxel authoring product
+----------------------------------------------------
+- Window/input/viewport runtime: source/blender/windowmanager, editors, intern/ghost, source/blender/gpu, source/blender/draw.
+- Data lifetime/undo/depsgraph: source/blender/blenkernel, makesdna, makesrna, blenloader, depsgraph.
+- Mesh and conversion foundation: source/blender/bmesh, geometry, mesh, modifiers, nodes, object, scene.
+- Images/palettes/cameras/lights/render-back verification: source/blender/imbuf, image, render, draw, scene, source/creator.
+- Save/load and portable assets: source/blender/blenloader, io, asset_system, scripts/startup, release/datafiles.
+- Python extension surface: root WITH_PYTHON option, source/blender/python, scripts, release/extensions.
+
+Options explicitly relevant to the reduced product
+---------------------------------------------------
+- Keep ON: WITH_BLENDER, WITH_PYTHON, WITH_PYTHON_SECURITY, WITH_INTERNATIONAL, WITH_OPENGL_BACKEND, WITH_VULKAN_BACKEND.
+- Keep ON: image support needed for pixel-art input/output (WITH_IMAGE_OPENJPEG, WITH_IMAGE_WEBP, and existing core image formats).
+- Keep ON: core mesh/geometry/dependency/asset/runtime targets regardless of optional render features.
+- Preserve baseline option behavior until a VOXTART CMake preset exists; do not delete modules before a passing baseline and surface inventory.
+
+First reduction review set (not deleted in M0)
+-----------------------------------------------
+- Animation/rigging: source/blender/animrig, armature, NLA-related runtime and editor modules.
+- Simulation/video/compositing: source/blender/simulation, compositor, sequencer, movie, and modifier simulation paths.
+- Tracking/VR/alternate interchange/rendering: libmv, XR/OpenXR, USD/Hydra, MaterialX, Cycles-only paths.
+- Legacy or non-product UI tools: sculpt/paint/Grease Pencil/freestyle/editor spaces outside voxel authoring.
+- These remain present until M1/M2 dependency evidence identifies a clean cut; removal is gated by build, save/load, and viewport regression fixtures.
+
+M0 risks
+--------
+- make.bat's stock MSVC detector does not recognize the installed Build Tools C++ component even though vcvarsall.bat, cl.exe, and MSBuild.exe are present; baseline build needs an explicit environment/generator path or installer component repair.
+- lib/windows_x64 is a Git submodule and must be populated before CMake can configure the normal Windows build.
+- SPRITEFORM at Chopper remains an external prerequisite; remote Paseo project operations returned HTTP 403 and SSH key authentication was rejected.
