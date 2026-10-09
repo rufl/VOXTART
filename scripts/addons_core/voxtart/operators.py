@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 
 import bpy
+from bpy_extras import view3d_utils
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 from bpy.props import (
     BoolProperty,
@@ -29,6 +30,7 @@ from .io import load_asset, save_asset
 from .kitbash import find_best_match
 from .meshing import scaled_mesh
 from .optimize import DecimationPolicy, decimate
+from .pick import raycast_voxel
 from .voxel import VoxelAsset, VoxelSocket
 
 
@@ -37,6 +39,8 @@ SCHEMA_PROPERTY = "voxtart_schema_version"
 MESH_BACKEND_PROPERTY = "voxtart_mesh_backend"
 COMPONENT_SELECTION_PROPERTY = "voxtart_component_selection"
 COMPONENT_OVERLAY_PROPERTY = "voxtart_component_overlay"
+PICKED_CELL_PROPERTY = "voxtart_picked_cell"
+PICKED_OVERLAY_PROPERTY = "voxtart_picked_overlay"
 PROTECTED_OVERLAY_PROPERTY = "voxtart_protected_overlay"
 
 
@@ -191,6 +195,7 @@ def _update_overlay(
 def _update_visual_overlays(obj: bpy.types.Object, asset: VoxelAsset | None = None) -> None:
     asset = asset or _load_asset(obj)
     selected = tuple(cell for cell in _overlay_cells(obj, COMPONENT_SELECTION_PROPERTY) if cell in asset.voxels)
+    picked = tuple(cell for cell in _overlay_cells(obj, PICKED_CELL_PROPERTY) if cell in asset.voxels)
     protected = tuple(sorted(_protected_cells(obj)))
     _update_overlay(
         obj,
@@ -207,6 +212,14 @@ def _update_visual_overlays(obj: bpy.types.Object, asset: VoxelAsset | None = No
         protected,
         "Protected",
         (1.0, 0.15, 0.1, 1.0),
+    )
+    _update_overlay(
+        obj,
+        asset,
+        PICKED_OVERLAY_PROPERTY,
+        picked,
+        "Picked",
+        (1.0, 0.7, 0.05, 1.0),
     )
 
 
@@ -567,6 +580,66 @@ class VOXTART_OT_add_palette_color(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VOXTART_OT_pick_voxel(bpy.types.Operator):
+    bl_idname = "voxtart.pick_voxel"
+    bl_label = "Pick Voxel"
+    bl_description = "Pick the first occupied voxel under the cursor"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    origin: FloatVectorProperty(name="Origin", size=3, default=(0.0, 0.0, 0.0), options={'HIDDEN'})
+    direction: FloatVectorProperty(name="Direction", size=3, default=(1.0, 0.0, 0.0), options={'HIDDEN'})
+    max_distance: FloatProperty(name="Max Distance", min=0.0, default=1.0e6, options={'HIDDEN'})
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and ASSET_PROPERTY in context.active_object
+
+    def _pick(self, context, origin, direction):
+        obj = context.active_object
+        try:
+            asset = _load_asset(obj)
+            inverse = obj.matrix_world.inverted()
+            local_origin = inverse @ Vector(origin)
+            local_direction = inverse.to_3x3() @ Vector(direction)
+            hit = raycast_voxel(
+                asset,
+                local_origin,
+                local_direction,
+                max_distance=self.max_distance,
+            )
+            if hit is None:
+                raise ValueError("ray did not hit an occupied voxel")
+            obj[PICKED_CELL_PROPERTY] = json.dumps([list(hit.cell)], separators=(",", ":"))
+            obj["voxtart_picked_normal"] = json.dumps(list(hit.normal), separators=(",", ":"))
+            obj["voxtart_picked_palette_index"] = hit.palette_index
+            context.scene.voxtart_edit_cell = hit.cell
+            _update_visual_overlays(obj, asset)
+        except (TypeError, ValueError, RuntimeError, json.JSONDecodeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"picked voxel {hit.cell}")
+        return {'FINISHED'}
+
+    def execute(self, context):
+        return self._pick(context, self.origin, self.direction)
+
+    def invoke(self, context, event):
+        if context.region is None or context.region_data is None:
+            self.report({'ERROR'}, "pick requires a 3D View region")
+            return {'CANCELLED'}
+        origin = view3d_utils.region_2d_to_origin_3d(
+            context.region,
+            context.region_data,
+            (event.mouse_region_x, event.mouse_region_y),
+        )
+        direction = view3d_utils.region_2d_to_vector_3d(
+            context.region,
+            context.region_data,
+            (event.mouse_region_x, event.mouse_region_y),
+        )
+        return self._pick(context, origin, direction)
+
+
 class VOXTART_OT_add_socket(bpy.types.Operator):
     bl_idname = "voxtart.add_socket"
     bl_label = "Add Socket"
@@ -776,6 +849,7 @@ class VOXTART_PT_voxel_panel(bpy.types.Panel):
         layout.separator()
         layout.label(text="Voxel Editing")
         layout.prop(scene, "voxtart_edit_cell", text="Cell")
+        layout.operator(VOXTART_OT_pick_voxel.bl_idname, text="Pick Voxel")
         layout.prop(scene, "voxtart_edit_palette_index", text="Palette Index")
         layout.prop(scene, "voxtart_palette_color", text="Palette Color")
         palette = layout.operator(VOXTART_OT_add_palette_color.bl_idname)
@@ -886,7 +960,7 @@ def _menu_add_voxel_cube(self, _context):
 _CLASSES = (
     VOXTART_OT_add_voxel_cube,
     VOXTART_OT_voxelize_active,
-    VOXTART_OT_add_voxel,
+    VOXTART_OT_pick_voxel,
     VOXTART_OT_remove_voxel,
     VOXTART_OT_fill_box,
     VOXTART_OT_flood_fill,
