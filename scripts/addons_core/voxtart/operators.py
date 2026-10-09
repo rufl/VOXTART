@@ -40,6 +40,7 @@ MESH_BACKEND_PROPERTY = "voxtart_mesh_backend"
 COMPONENT_SELECTION_PROPERTY = "voxtart_component_selection"
 COMPONENT_OVERLAY_PROPERTY = "voxtart_component_overlay"
 PICKED_CELL_PROPERTY = "voxtart_picked_cell"
+PICKED_NORMAL_PROPERTY = "voxtart_picked_normal"
 PICKED_OVERLAY_PROPERTY = "voxtart_picked_overlay"
 PROTECTED_OVERLAY_PROPERTY = "voxtart_protected_overlay"
 
@@ -640,6 +641,73 @@ class VOXTART_OT_pick_voxel(bpy.types.Operator):
         return self._pick(context, origin, direction)
 
 
+class VOXTART_OT_edit_picked_voxel(bpy.types.Operator):
+    bl_idname = "voxtart.edit_picked_voxel"
+    bl_label = "Edit Picked Voxel"
+    bl_description = "Place, remove, or paint the picked voxel"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    action: EnumProperty(
+        name="Action",
+        items=(
+            ('add', "Place Adjacent", "Place a voxel immediately outside the picked face"),
+            ('remove', "Remove Picked", "Remove the picked voxel"),
+            ('paint', "Paint Picked", "Apply the selected palette index to the picked voxel"),
+        ),
+        default='add',
+    )
+    palette_index: IntProperty(name="Palette Index", min=0, max=65535, default=0)
+    allow_protected: BoolProperty(name="Edit Protected", default=False)
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and ASSET_PROPERTY in context.active_object
+
+    def _target(self, obj):
+        cells = _overlay_cells(obj, PICKED_CELL_PROPERTY)
+        if len(cells) != 1:
+            raise ValueError("pick a voxel before editing")
+        cell = cells[0]
+        if self.action != 'add':
+            return cell
+        raw_normal = obj.get(PICKED_NORMAL_PROPERTY)
+        if raw_normal is None:
+            raise ValueError("picked voxel has no face normal")
+        encoded = json.loads(raw_normal) if isinstance(raw_normal, str) else raw_normal
+        if (
+            not isinstance(encoded, (list, tuple))
+            or len(encoded) != 3
+            or any(axis not in (-1, 0, 1) for axis in encoded)
+            or not any(encoded)
+        ):
+            raise ValueError("picked voxel normal is invalid")
+        return tuple(cell[axis] + int(encoded[axis]) for axis in range(3))
+
+    def execute(self, context):
+        obj = context.active_object
+        try:
+            target = self._target(obj)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        if self.action == 'add':
+            callback = lambda tx: tx.add(target, self.palette_index, overwrite=False)
+            operation = "add_picked_voxel"
+        elif self.action == 'remove':
+            callback = lambda tx: tx.remove(target)
+            operation = "remove_picked_voxel"
+        else:
+            callback = lambda tx: tx.paint(target, self.palette_index)
+            operation = "paint_picked_voxel"
+        return _run_edit_operator(
+            self,
+            context,
+            operation,
+            callback,
+            self.allow_protected,
+        )
+
+
 class VOXTART_OT_add_socket(bpy.types.Operator):
     bl_idname = "voxtart.add_socket"
     bl_label = "Add Socket"
@@ -855,6 +923,19 @@ class VOXTART_PT_voxel_panel(bpy.types.Panel):
         palette = layout.operator(VOXTART_OT_add_palette_color.bl_idname)
         palette.color = tuple(scene.voxtart_palette_color)
         layout.prop(scene, "voxtart_edit_allow_protected", text="Edit Protected")
+        layout.label(text="Picked Face Actions")
+        picked_row = layout.row(align=True)
+        place = picked_row.operator(VOXTART_OT_edit_picked_voxel.bl_idname, text="Place")
+        place.action = 'add'
+        place.palette_index = scene.voxtart_edit_palette_index
+        place.allow_protected = scene.voxtart_edit_allow_protected
+        picked_remove = picked_row.operator(VOXTART_OT_edit_picked_voxel.bl_idname, text="Remove")
+        picked_remove.action = 'remove'
+        picked_remove.allow_protected = scene.voxtart_edit_allow_protected
+        picked_paint = picked_row.operator(VOXTART_OT_edit_picked_voxel.bl_idname, text="Paint")
+        picked_paint.action = 'paint'
+        picked_paint.palette_index = scene.voxtart_edit_palette_index
+        picked_paint.allow_protected = scene.voxtart_edit_allow_protected
         cell = tuple(scene.voxtart_edit_cell)
         palette_index = scene.voxtart_edit_palette_index
         row = layout.row(align=True)
@@ -961,6 +1042,8 @@ _CLASSES = (
     VOXTART_OT_add_voxel_cube,
     VOXTART_OT_voxelize_active,
     VOXTART_OT_pick_voxel,
+    VOXTART_OT_edit_picked_voxel,
+    VOXTART_OT_add_voxel,
     VOXTART_OT_remove_voxel,
     VOXTART_OT_fill_box,
     VOXTART_OT_flood_fill,
