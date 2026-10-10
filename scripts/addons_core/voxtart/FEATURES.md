@@ -55,8 +55,9 @@ The P1 authoring loop is intentionally complete before advanced workflows:
 1. **Make Blocks** creates a starter asset from the project surface.
 2. **Open voxel editor** enters the product editor with the new asset active.
 3. The visible **Colors** strip selects a palette entry for add and paint.
-4. Face clicks add, paint, or erase voxels; `Ctrl+Z` and `Ctrl+Y` undo and
-   redo the committed stroke.
+4. Face clicks add, paint, or erase voxels; **Select blocks** selects a hit
+   voxel, `Ctrl+C` copies it, and `Ctrl+D` clears the selection. `Ctrl+Z` and
+   `Ctrl+Y` undo and redo the committed stroke.
 5. **Save** writes the Blender project, and reopening it restores the asset,
    palette indices, recovery state, and clipboard state.
 6. **Project** or `Esc` returns to the VOXTART project surface.

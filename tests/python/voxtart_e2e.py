@@ -299,6 +299,7 @@ def _run_gui_probe() -> None:
         environment["VOXTART_CONFIG"] = str(directory_path / "config")
         environment["VOXTART_GUI_MARKER"] = str(marker)
         environment["VOXTART_GUI_SCREENSHOT"] = str(screenshot)
+        environment["VOXTART_GUI_SAVE_PATH"] = str(directory_path / "gui_saved.blend")
         command = [str(LAUNCHER), "--factory-startup", "--python", str(GUI_PROBE)]
         print("\n=== visible VoxTart GUI smoke ===")
         print("$ " + subprocess.list2cmdline(command))
@@ -335,6 +336,7 @@ def _run_gui_probe() -> None:
         payload = json.loads(marker.read_text(encoding="utf-8"))
         if (
             payload.get("ok") is not True
+            or payload.get("save_control") is not True
             or payload.get("starter_pyramid") != 56
             or payload.get("starter_palette", 0) < 4
             or payload.get("shell_make") is not True
@@ -352,6 +354,7 @@ def _run_gui_probe() -> None:
             or payload.get("palette_selection") is not True
             or payload.get("paint_undo_redo") is not True
             or payload.get("palette_non_default") is not True
+            or payload.get("selection_workflow") is not True
             or payload.get("project_control") is not True
             or not str(payload.get("first_edit_feedback", "")).startswith("Added ")
             or payload.get("operator_running_modal") is not True

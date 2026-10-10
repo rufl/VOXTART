@@ -31,6 +31,12 @@ SHELL_SCREENSHOT = Path(
         str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_shell{SCREENSHOT.suffix}")),
     )
 )
+GUI_SAVE_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_SAVE_PATH",
+        str(SCREENSHOT.with_suffix(".blend")),
+    )
+)
 STATE = {"attempts": 0}
 
 class _ShellHarness:
@@ -249,6 +255,23 @@ def _finish_mouse_clicks():
         redone_asset = operators._load_asset(STATE["obj"])
         if redone_asset.voxels.get(painted_cell) != 1:
             return _fail("Ctrl+Y did not restore the painted voxel color")
+        scene.voxtart_editor_mode = "SELECT"
+        scene.voxtart_editor_shape = "VOXEL"
+        _modal_click(paint_point)
+        selected_cells = tuple(editor.selection)
+        if len(selected_cells) != 1 or editor.last_hit is None:
+            return _fail(f"Select click did not select one voxel: {selected_cells!r}")
+        if selected_cells != (editor.last_hit.cell,):
+            return _fail(
+                f"Select click stored the wrong hit: {selected_cells!r} != {editor.last_hit.cell!r}"
+            )
+        if _modal_key("C", ctrl=True) != {"RUNNING_MODAL"}:
+            return _fail("Ctrl+C did not copy the selected voxel")
+        if voxel_editor.EDITOR_CLIPBOARD_PROPERTY not in STATE["obj"]:
+            return _fail("Selected voxel copy did not persist clipboard state")
+        if _modal_key("D", ctrl=True) != {"RUNNING_MODAL"} or editor.selection:
+            return _fail("Ctrl+D did not clear the visible selection")
+        STATE["selection_workflow"] = True
         STATE["painted_cell"] = painted_cell
         STATE["paint_undo_redo"] = True
         scene.voxtart_editor_mode = "ADD"
@@ -285,12 +308,14 @@ def _finish_mouse_clicks():
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
                 "shell_editor": STATE.get("shell_editor", False),
+                "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
                 "startup_editor": STATE.get("startup_editor", False),
                 "first_run_hint": STATE.get("first_run_hint", False),
                 "first_edit_feedback": STATE.get("first_edit_feedback", ""),
                 "native_chrome_hidden": STATE.get("native_chrome_hidden", False),
+                "selection_workflow": STATE.get("selection_workflow", False),
                 "area_types": STATE.get("area_types", []),
                 "window_fullscreen": bool(
                     STATE["scene"].get(desktop_ui.DESKTOP_WINDOW_FULLSCREEN_PROPERTY)
@@ -560,6 +585,20 @@ def _probe():
         editor = voxel_editor._ACTIVE_EDITOR
         if editor is None:
             return _fail("Voxel editor did not become active")
+        GUI_SAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        save_result = bpy.ops.wm.save_as_mainfile(filepath=str(GUI_SAVE_PATH))
+        if "FINISHED" not in save_result or not GUI_SAVE_PATH.is_file():
+            return _fail(f"GUI save fixture did not save a .blend: {save_result!r}")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "SAVE")
+        if editor.status != "Project saved":
+            return _fail(f"Product Save control reported an invalid status: {editor.status!r}")
+        STATE["save_control"] = True
 
         if tuple(action for action, _bounds in voxel_editor._editor_topbar_action_bounds(region)) != (
             "PROJECT",
