@@ -259,9 +259,9 @@ orthographic views through `voxtart.reconstruct`:
   color-mismatched pixels;
 - source view names, count, and depth mode are preserved in asset provenance.
 
-The converter is intentionally indexed and orthographic. Image file decoding,
-palette extraction, and calibration UI are separate capabilities; arbitrary
-perspective inference is not part of this path.
+The converter is intentionally indexed and orthographic; arbitrary perspective
+inference is not part of this path. The Blender adapter exposes the same
+calibration contract without changing the authoritative voxel core.
 
 ### Image and palette intake
 
@@ -279,8 +279,14 @@ without resampling:
 - `IndexedImage.to_view` applies axis, facing, origin, integer depth, and
   priority calibration before calling `voxtart.reconstruct`.
 
-Actual PNG/PSD decoding remains an adapter concern so the core stays
-offline-capable and testable with deterministic RGBA fixtures.
+`voxtart.reconstruct_ui` loads Blender-supported image files, creates a new
+non-destructive voxel asset, stores the source/calibration/report metadata, and
+draws unresolved candidate cells as a purple wire overlay. The panel reports
+unresolved, conflicting, missing, extra, and color-mismatched pixels.
+
+The core remains offline-capable and testable with deterministic RGBA fixtures;
+file-format decoding is delegated to Blender's image loader at the adapter
+boundary.
 
 
 ### Animated voxel spritesheet export

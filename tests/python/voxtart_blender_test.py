@@ -29,7 +29,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import voxtart as addon  # noqa: E402
-from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, optimizer_ui, operators, palette_ui, scene_hierarchy_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
+from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
@@ -85,6 +85,14 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(bloformer_ui.VOXTART_OT_bloformer.bl_idname, "voxtart.bloformer")
         self.assertTrue(bloformer_ui.VOXTART_PT_bloformer.poll(bpy.context))
         self.assertFalse(bloformer_ui.VOXTART_OT_bloformer.poll(bpy.context))
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_reconstruct_image"),
+            reconstruct_ui.VOXTART_OT_reconstruct_image,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_PT_reconstruction"),
+            reconstruct_ui.VOXTART_PT_reconstruction,
+        )
         self.assertTrue(hasattr(bpy.types.VIEW3D_MT_object, "append"))
         self.assertIs(
             getattr(bpy.types, "VOXTART_PT_zoo_asset_placer"),
@@ -936,6 +944,57 @@ class BlenderRegistrationTest(unittest.TestCase):
         finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
 
+
+
+    def test_image_reconstruction_operator_loads_calibrated_source(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        image = None
+        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+            image_path = Path(handle.name)
+        try:
+            image = bpy.data.images.new("VOXTART Reconstruction Fixture", width=2, height=1, alpha=True)
+            image.pixels = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+            image.filepath_raw = str(image_path)
+            image.file_format = "PNG"
+            image.save()
+            bpy.data.images.remove(image)
+            image = None
+
+            result = bpy.ops.voxtart.reconstruct_image(
+                filepath=str(image_path),
+                axis="Z",
+                direction="1",
+                origin=(2, 3, 4),
+                depth=1,
+                background_mode="ALPHA",
+                max_colors=8,
+                mode="SURFACE",
+            )
+            self.assertEqual(result, {"FINISHED"})
+            obj = bpy.context.active_object
+            self.assertIsNotNone(obj)
+            asset = operators._load_asset(obj)
+            self.assertEqual(asset.voxels, {(2, 3, 4): 0})
+            self.assertEqual(asset.provenance["image_width"], "2")
+            self.assertEqual(asset.provenance["image_height"], "1")
+            self.assertEqual(obj[reconstruct_ui.RECONSTRUCTION_SOURCE_PROPERTY], str(image_path))
+            report = json.loads(obj[reconstruct_ui.RECONSTRUCTION_REPORT_PROPERTY])
+            self.assertEqual(report["occupied_voxels"], 1)
+            self.assertEqual(report["unresolved_voxels"], 0)
+            self.assertEqual(report["missing_pixels"], 0)
+            self.assertEqual(report["extra_pixels"], 0)
+            self.assertEqual(
+                json.loads(obj[reconstruct_ui.RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY]),
+                [],
+            )
+            overlay_name = obj[reconstruct_ui.RECONSTRUCTION_OVERLAY_PROPERTY]
+            self.assertIn(overlay_name, bpy.data.objects)
+            self.assertTrue(bpy.data.objects[overlay_name].hide_viewport)
+        finally:
+            if image is not None and image.name in bpy.data.images:
+                bpy.data.images.remove(image)
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+            image_path.unlink(missing_ok=True)
 
     def test_desktop_workspace_contract(self):
         desktop_ui.configure_workspace()
