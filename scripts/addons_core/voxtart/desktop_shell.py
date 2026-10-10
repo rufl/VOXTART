@@ -2,13 +2,12 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""A focused VOXTART shell drawn over the bundled Blender viewport.
+"""A focused VOXTART project surface drawn over the bundled Blender viewport.
 
-The shell keeps Blender as the viewport and file/runtime host, but presents the
-first release as a small project editor: project tab, simple modes, explorer,
-palette, parts, rounded icon controls, and status bar. Hover hints expose labels
-and shortcuts. The normal Blender sidebar remains available as a fallback when
-the shell is closed.
+The shell is a secondary project surface reached from the editor's Project
+control. It keeps Blender hidden by default and exposes the product's project,
+palette, asset, and advanced-workflow controls without making them part of the
+first-run editor path.
 """
 
 from __future__ import annotations
@@ -760,21 +759,15 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             bpy.types.SpaceView3D.draw_handler_remove(_ACTIVE_HANDLE, "WINDOW")
         _ACTIVE_HANDLE = None
         _ACTIVE_STATE = None
+        from . import desktop_ui
+
+        desktop_ui.set_native_chrome_visibility(False)
         scene = getattr(context, "scene", None)
         if scene is not None:
             scene[SHELL_OPEN_PROPERTY] = False
         area = _ACTIVE_AREA or getattr(context, "area", None)
         _ACTIVE_AREA = None
         if area is not None and area.type == "VIEW_3D":
-            try:
-                space = area.spaces.active
-                space.show_region_ui = True
-                space.show_region_header = True
-                space.show_region_footer = True
-                if context.screen is not None:
-                    context.screen.show_statusbar = True
-            except (AttributeError, RuntimeError, TypeError):
-                pass
             area.tag_redraw()
 
     def _activate(self, context, key: str):
@@ -961,17 +954,10 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             self.report({"WARNING"}, "VOXTART Shell needs a 3D View")
             return {"CANCELLED"}
         _ACTIVE_AREA = context.area
-        try:
-            context.area.spaces.active.show_region_ui = False
-        except (AttributeError, RuntimeError, TypeError):
-            pass
+        from . import desktop_ui
+
+        desktop_ui.set_native_chrome_visibility(False)
         _ACTIVE_STATE = _ShellState()
-        _ACTIVE_HANDLE = bpy.types.SpaceView3D.draw_handler_add(
-            _draw_shell,
-            (_ACTIVE_STATE, context),
-            "WINDOW",
-            "POST_PIXEL",
-        )
         context.scene[SHELL_OPEN_PROPERTY] = True
         if SHELL_MODE_PROPERTY not in context.scene:
             has_starter = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY)) or any(

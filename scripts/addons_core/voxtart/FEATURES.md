@@ -25,6 +25,10 @@ automatically, hides the auxiliary Blender editors behind a full-screen 3D
 viewport, and configures the active workspace as **VOXTART**. The short VoxStart
 splash then opens the voxel editor directly on the starter asset instead of
 making a new user choose a project shell first.
+The default editor surface hides Blender's header, native toolbar, sidebar,
+gizmos, grid, axes, footer, and status bar. VOXTART supplies its own compact
+top bar with **Project**, **Save**, and **More tools** controls; **More tools**
+is the explicit escape hatch for Blender's native controls.
 Each new unsaved project opens with an editable light-yellow stepped pyramid:
 6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
 framed in the viewport so the user can immediately place, erase, paint, or
@@ -34,18 +38,12 @@ mouse instructions and only the beginner actions: **Add block**, **Erase
 block**, **Color block**, and **Select blocks**. The card disappears after the
 first changed edit, which also reports the action and its block count in the
 status line with an undo reminder.
-The specialist panels remain under the `VOXTART` tab when you want more
-control. The VOXTART tab uses Blender's native `VIEW_3D` sidebar layout for
-tool settings, selected-object display controls, viewport shading, gizmos,
-floor, and axes. The **View & Cameras** panel also exposes perspective,
-orthographic, camera view, axis alignment, frame selected, pivot distance,
-and the standard Blender overlay controls without replacing Blender's view
-state.
-The desktop shell remains available as a secondary project surface. It uses a
-project-editor layout: project tab and modes at the top, project items on the
-left, palette and assets on the right, and a compact status bar at the bottom.
-When opened before the first edit, it defaults to **Build**, keeps only the
-starter-focused project category, and uses the same beginner tool labels.
+The desktop shell remains available as a secondary project surface through the
+editor's **Project** control. It uses a project-editor layout: project tab and
+modes at the top, project items on the left, palette and assets on the right,
+and a compact status bar at the bottom. When opened before the first edit, it
+defaults to **Build**, keeps only the starter-focused project category, and
+uses the same beginner tool labels.
 Rounded controls expose direct paths for creating, importing, voxelizing,
 painting, optimizing, and character work after the first-run path;
 hovering a control shows its label and available shortcut.
@@ -110,12 +108,13 @@ available while adding a compact voxel workflow:
   advanced brushes and selection categories appear after the first changed edit;
 - the permanent overlay stays lightweight: the asset, block count, current
   mode, one short guidance card or shortcut line, hit details, and edit status;
-- the compact VOXTART glyph rail keeps project tools one click away while
-  Blender's native toolbar remains available for familiar viewport actions;
+- the compact VOXTART toolbar keeps project tools one click away; Blender's
+  native toolbar, sidebar, gizmos, grid, and axes stay hidden until **More
+  tools** is selected;
 - the full Adobe-style vertical toolbar groups advanced brush and selection
-  tools, highlights the active tool, and exposes a tooltip on hover.
-- The VOXTART sidebar exposes a Color Picker, active-layer controls, session
-  History, and a Scene Hierarchy inspector beside the viewport.
+  tools, highlights the active tool, and exposes a tooltip on hover;
+- the VOXTART sidebar exposes a Color Picker, active-layer controls, session
+  History, and a Scene Hierarchy inspector after native controls are revealed.
 - In **Add** or **Attach**, **left click places** on a voxel face and **right
   click erases** the hit voxel; dragging paints continuously. When the ray
   misses the asset, Add/Attach places on the ground grid plane so the first
@@ -161,9 +160,9 @@ The **View & Cameras** panel supports multiple scene cameras. Each camera can
 be made the render camera, focused in the main viewport, soloed while the
 others are disabled in the viewport, or restored with **Show All**. Camera
 viewport and render visibility remain separate Blender object properties.
-
-Open the editor from the VOXTART sidebar, the desktop shell's **Open voxel
-editor** action, or the global `Alt+Shift+Q` shortcut.
+Open the editor directly from the VOXTART launcher, from the shell's **Open
+voxel editor** action, or from the global `Alt+Shift+Q` shortcut. Use
+**More tools** when opening Blender's native sidebar is intentional.
 
 ### Dynamic voxelizer
 

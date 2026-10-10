@@ -209,6 +209,10 @@ def _finish_mouse_clicks():
                 "startup_editor": STATE.get("startup_editor", False),
                 "first_run_hint": STATE.get("first_run_hint", False),
                 "first_edit_feedback": STATE.get("first_edit_feedback", ""),
+                "native_chrome_hidden": STATE.get("native_chrome_hidden", False),
+                "more_tools_escape_hatch": STATE.get("more_tools_escape_hatch", False),
+                "product_controls": STATE.get("product_controls", False),
+                "project_control": STATE.get("project_control", False),
                 "shape": scene.voxtart_editor_shape,
                 "preview_count": len(editor.preview_cells),
                 "area": [STATE["area"].width, STATE["area"].height],
@@ -303,6 +307,19 @@ def _probe():
         STATE["starter_pyramid"] = len(starter_asset.voxels)
         STATE["startup_editor"] = voxel_editor._ACTIVE_EDITOR is not None
         STATE["first_run_hint"] = bool(scene.get(voxel_editor.FIRST_RUN_HINT_PROPERTY))
+        STATE["native_chrome_hidden"] = not bool(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
+        if not STATE["native_chrome_hidden"]:
+            return _fail("VOXTART startup left Blender chrome visible")
+        if screen.show_statusbar or any(
+            bool(getattr(area.spaces.active, property_name, False))
+            for property_name in (
+                "show_region_toolbar",
+                "show_region_ui",
+                "show_region_header",
+                "show_region_footer",
+            )
+        ):
+            return _fail("VOXTART startup left a Blender native region visible")
         if not STATE["startup_editor"]:
             return _fail("VOXTART startup did not open the voxel editor")
         if not STATE["first_run_hint"]:
@@ -398,6 +415,49 @@ def _probe():
         editor = voxel_editor._ACTIVE_EDITOR
         if editor is None:
             return _fail("Voxel editor did not become active")
+        if tuple(action for action, _bounds in voxel_editor._editor_topbar_action_bounds(region)) != (
+            "PROJECT",
+            "SAVE",
+            "MORE_TOOLS",
+        ):
+            return _fail("VOXTART editor did not expose product-native project controls")
+        STATE["product_controls"] = True
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "PROJECT")
+        if desktop_shell._ACTIVE_STATE is None:
+            return _fail("Project control did not open the VOXTART project surface")
+        desktop_shell.VOXTART_OT_desktop_shell._finish(None, bpy.context)
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            result = bpy.ops.voxtart.voxel_editor("INVOKE_DEFAULT")
+            if "RUNNING_MODAL" not in result:
+                return _fail(f"Project control did not return to the voxel editor: {result!r}")
+        editor = voxel_editor._ACTIVE_EDITOR
+        if editor is None:
+            return _fail("Project control returned without an active voxel editor")
+        STATE["project_control"] = True
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "MORE_TOOLS")
+            if not desktop_ui.native_chrome_visible(scene):
+                return _fail("More tools did not reveal Blender controls")
+            editor._activate_topbar_action(bpy.context, "MORE_TOOLS")
+            if desktop_ui.native_chrome_visible(scene):
+                return _fail("More tools did not hide Blender controls again")
+        STATE["more_tools_escape_hatch"] = True
         bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
         left_point, right_point, left_cell, right_cell = _viewport_hits(editor, obj, area, region)
         STATE.update(

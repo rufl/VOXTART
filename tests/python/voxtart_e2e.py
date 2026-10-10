@@ -335,6 +335,10 @@ def _run_gui_probe() -> None:
             or payload.get("starter_pyramid") != 56
             or payload.get("startup_editor") is not True
             or payload.get("first_run_hint") is not True
+            or payload.get("native_chrome_hidden") is not True
+            or payload.get("more_tools_escape_hatch") is not True
+            or payload.get("product_controls") is not True
+            or payload.get("project_control") is not True
             or not str(payload.get("first_edit_feedback", "")).startswith("Added ")
             or payload.get("operator_running_modal") is not True
             or payload.get("draw_overlay_handle") is not True
