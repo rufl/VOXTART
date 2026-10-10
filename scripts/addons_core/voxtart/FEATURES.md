@@ -78,8 +78,11 @@ material-aware optimized OBJ, while keeping the authoritative voxel asset
 unchanged and recording the export report.
 The project surface's **Import VOX / QB** action closes P1 native voxel
 interchange; the release gate round-trips VOX while the same operator retains
-Qubicle QB support. Character workflows remain available after this loop is
-stable, but they are not prerequisites for the first successful project.
+Qubicle QB support.
+The Character surface's **Prepare rig** action closes P1 character entry:
+it creates an editable blockout armature and binds the active mesh while
+leaving the source mesh available for further edits. Broader animation
+retargeting and game-rig export remain advanced paths.
 The palette panel's **Import palette** action closes local palette-file intake:
 it loads a palette into the visible Colors strip and, when enforcement is on,
 retargets the active asset to the imported colors.
