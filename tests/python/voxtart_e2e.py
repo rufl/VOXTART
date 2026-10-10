@@ -343,6 +343,7 @@ def _run_gui_probe() -> None:
             or payload.get("shell_make") is not True
             or payload.get("shell_editor") is not True
             or payload.get("shell_voxelize") is not True
+            or payload.get("shell_refresh") is not True
             or payload.get("shell_optimize") is not True
             or payload.get("portable_roundtrip") is not True
             or payload.get("startup_editor") is not True
