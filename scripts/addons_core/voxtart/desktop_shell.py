@@ -978,6 +978,9 @@ def open_shell() -> bool:
     """Open the shell in the first available interactive 3D View."""
     if bpy.app.background:
         return False
+    from . import desktop_ui
+
+    desktop_ui.enter_window_fullscreen()
     for window in tuple(bpy.context.window_manager.windows):
         screen = window.screen
         if screen is None:
