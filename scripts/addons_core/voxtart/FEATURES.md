@@ -73,11 +73,15 @@ while the source mesh remains available.
 The portable `.voxel.json` path is also closed for P1: exporting the active
 authoritative asset and importing it as a new asset preserves its sparse voxels
 and palette data.
-Broader format exchange, character, and palette-library workflows remain
+The Build surface's **Export mesh** action closes the P1 handoff to a
+material-aware optimized OBJ, while keeping the authoritative voxel asset
+unchanged and recording the export report.
+Other native formats, character, and palette-library workflows remain
 available after this loop is stable, but they are not prerequisites for the
 first successful project.
 Rounded controls expose direct paths for creating, importing, voxelizing,
-refreshing, painting, optimizing, and character work after the first-run path;
+refreshing, painting, optimizing, exporting, and character work after the
+first-run path;
 hovering a control shows its label and available shortcut.
 On Windows, the host window is branded **VoxTart** and uses the voxel-cake
 icon at `assets/voxtart.ico`.
