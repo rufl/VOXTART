@@ -259,9 +259,28 @@ orthographic views through `voxtart.reconstruct`:
   color-mismatched pixels;
 - source view names, count, and depth mode are preserved in asset provenance.
 
-The converter is intentionally indexed and orthographic. Image decoding,
-palette extraction, calibration UI, and arbitrary perspective inference remain
-separate follow-up capabilities.
+The converter is intentionally indexed and orthographic. Image file decoding,
+palette extraction, and calibration UI are separate capabilities; arbitrary
+perspective inference is not part of this path.
+
+### Image and palette intake
+
+`voxtart.image_intake` converts calibrated RGBA rows into indexed source views
+without resampling:
+
+- source dimensions and nearest-neighbor pixel identity are retained;
+- fully transparent pixels can become background through an alpha threshold;
+- `NONE`, `ALPHA`, `CORNER`, and `EXPLICIT` background policies are explicit;
+- palettes are extracted by deterministic frequency ordering with
+  lexicographic tie breaks, or accepted from the caller;
+- bounded palettes map overflow colors to the nearest stable entry;
+- each indexed image records dimensions, background settings, palette size, and
+  an SHA-256 digest for reconstruction provenance;
+- `IndexedImage.to_view` applies axis, facing, origin, integer depth, and
+  priority calibration before calling `voxtart.reconstruct`.
+
+Actual PNG/PSD decoding remains an adapter concern so the core stays
+offline-capable and testable with deterministic RGBA fixtures.
 
 
 ### Animated voxel spritesheet export

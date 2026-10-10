@@ -12,7 +12,7 @@ unresolved are returned separately from the authoritative voxel asset.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Iterable, Literal, Sequence
+from typing import Iterable, Literal, Mapping, Sequence
 
 from .voxel import Cell, Color, VoxelAsset
 
@@ -239,6 +239,8 @@ def reconstruct_views(
     views: Sequence[OrthographicView],
     palette: Sequence[Color],
     settings: ReconstructionSettings = ReconstructionSettings(),
+    *,
+    source_provenance: Mapping[str, str] | None = None,
 ) -> ReconstructionResult:
     """Reconstruct a bounded voxel asset from one to six orthographic views.
 
@@ -311,15 +313,24 @@ def reconstruct_views(
         for _priority, color in entries:
             counts[color] = counts.get(color, 0) + 1
         occupied[cell] = min(counts, key=lambda color: (-counts[color], color))
+    provenance = {
+        "reconstruction": "orthographic",
+        "view_count": str(len(normalized_views)),
+        "view_names": ",".join(view.name for view in normalized_views),
+        "mode": settings.mode,
+    }
+    if source_provenance is not None:
+        if not isinstance(source_provenance, Mapping):
+            raise TypeError("source_provenance must be a mapping")
+        for key, value in sorted(source_provenance.items(), key=lambda item: str(item[0])):
+            normalized_key = str(key)
+            if normalized_key in provenance:
+                raise ValueError(f"source provenance key is reserved: {normalized_key!r}")
+            provenance[normalized_key] = str(value)
     asset = VoxelAsset(
         palette=list(normalized_palette),
         voxels=occupied,
-        provenance={
-            "reconstruction": "orthographic",
-            "view_count": str(len(normalized_views)),
-            "view_names": ",".join(view.name for view in normalized_views),
-            "mode": settings.mode,
-        },
+        provenance=provenance,
     )
     missing_pixels = 0
     extra_pixels = 0
