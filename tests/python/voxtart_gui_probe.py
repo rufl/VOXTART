@@ -55,6 +55,12 @@ GUI_PALETTE_PATH = Path(
         str(SCREENSHOT.with_suffix(".hex")),
     )
 )
+GUI_VOX_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_VOX_PATH",
+        str(SCREENSHOT.with_suffix(".vox")),
+    )
+)
 STATE = {"attempts": 0}
 
 class _ShellHarness:
@@ -332,6 +338,7 @@ def _finish_mouse_clicks():
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
+                "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -668,10 +675,51 @@ def _probe():
                 ):
                     return _fail(f"Palette file import did not update the active palette: {palette_result!r}")
                 STATE["palette_import"] = True
+                native_source = operators._load_asset(imported_asset_object)
+                before_native_assets = set(desktop_shell._asset_objects())
+                GUI_VOX_PATH.parent.mkdir(parents=True, exist_ok=True)
+                vox_export_result = bpy.ops.voxtart.export_voxel_format(
+                    filepath=str(GUI_VOX_PATH),
+                    format="VOX",
+                    export_selected=False,
+                )
+                if (
+                    "FINISHED" not in vox_export_result
+                    or not GUI_VOX_PATH.is_file()
+                    or GUI_VOX_PATH.stat().st_size <= 0
+                ):
+                    return _fail(f"VOX export did not write its file: {vox_export_result!r}")
+                vox_import_result = bpy.ops.voxtart.import_voxel_format(filepath=str(GUI_VOX_PATH))
+                native_assets = set(desktop_shell._asset_objects()).difference(before_native_assets)
+                if len(native_assets) != 1:
+                    return _fail(f"VOX import did not create exactly one asset: {native_assets!r}")
+                native_object = next(iter(native_assets))
+                native_asset = operators._load_asset(native_object)
+                def _normalized_colors(asset):
+                    minimum = asset.bounds[0] if asset.bounds is not None else (0, 0, 0)
+                    return {
+                        (
+                            tuple(cell[axis] - minimum[axis] for axis in range(3)),
+                            tuple(round(channel, 6) for channel in asset.palette[palette_index]),
+                        )
+                        for cell, palette_index in asset.voxels.items()
+                    }
+
+                source_colors = _normalized_colors(native_source)
+                imported_colors = _normalized_colors(native_asset)
+                if (
+                    "FINISHED" not in vox_import_result
+                    or native_object.get("voxtart_import_format") != "VOX"
+                    or source_colors != imported_colors
+                ):
+                    return _fail(f"VOX round-trip changed the native voxel model: {vox_import_result!r}")
+                STATE["native_vox_roundtrip"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "palette:import" for key, _bounds in shell_state.targets):
                     return _fail("Project surface did not expose Import palette")
+                if not any(key == "voxel:import" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Import VOX / QB")
                 if not any(key == "build:refresh" for key, _bounds in shell_state.targets):
                     return _fail("Build surface did not expose Refresh linked")
                 if not any(key == "build:export" for key, _bounds in shell_state.targets):

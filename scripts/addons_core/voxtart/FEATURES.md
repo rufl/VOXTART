@@ -76,8 +76,10 @@ and palette data.
 The Build surface's **Export mesh** action closes the P1 handoff to a
 material-aware optimized OBJ, while keeping the authoritative voxel asset
 unchanged and recording the export report.
-Other native formats and character workflows remain available after this loop
-is stable, but they are not prerequisites for the first successful project.
+The project surface's **Import VOX / QB** action closes P1 native voxel
+interchange; the release gate round-trips VOX while the same operator retains
+Qubicle QB support. Character workflows remain available after this loop is
+stable, but they are not prerequisites for the first successful project.
 The palette panel's **Import palette** action closes local palette-file intake:
 it loads a palette into the visible Colors strip and, when enforcement is on,
 retargets the active asset to the imported colors.
