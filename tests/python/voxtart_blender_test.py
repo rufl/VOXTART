@@ -93,6 +93,14 @@ class BlenderRegistrationTest(unittest.TestCase):
             getattr(bpy.types, "VOXTART_PT_reconstruction"),
             reconstruct_ui.VOXTART_PT_reconstruction,
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_reconstruct_views"),
+            reconstruct_ui.VOXTART_OT_reconstruct_views,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_PT_multiview_reconstruction"),
+            reconstruct_ui.VOXTART_PT_multiview_reconstruction,
+        )
         self.assertTrue(hasattr(bpy.types.VIEW3D_MT_object, "append"))
         self.assertIs(
             getattr(bpy.types, "VOXTART_PT_zoo_asset_placer"),
@@ -995,6 +1003,83 @@ class BlenderRegistrationTest(unittest.TestCase):
                 bpy.data.images.remove(image)
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
             image_path.unlink(missing_ok=True)
+
+
+    def test_multiview_reconstruction_operator_resolves_opposing_sources(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        scene = bpy.context.scene
+        slots = (1, 2)
+        slot_fields = ("filepath", "axis", "direction", "origin", "depth", "priority")
+        previous_slots = {
+            (slot, field): getattr(scene, reconstruct_ui._slot_property(slot, field))
+            for slot in slots
+            for field in slot_fields
+        }
+        shared_fields = (
+            "voxtart_reconstruction_background",
+            "voxtart_reconstruction_alpha_threshold",
+            "voxtart_reconstruction_background_color",
+            "voxtart_reconstruction_background_tolerance",
+            "voxtart_reconstruction_max_colors",
+            "voxtart_reconstruction_mode",
+        )
+        previous_shared = {name: getattr(scene, name) for name in shared_fields}
+        paths = []
+
+        def write_pixel(path, name, color):
+            image = bpy.data.images.new(name, width=1, height=1, alpha=True)
+            try:
+                image.pixels = tuple(color)
+                image.filepath_raw = str(path)
+                image.file_format = "PNG"
+                image.save()
+            finally:
+                bpy.data.images.remove(image)
+
+        try:
+            for index, color in enumerate(((1.0, 0.0, 0.0, 1.0), (1.0, 0.0, 0.0, 1.0)), 1):
+                with tempfile.NamedTemporaryFile(suffix=f"_view{index}.png", delete=False) as handle:
+                    path = Path(handle.name)
+                paths.append(path)
+                write_pixel(path, f"VOXTART Multiview Fixture {index}", color)
+
+            for slot, path, direction, origin in (
+                (1, paths[0], "1", (0, 0, 0)),
+                (2, paths[1], "-1", (0, 0, 1)),
+            ):
+                setattr(scene, reconstruct_ui._slot_property(slot, "filepath"), str(path))
+                setattr(scene, reconstruct_ui._slot_property(slot, "axis"), "Z")
+                setattr(scene, reconstruct_ui._slot_property(slot, "direction"), direction)
+                setattr(scene, reconstruct_ui._slot_property(slot, "origin"), origin)
+                setattr(scene, reconstruct_ui._slot_property(slot, "depth"), 1)
+                setattr(scene, reconstruct_ui._slot_property(slot, "priority"), slot - 1)
+            scene.voxtart_reconstruction_background = "ALPHA"
+            scene.voxtart_reconstruction_alpha_threshold = 0.0
+            scene.voxtart_reconstruction_max_colors = 8
+            scene.voxtart_reconstruction_mode = "SURFACE"
+
+            result = bpy.ops.voxtart.reconstruct_views()
+            self.assertEqual(result, {"FINISHED"})
+            obj = bpy.context.active_object
+            asset = operators._load_asset(obj)
+            self.assertEqual(asset.voxels, {(0, 0, 0): 0, (0, 0, 1): 0})
+            self.assertEqual(asset.provenance["view_count"], "2")
+            report = json.loads(obj[reconstruct_ui.RECONSTRUCTION_REPORT_PROPERTY])
+            self.assertEqual(report["view_count"], 2)
+            self.assertEqual(report["unresolved_voxels"], 0)
+            self.assertEqual(report["conflicting_rays"], 0)
+            self.assertEqual(report["missing_pixels"], 0)
+            self.assertEqual(report["extra_pixels"], 0)
+            self.assertEqual(len(json.loads(obj[reconstruct_ui.RECONSTRUCTION_SOURCES_PROPERTY])), 2)
+            self.assertEqual(len(json.loads(obj[reconstruct_ui.RECONSTRUCTION_VIEWS_PROPERTY])), 2)
+        finally:
+            for (slot, field), value in previous_slots.items():
+                setattr(scene, reconstruct_ui._slot_property(slot, field), value)
+            for name, value in previous_shared.items():
+                setattr(scene, name, value)
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+            for path in paths:
+                path.unlink(missing_ok=True)
 
     def test_desktop_workspace_contract(self):
         desktop_ui.configure_workspace()

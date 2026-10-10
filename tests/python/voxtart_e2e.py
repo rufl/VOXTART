@@ -48,7 +48,7 @@ LAUNCHER_PROBE = TEST_ROOT / "voxtart_launcher_probe.py"
 PERSISTENCE_PROBE = TEST_ROOT / "voxtart_persistence_probe.py"
 GUI_PROBE = TEST_ROOT / "voxtart_gui_probe.py"
 PACKAGE_ASSEMBLER = ROOT / "tools" / "assemble_voxtart_package.py"
-REGRESSION_BASELINE = {"core_tests": 93, "blender_tests": 25, "e2e_tests": 7}
+REGRESSION_BASELINE = {"core_tests": 93, "blender_tests": 26, "e2e_tests": 7}
 
 
 def _run(

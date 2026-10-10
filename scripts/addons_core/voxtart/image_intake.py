@@ -204,23 +204,45 @@ def _is_background(pixel: Color, background: Color | None, settings: PaletteInta
     return background is not None and _distance_squared(pixel, background) <= settings.background_tolerance ** 2
 
 
+def _extract_palette_counts(
+    frames: Sequence[ImageFrame],
+    settings: PaletteIntakeSettings,
+) -> tuple[Color, ...]:
+    counts: dict[Color, int] = {}
+    for frame in frames:
+        background = _background_color(frame, settings)
+        for row in frame.pixels:
+            for pixel in row:
+                if _is_background(pixel, background, settings):
+                    continue
+                counts[pixel] = counts.get(pixel, 0) + 1
+    if not counts:
+        return (DEFAULT_EMPTY_PALETTE_COLOR,)
+    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    return tuple(color for color, _count in ordered[: settings.max_colors])
+
+
 def extract_palette(
     frame: ImageFrame,
     settings: PaletteIntakeSettings = PaletteIntakeSettings(),
 ) -> tuple[Color, ...]:
     """Extract the most frequent foreground colors with deterministic ties."""
 
-    background = _background_color(frame, settings)
-    counts: dict[Color, int] = {}
-    for row in frame.pixels:
-        for pixel in row:
-            if _is_background(pixel, background, settings):
-                continue
-            counts[pixel] = counts.get(pixel, 0) + 1
-    if not counts:
-        return (DEFAULT_EMPTY_PALETTE_COLOR,)
-    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
-    return tuple(color for color, _count in ordered[: settings.max_colors])
+    return _extract_palette_counts((frame,), settings)
+
+
+def extract_palette_frames(
+    frames: Sequence[ImageFrame],
+    settings: PaletteIntakeSettings = PaletteIntakeSettings(),
+) -> tuple[Color, ...]:
+    """Extract one shared deterministic palette from multiple source views."""
+
+    normalized_frames = tuple(frames)
+    if not normalized_frames:
+        raise ValueError("at least one image frame is required")
+    if any(not isinstance(frame, ImageFrame) for frame in normalized_frames):
+        raise TypeError("frames must contain ImageFrame values")
+    return _extract_palette_counts(normalized_frames, settings)
 
 
 def _normalize_palette(palette: Sequence[Color]) -> tuple[Color, ...]:
@@ -280,6 +302,6 @@ __all__ = [
     "IndexedImage",
     "PaletteIntakeSettings",
     "extract_palette",
-    "index_image",
+    "extract_palette_frames",
     "nearest_palette_index",
 ]

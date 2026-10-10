@@ -272,17 +272,22 @@ without resampling:
 - fully transparent pixels can become background through an alpha threshold;
 - `NONE`, `ALPHA`, `CORNER`, and `EXPLICIT` background policies are explicit;
 - palettes are extracted by deterministic frequency ordering with
-  lexicographic tie breaks, or accepted from the caller;
+  lexicographic tie breaks across one frame or a shared multi-view set, or
+  accepted from the caller;
 - bounded palettes map overflow colors to the nearest stable entry;
 - each indexed image records dimensions, background settings, palette size, and
   an SHA-256 digest for reconstruction provenance;
 - `IndexedImage.to_view` applies axis, facing, origin, integer depth, and
   priority calibration before calling `voxtart.reconstruct`.
 
+
 `voxtart.reconstruct_ui` loads Blender-supported image files, creates a new
 non-destructive voxel asset, stores the source/calibration/report metadata, and
-draws unresolved candidate cells as a purple wire overlay. The panel reports
-unresolved, conflicting, missing, extra, and color-mismatched pixels.
+draws unresolved candidate cells as a purple wire overlay. The single-view
+panel handles one source directly; the multi-view panel accepts up to six
+independently calibrated images and applies one shared palette before solving
+the constraints. Both panels report unresolved, conflicting, missing, extra,
+and color-mismatched pixels.
 
 The core remains offline-capable and testable with deterministic RGBA fixtures;
 file-format decoding is delegated to Blender's image loader at the adapter
