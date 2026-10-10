@@ -35,7 +35,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_formats  # noqa: E402
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
-from voxtart import character_editor, optimize, optimizer, palette, palette_reduce, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import character_editor, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
 
 
 PALETTE = [
@@ -3611,5 +3611,101 @@ class BoundaryAndFailureTest(unittest.TestCase):
         finally:
             meshing._TETRAHEDRA = tetrahedra
             meshing._lattice_value = lattice
+
+class ReconstructionTest(unittest.TestCase):
+    def test_calibration_roundtrips_for_all_view_axes(self):
+        for axis in ("X", "Y", "Z"):
+            view = reconstruct.OrthographicView.from_rows(
+                axis,
+                [[0]],
+                axis=axis,
+                origin=(3, 4, 5),
+                depth=2,
+            )
+            cell = view.cell_at(0, 0, 1)
+            self.assertEqual(view.project_cell(cell), (0, 0, 1))
+
+    def test_surface_mode_preserves_silhouette_and_marks_unknown_depth(self):
+        view = reconstruct.OrthographicView.from_rows(
+            "front",
+            [[0, None], [0, 0]],
+            axis="Z",
+            origin=(0, 1, 0),
+            depth=3,
+        )
+        result = reconstruct.reconstruct_views((view,), PALETTE[:1])
+
+        self.assertEqual(
+            set(result.asset.voxels),
+            {(0, 1, 0), (0, 0, 0), (1, 0, 0)},
+        )
+        self.assertEqual(result.report.unresolved_voxels, 6)
+        self.assertEqual(result.report.missing_pixels, 0)
+        self.assertEqual(result.report.extra_pixels, 0)
+        self.assertEqual(result.report.color_mismatches, 0)
+        self.assertEqual(result.render_back(view), view.pixels)
+        volume = reconstruct.reconstruct_views(
+            (view,),
+            PALETTE[:1],
+            reconstruct.ReconstructionSettings(mode="VOLUME"),
+        )
+        self.assertEqual(len(volume.asset.voxels), 9)
+        self.assertEqual(volume.report.unresolved_voxels, 0)
+
+    def test_opposing_views_resolve_depth_and_background_conflict(self):
+        front = reconstruct.OrthographicView.from_rows(
+            "front",
+            [[0]],
+            axis="Z",
+            direction=1,
+            origin=(0, 0, 0),
+            depth=2,
+        )
+        back = reconstruct.OrthographicView.from_rows(
+            "back",
+            [[0]],
+            axis="Z",
+            direction=-1,
+            origin=(0, 0, 1),
+            depth=2,
+        )
+        resolved = reconstruct.reconstruct_views((front, back), PALETTE[:1])
+        self.assertEqual(set(resolved.asset.voxels), {(0, 0, 0), (0, 0, 1)})
+        self.assertEqual(resolved.report.unresolved_voxels, 0)
+        self.assertEqual(resolved.asset.provenance["view_names"], "front,back")
+
+        empty = reconstruct.OrthographicView.from_rows(
+            "empty",
+            [[None]],
+            axis="Z",
+            origin=(0, 0, 0),
+            depth=2,
+        )
+        conflict = reconstruct.reconstruct_views((front, empty), PALETTE[:1])
+        self.assertEqual(conflict.report.conflicting_rays, 1)
+        self.assertEqual(conflict.report.missing_pixels, 1)
+        self.assertFalse(conflict.asset.voxels)
+
+    def test_material_conflicts_are_reported_deterministically(self):
+        side = reconstruct.OrthographicView.from_rows(
+            "side",
+            [[1]],
+            axis="X",
+            origin=(0, 0, 0),
+            depth=1,
+        )
+        front = reconstruct.OrthographicView.from_rows(
+            "front",
+            [[0]],
+            axis="Z",
+            origin=(0, 0, 0),
+            depth=1,
+        )
+        result = reconstruct.reconstruct_views((side, front), PALETTE[:2])
+
+        self.assertEqual(result.asset.voxels, {(0, 0, 0): 0})
+        self.assertEqual(result.report.material_conflicts, 1)
+        self.assertEqual(result.report.color_mismatches, 1)
+
 if __name__ == "__main__":
     unittest.main()
