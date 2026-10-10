@@ -12,15 +12,15 @@ This is intentionally a prototype boundary for the later native data-block.
 bl_info = {
     "name": "VOXTART",
     "author": "VOXTART contributors",
-    "version": (0, 17, 0),
+    "version": (0, 18, 0),
     "blender": (5, 2, 0),
-    "description": "Goxel-inspired voxel authoring with dynamic mesh voxelization, pixel tiling and proportional spritesheet projection, Bloformer volume deformation, portable VOX/QB/Blockbench/Minecraft formats, layered SpriteStack/PSD/ORA/KRA imports rendered as voxels, stack manifests, categorized Zoo Gallery asset browsing, favorites, thumbnails, surface/grid/vertex placement, brush scattering, path distribution, transform randomization, collision and material overrides, blob gallery kitbashing, socketed voxel character editing, V-Optimizer-style greedy/marching mesh cleanup, lasso blobs, skeleton retargeting, game-rig extraction, action baking, palettes, layers, and optional MCP plugins",
+    "description": "Goxel-inspired voxel authoring with dynamic mesh voxelization, pixel tiling and proportional spritesheet projection, calibrated image-to-voxel reconstruction, Bloformer volume deformation, portable VOX/QB/Blockbench/Minecraft formats, layered SpriteStack/PSD/ORA/KRA imports rendered as voxels, stack manifests, categorized Zoo Gallery asset browsing, favorites, thumbnails, surface/grid/vertex placement, brush scattering, path distribution, transform randomization, collision and material overrides, blob gallery kitbashing, socketed voxel character editing, V-Optimizer-style greedy/marching mesh cleanup, lasso blobs, skeleton retargeting, game-rig extraction, action baking, palettes, layers, and optional MCP plugins",
     "location": "VOXTART desktop launcher; View3D > Sidebar > Item / VOXTART",
     "category": "3D View",
 }
 
 def register():
-    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, scene_hierarchy_ui, shading_ui, skeleton_wizard, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
+    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, skeleton_wizard, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
     operators.register()
     formats_ui.register()
     export_ui.register()
@@ -31,6 +31,7 @@ def register():
     viewport_workflow_ui.register()
     layers_ui.register()
     tiler_ui.register()
+    reconstruct_ui.register()
     lasso_blob.register()
     bloformer_ui.register()
     ux.register()
@@ -49,7 +50,7 @@ def register():
 
 
 def unregister():
-    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, scene_hierarchy_ui, shading_ui, skeleton_wizard, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
+    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, skeleton_wizard, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
     mcp.unregister()
     shading_ui.unregister()
     minecraft_ui.unregister()
@@ -65,8 +66,8 @@ def unregister():
     ux.unregister()
     bloformer_ui.unregister()
     lasso_blob.unregister()
+    reconstruct_ui.unregister()
     tiler_ui.unregister()
-    layers_ui.unregister()
     viewport_workflow_ui.unregister()
     voxel_editor.unregister()
     goxel_ui.unregister()

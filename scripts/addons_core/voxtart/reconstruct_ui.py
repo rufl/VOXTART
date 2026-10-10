@@ -1,0 +1,364 @@
+# SPDX-FileCopyrightText: 2026 VOXTART contributors
+#
+# SPDX-License-Identifier: MIT
+
+"""Blender adapter for calibrated image-to-voxel reconstruction."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import bpy
+from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, IntVectorProperty, StringProperty
+
+from . import operators
+from .image_intake import ImageFrame, PaletteIntakeSettings, index_image
+from .reconstruct import ReconstructionSettings, reconstruct_views
+
+
+RECONSTRUCTION_REPORT_PROPERTY = "voxtart_reconstruction_report"
+RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY = "voxtart_reconstruction_unresolved_cells"
+RECONSTRUCTION_OVERLAY_PROPERTY = "voxtart_reconstruction_overlay"
+RECONSTRUCTION_SOURCE_PROPERTY = "voxtart_reconstruction_source"
+RECONSTRUCTION_VIEW_PROPERTY = "voxtart_reconstruction_view"
+MAX_RECONSTRUCTION_PIXELS = 1_000_000
+MAX_RECONSTRUCTION_CELLS = 4_000_000
+
+_AXIS_ITEMS = (
+    ("X", "X", "Use X as the view-depth axis"),
+    ("Y", "Y", "Use Y as the view-depth axis"),
+    ("Z", "Z", "Use Z as the view-depth axis"),
+)
+_DIRECTION_ITEMS = (
+    ("1", "Positive", "Project into the positive direction of the view axis"),
+    ("-1", "Negative", "Project into the negative direction of the view axis"),
+)
+_BACKGROUND_ITEMS = (
+    ("ALPHA", "Alpha", "Treat pixels at or below the alpha threshold as background"),
+    ("NONE", "None", "Keep transparent pixels as source colors"),
+    ("CORNER", "Corner", "Use the top-left pixel as the background color"),
+    ("EXPLICIT", "Explicit", "Use the configured background color"),
+)
+_MODE_ITEMS = (
+    ("SURFACE", "Surface", "Select the nearest viable voxel per source pixel"),
+    ("VOLUME", "Volume", "Keep every viable voxel in the calibrated depth slab"),
+)
+
+
+def _load_image_frame(filepath: str) -> tuple[ImageFrame, Path]:
+    path = Path(bpy.path.abspath(str(filepath or ""))).expanduser()
+    if not path.is_file():
+        raise ValueError(f"image file does not exist: {path}")
+    image = None
+    try:
+        image = bpy.data.images.load(str(path), check_existing=False)
+        width, height = (int(image.size[0]), int(image.size[1]))
+        if width < 1 or height < 1:
+            raise ValueError("image has no pixels")
+        if width * height > MAX_RECONSTRUCTION_PIXELS:
+            raise ValueError(f"image exceeds the {MAX_RECONSTRUCTION_PIXELS:,}-pixel reconstruction budget")
+        raw = tuple(float(value) for value in image.pixels)
+        expected = width * height * 4
+        if len(raw) != expected:
+            raise ValueError("Blender returned an incomplete image pixel buffer")
+        rows = tuple(
+            tuple(
+                tuple(raw[(row * width + column) * 4:(row * width + column + 1) * 4])
+                for column in range(width)
+            )
+            for row in range(height)
+        )
+        return ImageFrame.from_rows(path.stem or "image", rows), path
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
+        raise ValueError(f"could not load reconstruction image: {error}") from error
+    finally:
+        if image is not None:
+            try:
+                bpy.data.images.remove(image)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+
+
+def _store_result(obj: bpy.types.Object, source: Path, view, result) -> None:
+    report = result.report.to_dict()
+    obj[RECONSTRUCTION_REPORT_PROPERTY] = json.dumps(report, sort_keys=True, separators=(",", ":"))
+    obj[RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY] = json.dumps(
+        [list(cell) for cell in result.unresolved],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    obj[RECONSTRUCTION_SOURCE_PROPERTY] = str(source)
+    obj[RECONSTRUCTION_VIEW_PROPERTY] = json.dumps(
+        {
+            "name": view.name,
+            "axis": view.axis,
+            "direction": view.direction,
+            "origin": list(view.origin),
+            "depth": view.depth,
+            "priority": view.priority,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    operators._update_overlay(
+        obj,
+        result.asset,
+        RECONSTRUCTION_OVERLAY_PROPERTY,
+        result.unresolved,
+        "Unresolved",
+        (0.75, 0.2, 1.0, 1.0),
+    )
+
+
+def _report_from_object(obj):
+    if obj is None:
+        return None
+    encoded = obj.get(RECONSTRUCTION_REPORT_PROPERTY)
+    if not isinstance(encoded, str):
+        return None
+    try:
+        value = json.loads(encoded)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+class VOXTART_OT_reconstruct_image(bpy.types.Operator):
+    bl_idname = "voxtart.reconstruct_image"
+    bl_label = "Reconstruct Image to Voxels"
+    bl_description = "Create a non-destructive voxel asset from one calibrated orthographic image"
+    bl_options = {"REGISTER", "UNDO"}
+
+    filepath: StringProperty(name="Image", subtype="FILE_PATH")
+    axis: EnumProperty(name="Depth Axis", items=_AXIS_ITEMS, default="Z")
+    direction: EnumProperty(name="Facing", items=_DIRECTION_ITEMS, default="1")
+    origin: IntVectorProperty(name="Origin", size=3, default=(0, 0, 0))
+    depth: IntProperty(name="Depth", min=1, max=MAX_RECONSTRUCTION_CELLS, default=1)
+    priority: IntProperty(name="Priority", default=0)
+    background_mode: EnumProperty(name="Background", items=_BACKGROUND_ITEMS, default="ALPHA")
+    alpha_threshold: FloatProperty(name="Alpha Threshold", min=0.0, max=1.0, default=0.0)
+    background_color: FloatVectorProperty(
+        name="Background Color",
+        subtype="COLOR",
+        size=4,
+        min=0.0,
+        max=1.0,
+        default=(0.0, 0.0, 0.0, 1.0),
+    )
+    background_tolerance: FloatProperty(name="Background Tolerance", min=0.0, max=1.0, default=0.0)
+    max_colors: IntProperty(name="Maximum Colors", min=1, max=256, default=256)
+    mode: EnumProperty(name="Depth Mode", items=_MODE_ITEMS, default="SURFACE")
+
+    def invoke(self, context, _event):
+        if self.filepath:
+            return self.execute(context)
+        context.window_manager.fileselect_add(self)
+        return {"RUNNING_MODAL"}
+
+    def execute(self, context):
+        try:
+            frame, source = _load_image_frame(self.filepath)
+            if frame.width * frame.height * int(self.depth) > MAX_RECONSTRUCTION_CELLS:
+                raise ValueError(f"calibrated image exceeds the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget")
+            intake_settings = PaletteIntakeSettings(
+                background_mode=self.background_mode,
+                alpha_threshold=float(self.alpha_threshold),
+                background_color=tuple(self.background_color),
+                background_tolerance=float(self.background_tolerance),
+                max_colors=int(self.max_colors),
+            )
+            indexed = index_image(frame, intake_settings)
+            view = indexed.to_view(
+                axis=self.axis,
+                direction=int(self.direction),
+                origin=tuple(self.origin),
+                depth=int(self.depth),
+                priority=int(self.priority),
+            )
+            result = reconstruct_views(
+                (view,),
+                indexed.palette,
+                ReconstructionSettings(mode=self.mode),
+                source_provenance=indexed.provenance(),
+            )
+            obj = operators._create_asset_object(
+                context,
+                f"VOXTART {frame.name} Reconstruction",
+                result.asset,
+            )
+            _store_result(obj, source, view, result)
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Reconstructed {result.report.occupied_voxels} voxels; "
+            f"{result.report.unresolved_voxels} unresolved; "
+            f"{result.report.conflicting_rays} conflicts",
+        )
+        return {"FINISHED"}
+
+
+class VOXTART_PT_reconstruction(bpy.types.Panel):
+    bl_label = "Image Reconstruction"
+    bl_idname = "VOXTART_PT_reconstruction"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "VOXTART"
+    bl_order = 20
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        layout.prop(scene, "voxtart_reconstruction_filepath", text="Image")
+        layout.prop(scene, "voxtart_reconstruction_axis", text="Depth Axis")
+        layout.prop(scene, "voxtart_reconstruction_direction", text="Facing")
+        layout.prop(scene, "voxtart_reconstruction_origin", text="Origin")
+        layout.prop(scene, "voxtart_reconstruction_depth", text="Depth")
+        layout.prop(scene, "voxtart_reconstruction_priority", text="Priority")
+        layout.prop(scene, "voxtart_reconstruction_background", text="Background")
+        layout.prop(scene, "voxtart_reconstruction_alpha_threshold")
+        if scene.voxtart_reconstruction_background in {"CORNER", "EXPLICIT"}:
+            layout.prop(scene, "voxtart_reconstruction_background_color")
+            layout.prop(scene, "voxtart_reconstruction_background_tolerance")
+        layout.prop(scene, "voxtart_reconstruction_max_colors")
+        layout.prop(scene, "voxtart_reconstruction_mode", text="Depth Mode")
+
+        operator = layout.operator(VOXTART_OT_reconstruct_image.bl_idname, icon="IMAGE_DATA")
+        operator.filepath = scene.voxtart_reconstruction_filepath
+        operator.axis = scene.voxtart_reconstruction_axis
+        operator.direction = scene.voxtart_reconstruction_direction
+        operator.origin = tuple(scene.voxtart_reconstruction_origin)
+        operator.depth = scene.voxtart_reconstruction_depth
+        operator.priority = scene.voxtart_reconstruction_priority
+        operator.background_mode = scene.voxtart_reconstruction_background
+        operator.alpha_threshold = scene.voxtart_reconstruction_alpha_threshold
+        operator.background_color = tuple(scene.voxtart_reconstruction_background_color)
+        operator.background_tolerance = scene.voxtart_reconstruction_background_tolerance
+        operator.max_colors = scene.voxtart_reconstruction_max_colors
+        operator.mode = scene.voxtart_reconstruction_mode
+
+        report = _report_from_object(context.active_object)
+        if report is None:
+            layout.label(text="No reconstruction report yet", icon="INFO")
+            return
+        report_box = layout.box()
+        report_box.label(text="Last Result", icon="CHECKMARK")
+        report_box.label(text=f"Voxels: {report.get('occupied_voxels', 0)}")
+        report_box.label(text=f"Unresolved: {report.get('unresolved_voxels', 0)}")
+        report_box.label(text=f"Conflicts: {report.get('conflicting_rays', 0)}")
+        report_box.label(text=f"Missing pixels: {report.get('missing_pixels', 0)}")
+        report_box.label(text=f"Extra pixels: {report.get('extra_pixels', 0)}")
+        report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
+
+
+_CLASSES = (
+    VOXTART_OT_reconstruct_image,
+    VOXTART_PT_reconstruction,
+)
+
+
+def register() -> None:
+    for cls in _CLASSES:
+        bpy.utils.register_class(cls)
+    bpy.types.Scene.voxtart_reconstruction_filepath = StringProperty(
+        name="Reconstruction Image",
+        subtype="FILE_PATH",
+        default="",
+    )
+    bpy.types.Scene.voxtart_reconstruction_axis = EnumProperty(
+        name="Reconstruction Axis",
+        items=_AXIS_ITEMS,
+        default="Z",
+    )
+    bpy.types.Scene.voxtart_reconstruction_direction = EnumProperty(
+        name="Reconstruction Facing",
+        items=_DIRECTION_ITEMS,
+        default="1",
+    )
+    bpy.types.Scene.voxtart_reconstruction_origin = IntVectorProperty(
+        name="Reconstruction Origin",
+        size=3,
+        default=(0, 0, 0),
+    )
+    bpy.types.Scene.voxtart_reconstruction_depth = IntProperty(
+        name="Reconstruction Depth",
+        min=1,
+        max=MAX_RECONSTRUCTION_CELLS,
+        default=1,
+    )
+    bpy.types.Scene.voxtart_reconstruction_priority = IntProperty(
+        name="Reconstruction Priority",
+        default=0,
+    )
+    bpy.types.Scene.voxtart_reconstruction_background = EnumProperty(
+        name="Reconstruction Background",
+        items=_BACKGROUND_ITEMS,
+        default="ALPHA",
+    )
+    bpy.types.Scene.voxtart_reconstruction_alpha_threshold = FloatProperty(
+        name="Reconstruction Alpha Threshold",
+        min=0.0,
+        max=1.0,
+        default=0.0,
+    )
+    bpy.types.Scene.voxtart_reconstruction_background_color = FloatVectorProperty(
+        name="Reconstruction Background Color",
+        subtype="COLOR",
+        size=4,
+        min=0.0,
+        max=1.0,
+        default=(0.0, 0.0, 0.0, 1.0),
+    )
+    bpy.types.Scene.voxtart_reconstruction_background_tolerance = FloatProperty(
+        name="Reconstruction Background Tolerance",
+        min=0.0,
+        max=1.0,
+        default=0.0,
+    )
+    bpy.types.Scene.voxtart_reconstruction_max_colors = IntProperty(
+        name="Reconstruction Maximum Colors",
+        min=1,
+        max=256,
+        default=256,
+    )
+    bpy.types.Scene.voxtart_reconstruction_mode = EnumProperty(
+        name="Reconstruction Depth Mode",
+        items=_MODE_ITEMS,
+        default="SURFACE",
+    )
+
+
+def unregister() -> None:
+    for name in (
+        "voxtart_reconstruction_mode",
+        "voxtart_reconstruction_max_colors",
+        "voxtart_reconstruction_background_tolerance",
+        "voxtart_reconstruction_background_color",
+        "voxtart_reconstruction_alpha_threshold",
+        "voxtart_reconstruction_background",
+        "voxtart_reconstruction_priority",
+        "voxtart_reconstruction_depth",
+        "voxtart_reconstruction_origin",
+        "voxtart_reconstruction_direction",
+        "voxtart_reconstruction_axis",
+        "voxtart_reconstruction_filepath",
+    ):
+        if hasattr(bpy.types.Scene, name):
+            delattr(bpy.types.Scene, name)
+    for cls in reversed(_CLASSES):
+        bpy.utils.unregister_class(cls)
+
+
+__all__ = [
+    "RECONSTRUCTION_REPORT_PROPERTY",
+    "RECONSTRUCTION_SOURCE_PROPERTY",
+    "RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY",
+    "RECONSTRUCTION_OVERLAY_PROPERTY",
+    "RECONSTRUCTION_VIEW_PROPERTY",
+    "VOXTART_OT_reconstruct_image",
+    "VOXTART_PT_reconstruction",
+    "register",
+    "unregister",
+]
