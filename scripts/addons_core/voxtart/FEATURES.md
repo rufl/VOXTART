@@ -47,6 +47,23 @@ modes at the top, project items on the left, palette and assets on the right,
 and a compact status bar at the bottom. When opened before the first edit, it
 defaults to **Build**, keeps only the starter-focused project category, and
 uses the same beginner tool labels.
+
+### Core project loop
+
+The P1 authoring loop is intentionally complete before advanced workflows:
+
+1. **Make Blocks** creates a starter asset from the project surface.
+2. **Open voxel editor** enters the product editor with the new asset active.
+3. The visible **Colors** strip selects a palette entry for add and paint.
+4. Face clicks add, paint, or erase voxels; `Ctrl+Z` and `Ctrl+Y` undo and
+   redo the committed stroke.
+5. **Save** writes the Blender project, and reopening it restores the asset,
+   palette indices, recovery state, and clipboard state.
+6. **Project** or `Esc` returns to the VOXTART project surface.
+
+Import, voxelization, optimization, character, and palette-library workflows
+remain available after this loop is stable, but they are not prerequisites for
+the first successful project.
 Rounded controls expose direct paths for creating, importing, voxelizing,
 painting, optimizing, and character work after the first-run path;
 hovering a control shows its label and available shortcut.

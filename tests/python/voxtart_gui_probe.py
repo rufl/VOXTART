@@ -33,6 +33,10 @@ SHELL_SCREENSHOT = Path(
 )
 STATE = {"attempts": 0}
 
+class _ShellHarness:
+    _activate = desktop_shell.VOXTART_OT_desktop_shell._activate
+    _finish = desktop_shell.VOXTART_OT_desktop_shell._finish
+
 
 def _write(payload: dict) -> None:
     MARKER.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
@@ -124,6 +128,24 @@ def _modal_click(point: tuple[float, float]) -> None:
         event.value = "RELEASE"
         editor.modal(bpy.context, event)
 
+def _modal_key(event_type: str, *, ctrl: bool = False, shift: bool = False):
+    event = SimpleNamespace(
+        type=event_type,
+        value="PRESS",
+        ctrl=ctrl,
+        shift=shift,
+        alt=False,
+        mouse_region_x=-1.0,
+        mouse_region_y=-1.0,
+    )
+    with bpy.context.temp_override(
+        window=STATE["window"],
+        screen=STATE["screen"],
+        area=STATE["area"],
+        region=STATE["region"],
+    ):
+        return STATE["editor"].modal(bpy.context, event)
+
 
 def _send_left_click():
     try:
@@ -178,6 +200,57 @@ def _finish_mouse_clicks():
             return _fail("Erase click removed the placed voxel instead of the hit voxel")
         editor = STATE["editor"]
         scene = STATE["scene"]
+        scene.voxtart_editor_mode = "PAINT"
+        scene.voxtart_editor_shape = "VOXEL"
+        scene.voxtart_editor_radius = 1
+        scene.voxtart_edit_palette_index = 1
+        before_paint_asset = operators._load_asset(STATE["obj"])
+        before_paint_voxels = dict(before_paint_asset.voxels)
+        paint_hits = _viewport_hits(
+            STATE["editor"],
+            STATE["obj"],
+            STATE["area"],
+            STATE["region"],
+        )
+        paint_point = next(
+            (
+                point
+                for point, cell in (
+                    (paint_hits[0], paint_hits[2]),
+                    (paint_hits[1], paint_hits[3]),
+                )
+                if before_paint_voxels.get(cell) == 0
+            ),
+            None,
+        )
+        if paint_point is None:
+            return _fail("Paint workflow could not find a visible default-color voxel")
+        _modal_click(paint_point)
+        painted_asset = operators._load_asset(STATE["obj"])
+        painted_cells = [
+            cell
+            for cell, palette_index in before_paint_voxels.items()
+            if painted_asset.voxels.get(cell) != palette_index
+        ]
+        if len(painted_cells) != 1 or painted_asset.voxels.get(painted_cells[0]) != 1:
+            return _fail(
+                f"Paint click did not apply the selected palette color: "
+                f"changed={painted_cells!r}, palette={painted_asset.voxels!r}"
+            )
+        painted_cell = painted_cells[0]
+        previous_palette_index = before_paint_voxels[painted_cell]
+        if _modal_key("Z", ctrl=True) != {"RUNNING_MODAL"}:
+            return _fail("Ctrl+Z did not run through the editor")
+        undone_asset = operators._load_asset(STATE["obj"])
+        if undone_asset.voxels.get(painted_cell) != previous_palette_index:
+            return _fail("Ctrl+Z did not restore the prior voxel color")
+        if _modal_key("Y", ctrl=True) != {"RUNNING_MODAL"}:
+            return _fail("Ctrl+Y did not run through the editor")
+        redone_asset = operators._load_asset(STATE["obj"])
+        if redone_asset.voxels.get(painted_cell) != 1:
+            return _fail("Ctrl+Y did not restore the painted voxel color")
+        STATE["painted_cell"] = painted_cell
+        STATE["paint_undo_redo"] = True
         scene.voxtart_editor_mode = "ADD"
         scene.voxtart_editor_shape = "FACE"
         scene.voxtart_editor_radius = 2
@@ -210,6 +283,8 @@ def _finish_mouse_clicks():
                 "view_workflow": STATE.get("view_workflow", False),
                 "shell_toolbar": STATE.get("shell_toolbar", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
+                "shell_make": STATE.get("shell_make", False),
+                "shell_editor": STATE.get("shell_editor", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
                 "startup_editor": STATE.get("startup_editor", False),
@@ -232,6 +307,7 @@ def _finish_mouse_clicks():
                         "show_region_footer",
                     )
                 },
+                "paint_undo_redo": STATE.get("paint_undo_redo", False),
                 "palette_non_default": STATE.get("palette_non_default", False),
                 "palette_selection": STATE.get("palette_selection", False),
                 "product_controls": STATE.get("product_controls", False),
@@ -414,6 +490,37 @@ def _probe():
                 return _fail(f"Could not capture shell screenshot: {screenshot_result!r}")
             STATE["shell_toolbar"] = shell_toolbar_count
             STATE["shell_screenshot"] = str(SHELL_SCREENSHOT)
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                desktop_shell._set_mode(scene, "HOME")
+                shell_operator = _ShellHarness()
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "home:make" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Make Blocks")
+                before_shell_assets = set(desktop_shell._asset_objects())
+                shell_operator._activate(bpy.context, "home:make")
+                created_shell_assets = set(desktop_shell._asset_objects()).difference(before_shell_assets)
+                if len(created_shell_assets) != 1:
+                    return _fail(
+                        f"Make Blocks did not create exactly one asset: {created_shell_assets!r}"
+                    )
+                created_shell_asset = next(iter(created_shell_assets))
+                if len(operators._load_asset(created_shell_asset).voxels) != 64:
+                    return _fail("Make Blocks created an asset with the wrong voxel count")
+                STATE["shell_make"] = True
+                desktop_shell._set_mode(scene, "BUILD")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "build:editor" for key, _bounds in shell_state.targets):
+                    return _fail("Build surface did not expose Open voxel editor")
+                shell_operator._activate(bpy.context, "build:editor")
+                if voxel_editor._ACTIVE_EDITOR is None:
+                    return _fail("Open voxel editor did not enter the editor")
+                STATE["shell_editor"] = True
+                voxel_editor._ACTIVE_EDITOR._finish(bpy.context, {"CANCELLED"})
             desktop_shell.VOXTART_OT_desktop_shell._finish(None, bpy.context)
         STATE["view_workflow"] = _exercise_view_workflow(window, screen, area, region, scene)
         if not hasattr(bpy.types, "VOXTART_OT_voxel_editor"):
