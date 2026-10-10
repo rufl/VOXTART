@@ -93,6 +93,20 @@ def _ensure_default_pyramid(context):
     return obj
 
 
+def _set_native_toolbar_visibility(visible: bool) -> None:
+    for window in tuple(bpy.context.window_manager.windows):
+        screen = window.screen
+        if screen is None:
+            continue
+        for area in tuple(screen.areas):
+            if area.type != "VIEW_3D":
+                continue
+            try:
+                area.spaces.active.show_region_toolbar = bool(visible)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+
+
 def _frame_object_in_viewports(obj) -> None:
     """Frame the starter asset in every available 3D viewport."""
 
@@ -227,7 +241,7 @@ def configure_workspace() -> None:
         for area in view_areas:
             space = area.spaces.active
             for property_name, value in (
-                ("show_region_toolbar", False),
+                ("show_region_toolbar", True),
                 ("show_region_header", False),
                 ("show_region_footer", False),
                 ("show_region_ui", True),
@@ -268,6 +282,7 @@ def configure_workspace() -> None:
         if "FINISHED" in result:
             scene[DESKTOP_FULLSCREEN_PROPERTY] = True
 
+    _set_native_toolbar_visibility(True)
     if starter is not None:
         _frame_object_in_viewports(starter)
     scene[DESKTOP_MODE_PROPERTY] = True

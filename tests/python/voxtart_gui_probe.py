@@ -314,6 +314,13 @@ def _probe():
                     f"Desktop shell toolbar target count mismatch: "
                     f"{shell_toolbar_count} != {expected_toolbar_count}"
                 )
+            shell_toolbar_widths = [
+                bounds[2] - bounds[0]
+                for key, bounds in shell_state.targets
+                if key.startswith("tool:")
+            ]
+            if not shell_toolbar_widths or max(shell_toolbar_widths) > 52.0:
+                return _fail(f"Desktop shell toolbar is not compact: {shell_toolbar_widths!r}")
             area.tag_redraw()
             bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
             SHELL_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)

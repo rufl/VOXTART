@@ -103,6 +103,8 @@ while adding a compact voxel workflow:
 - The Adobe-style vertical toolbar on the left groups the main mode, brush, and
   selection tools; each button shows its glyph and shortcut, highlights the
   active tool, and exposes a tooltip on hover.
+- the compact VOXTART glyph rail keeps project tools one click away while
+  Blender's native toolbar remains available for familiar viewport actions;
 - The VOXTART sidebar exposes a Color Picker, active-layer controls, session
   History, and a Scene Hierarchy inspector beside the viewport.
 - In **Add** or **Attach**, **left click places** on a voxel face and **right

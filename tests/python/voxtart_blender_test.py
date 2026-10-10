@@ -1141,6 +1141,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         )
         if view_areas:
             self.assertTrue(any(area.spaces.active.show_region_ui for area in view_areas))
+            self.assertTrue(any(getattr(area.spaces.active, "show_region_toolbar", False) for area in view_areas))
             self.assertFalse(any(area.spaces.active.show_region_header for area in view_areas))
             self.assertFalse(any(area.spaces.active.show_region_footer for area in view_areas))
 

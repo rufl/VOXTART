@@ -112,8 +112,8 @@ EDITOR_TOOLBAR_ITEMS = (
     ("SELECT", "COMPONENT", "N", "Component select", "N"),
     ("SELECT", "SURFACE", "R", "Surface select", "R"),
 )
-EDITOR_TOOLBAR_BUTTON_MAX = 44.0
-EDITOR_TOOLBAR_BUTTON_MIN = 22.0
+EDITOR_TOOLBAR_BUTTON_MAX = 32.0
+EDITOR_TOOLBAR_BUTTON_MIN = 20.0
 
 _ACTIVE_EDITOR = None
 _CLIPBOARD: tuple[tuple[Cell, int], ...] = ()
