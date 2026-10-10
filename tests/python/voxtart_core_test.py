@@ -35,7 +35,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_formats  # noqa: E402
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
-from voxtart import character_editor, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import character_editor, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
 
 
 PALETTE = [
@@ -3611,6 +3611,80 @@ class BoundaryAndFailureTest(unittest.TestCase):
         finally:
             meshing._TETRAHEDRA = tetrahedra
             meshing._lattice_value = lattice
+
+
+class ImageIntakeTest(unittest.TestCase):
+    def test_palette_extraction_is_deterministic_and_alpha_aware(self):
+        frame = image_intake.ImageFrame.from_rows(
+            "paint",
+            [
+                [(0.0, 0.0, 0.0, 0.0), (1.0, 0.0, 0.0, 1.0), (1.0, 0.0, 0.0, 1.0)],
+                [(0.0, 1.0, 0.0, 1.0), (1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)],
+            ],
+        )
+        indexed = image_intake.index_image(frame)
+
+        self.assertEqual(indexed.palette, ((1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)))
+        self.assertEqual(indexed.pixels, ((None, 0, 0), (1, 0, 1)))
+        limited = image_intake.index_image(
+            frame,
+            image_intake.PaletteIntakeSettings(max_colors=1),
+        )
+        self.assertEqual(limited.palette, ((1.0, 0.0, 0.0, 1.0),))
+        self.assertEqual(limited.pixels, ((None, 0, 0), (0, 0, 0)))
+
+    def test_background_modes_remove_only_configured_pixels(self):
+        frame = image_intake.ImageFrame.from_rows(
+            "background",
+            [[(0.0, 0.0, 0.0, 1.0), (1.0, 0.0, 0.0, 1.0)]],
+        )
+        corner = image_intake.index_image(
+            frame,
+            image_intake.PaletteIntakeSettings(background_mode="CORNER"),
+        )
+        explicit = image_intake.index_image(
+            frame,
+            image_intake.PaletteIntakeSettings(
+                background_mode="EXPLICIT",
+                background_color=(0.0, 0.0, 0.0, 1.0),
+            ),
+        )
+        self.assertEqual(corner.pixels, ((None, 0),))
+        self.assertEqual(explicit.pixels, ((None, 0),))
+
+        transparent = image_intake.ImageFrame.from_rows(
+            "transparent-foreground",
+            [[(0.0, 0.0, 1.0, 0.0)]],
+        )
+        retained = image_intake.index_image(
+            transparent,
+            image_intake.PaletteIntakeSettings(background_mode="NONE"),
+        )
+        self.assertEqual(retained.pixels, ((0,),))
+
+    def test_calibration_and_provenance_feed_reconstruction(self):
+        frame = image_intake.ImageFrame.from_rows(
+            "calibrated",
+            [[(1.0, 0.0, 0.0, 1.0)]],
+        )
+        indexed = image_intake.index_image(
+            frame,
+            image_intake.PaletteIntakeSettings(background_mode="NONE"),
+        )
+        view = indexed.to_view(axis="Z", origin=(4, 5, 6), depth=1)
+        result = reconstruct.reconstruct_views(
+            (view,),
+            indexed.palette,
+            source_provenance=indexed.provenance(),
+        )
+
+        self.assertEqual(result.asset.voxels, {(4, 5, 6): 0})
+        self.assertEqual(result.report.missing_pixels, 0)
+        self.assertEqual(result.report.extra_pixels, 0)
+        self.assertEqual(result.asset.provenance["image_name"], "calibrated")
+        self.assertEqual(result.asset.provenance["image_width"], "1")
+        self.assertEqual(result.asset.provenance["image_height"], "1")
+        self.assertEqual(result.asset.provenance["image_sha256"], frame.source_digest)
 
 class ReconstructionTest(unittest.TestCase):
     def test_calibration_roundtrips_for_all_view_axes(self):
