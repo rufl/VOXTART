@@ -1,0 +1,418 @@
+# SPDX-FileCopyrightText: 2026 VOXTART contributors
+#
+# SPDX-License-Identifier: MIT
+
+"""Blender UI for assembling socketed voxel character parts."""
+
+
+import json
+import uuid
+
+import bpy
+from bpy.props import BoolProperty, EnumProperty, StringProperty
+
+from .character_editor import (
+    CHARACTER_SLOTS,
+    CharacterPart,
+    CharacterRecipe,
+)
+from .operators import ASSET_PROPERTY
+
+
+CHARACTER_RECIPE_PROPERTY = "voxtart_character_recipe"
+CHARACTER_ID_PROPERTY = "voxtart_character_id"
+CHARACTER_OBJECT_ID_PROPERTY = "voxtart_character_object_id"
+CHARACTER_SLOT_PROPERTY = "voxtart_character_slot"
+CHARACTER_BLOB_PROPERTY = "voxtart_character_blob_id"
+
+_SLOT_ITEMS = (
+    ("ROOT", "Root", "Main character anchor; required before socketed parts."),
+    ("TORSO", "Torso", "Central body part mounted to the root."),
+    ("HEAD", "Head", "Head or helmet mounted to the torso."),
+    ("ARM_L", "Arm L", "Left arm mounted to the torso."),
+    ("ARM_R", "Arm R", "Right arm mounted to the torso."),
+    ("LEG_L", "Leg L", "Left leg mounted to the torso."),
+    ("LEG_R", "Leg R", "Right leg mounted to the torso."),
+    ("ACCESSORY", "Accessory", "Optional accessory mounted to the torso."),
+)
+
+
+def _gallery(context):
+    from .blob_gallery_ui import _gallery as get_gallery
+
+    return get_gallery(context)
+
+
+def _gallery_entries(context):
+    scene = context.scene
+    return _gallery(context).scan(
+        getattr(scene, "voxtart_character_search", ""),
+        getattr(scene, "voxtart_blob_gallery_category", ""),
+        False,
+    )
+
+
+def _load_recipe(scene: bpy.types.Scene) -> CharacterRecipe:
+    encoded = scene.get(CHARACTER_RECIPE_PROPERTY, "")
+    if not encoded:
+        return CharacterRecipe(name=str(getattr(scene, "voxtart_character_name", "VOXTART Character") or "VOXTART Character"))
+    try:
+        return CharacterRecipe.decode(encoded)
+    except (TypeError, ValueError):
+        return CharacterRecipe(name=str(getattr(scene, "voxtart_character_name", "VOXTART Character") or "VOXTART Character"))
+
+
+def _save_recipe(scene: bpy.types.Scene, recipe: CharacterRecipe) -> None:
+    scene[CHARACTER_RECIPE_PROPERTY] = recipe.encode()
+    scene.voxtart_character_name = recipe.name
+
+
+def _character_id(scene: bpy.types.Scene) -> str:
+    value = str(scene.get(CHARACTER_ID_PROPERTY, "") or "").strip()
+    if not value:
+        value = uuid.uuid4().hex
+        scene[CHARACTER_ID_PROPERTY] = value
+    return value
+
+
+def _scene_name(scene: bpy.types.Scene, recipe: CharacterRecipe) -> str:
+    name = str(getattr(scene, "voxtart_character_name", "") or "").strip()
+    if name:
+        recipe.name = name[:128]
+    return recipe.name
+
+
+def _root_location(recipe: CharacterRecipe, context: bpy.types.Context) -> tuple[float, float, float]:
+    raw = recipe.settings.get("root_location")
+    if isinstance(raw, (list, tuple)) and len(raw) == 3:
+        try:
+            return tuple(float(value) for value in raw)
+        except (TypeError, ValueError):
+            pass
+    location = tuple(float(value) for value in context.scene.cursor.location)
+    recipe.settings["root_location"] = list(location)
+    return location
+
+
+def _remove_objects_with_id(character_id: str) -> None:
+    for obj in tuple(bpy.data.objects):
+        if obj.get(CHARACTER_OBJECT_ID_PROPERTY) == character_id:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def _remove_created(created: dict[str, bpy.types.Object]) -> None:
+    for obj in tuple(created.values()):
+        if obj.name in bpy.data.objects:
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+
+def _rebuild_character(context: bpy.types.Context, recipe: CharacterRecipe) -> tuple[bpy.types.Object, ...]:
+    """Build a staged character, replacing the previous build only on success."""
+
+    if not recipe.parts:
+        _remove_objects_with_id(_character_id(context.scene))
+        return ()
+    root = recipe.get("ROOT")
+    if root is None:
+        raise ValueError("assign a Root part before adding socketed parts")
+
+    from .blob_gallery_ui import _instantiate_entry, _snap_source_to_target
+
+    gallery = _gallery(context)
+    loaded = [(part, gallery.load(part.blob_id)) for part in recipe.ordered_parts()]
+    character_id = _character_id(context.scene)
+    created: dict[str, bpy.types.Object] = {}
+    try:
+        for part, entry in loaded:
+            obj = _instantiate_entry(context, entry)
+            obj.name = f"{recipe.name} {part.slot}"
+            created[part.slot] = obj
+            parent = created.get(part.parent_slot) if part.parent_slot else None
+            if part.parent_slot and parent is None:
+                raise ValueError(
+                    f"slot {part.slot} requires parent slot {part.parent_slot}"
+                )
+            if parent is None:
+                obj.location = _root_location(recipe, context)
+            else:
+                if bool(getattr(context.scene, "voxtart_character_auto_snap", True)):
+                    try:
+                        snap = _snap_source_to_target(obj, parent)
+                    except ValueError as error:
+                        raise ValueError(
+                            f"slot {part.slot} cannot snap to {part.parent_slot}: {error}"
+                        ) from error
+                    obj["voxtart_character_snap"] = json.dumps(snap, sort_keys=True)
+                else:
+                    obj.location = parent.location
+                world_matrix = obj.matrix_world.copy()
+                obj.parent = parent
+                obj.matrix_world = world_matrix
+            obj[CHARACTER_SLOT_PROPERTY] = part.slot
+            obj[CHARACTER_BLOB_PROPERTY] = part.blob_id
+            obj["voxtart_character_parent_slot"] = part.parent_slot
+            obj["voxtart_character_part_name"] = part.name
+    except Exception:
+        _remove_created(created)
+        raise
+
+    _remove_objects_with_id(character_id)
+    for obj in created.values():
+        obj[CHARACTER_OBJECT_ID_PROPERTY] = character_id
+    root_object = created["ROOT"]
+    for obj in tuple(bpy.context.selected_objects):
+        obj.select_set(False)
+    root_object.select_set(True)
+    context.view_layer.objects.active = root_object
+    return tuple(created.values())
+
+
+def _assign_part(context: bpy.types.Context, part: CharacterPart) -> tuple[bpy.types.Object, ...]:
+    scene = context.scene
+    old_recipe = _load_recipe(scene)
+    recipe = CharacterRecipe(
+        name=old_recipe.name,
+        parts=list(old_recipe.parts),
+        settings=dict(old_recipe.settings),
+    )
+    _scene_name(scene, recipe)
+    _root_location(recipe, context)
+    recipe.upsert(part)
+    try:
+        objects = _rebuild_character(context, recipe)
+    except (OSError, TypeError, ValueError, RuntimeError) as error:
+        _save_recipe(scene, old_recipe)
+        raise ValueError(str(error)) from error
+    _save_recipe(scene, recipe)
+    return objects
+
+
+class VOXTART_OT_character_assign_blob(bpy.types.Operator):
+    bl_idname = "voxtart.character_assign_blob"
+    bl_label = "Assign Character Part"
+    bl_description = "Assign a gallery blob to the selected character slot and rebuild the socketed character"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    slot: EnumProperty(name="Slot", items=_SLOT_ITEMS, default="ROOT", options={'HIDDEN'})
+    blob_id: StringProperty(name="Blob ID", options={'HIDDEN'})
+
+    def execute(self, context):
+        try:
+            entry = _gallery(context).load(self.blob_id)
+            _assign_part(
+                context,
+                CharacterPart(slot=self.slot, blob_id=entry.blob_id, name=entry.name),
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Assigned {entry.name} to {self.slot}")
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_assign_active(bpy.types.Operator):
+    bl_idname = "voxtart.character_assign_active"
+    bl_label = "Use Active Blob"
+    bl_description = "Save the active voxel asset to the Blob Gallery and assign it to the selected character slot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    slot: EnumProperty(name="Slot", items=_SLOT_ITEMS, default="ROOT", options={'HIDDEN'})
+
+    def execute(self, context):
+        obj = context.active_object
+        if obj is None or ASSET_PROPERTY not in obj:
+            self.report({'ERROR'}, "select a VOXTART voxel asset first")
+            return {'CANCELLED'}
+        try:
+            from .blob_gallery_ui import _entry_from_active
+
+            entry = _entry_from_active(context)
+            _gallery(context).save(entry)
+            _assign_part(
+                context,
+                CharacterPart(slot=self.slot, blob_id=entry.blob_id, name=entry.name),
+            )
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Assigned active blob to {self.slot}")
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_rebuild(bpy.types.Operator):
+    bl_idname = "voxtart.character_rebuild"
+    bl_label = "Rebuild Character"
+    bl_description = "Rebuild the current character from its saved gallery recipe"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        recipe = _load_recipe(context.scene)
+        if not recipe.parts:
+            self.report({'ERROR'}, "assign at least one character part first")
+            return {'CANCELLED'}
+        try:
+            _scene_name(context.scene, recipe)
+            _rebuild_character(context, recipe)
+            _save_recipe(context.scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Rebuilt {recipe.name}")
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_remove_part(bpy.types.Operator):
+    bl_idname = "voxtart.character_remove_part"
+    bl_label = "Remove Character Part"
+    bl_description = "Remove a slot and rebuild the character"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    slot: EnumProperty(name="Slot", items=_SLOT_ITEMS, default="ROOT", options={'HIDDEN'})
+
+    def execute(self, context):
+        scene = context.scene
+        recipe = _load_recipe(scene)
+        if self.slot == "ROOT":
+            self.report({'ERROR'}, "use Clear Character to remove the root and its children")
+            return {'CANCELLED'}
+        if not recipe.remove(self.slot):
+            self.report({'ERROR'}, f"slot {self.slot} is empty")
+            return {'CANCELLED'}
+        try:
+            _rebuild_character(context, recipe)
+            _save_recipe(scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_clear(bpy.types.Operator):
+    bl_idname = "voxtart.character_clear"
+    bl_label = "Clear Character"
+    bl_description = "Remove the assembled character and its saved recipe"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        _remove_objects_with_id(str(scene.get(CHARACTER_ID_PROPERTY, "") or ""))
+        for name in (CHARACTER_RECIPE_PROPERTY, CHARACTER_ID_PROPERTY):
+            if name in scene:
+                del scene[name]
+        scene.voxtart_character_name = "VOXTART Character"
+        self.report({'INFO'}, "Character cleared")
+        return {'FINISHED'}
+
+
+class VOXTART_PT_character_editor(bpy.types.Panel):
+    bl_label = "Voxel Character Editor"
+    bl_idname = "VOXTART_PT_character_editor"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = "VOXTART"
+    bl_order = 18
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        layout.prop(scene, "voxtart_character_name", text="Name")
+        layout.prop(scene, CHARACTER_SLOT_PROPERTY, text="Target Slot")
+        layout.prop(scene, "voxtart_character_search", text="Part Search")
+        layout.prop(scene, "voxtart_character_auto_snap", text="Auto Snap")
+        row = layout.row(align=True)
+        row.operator(VOXTART_OT_character_rebuild.bl_idname, text="Rebuild", icon="FILE_REFRESH")
+        row.operator(VOXTART_OT_character_clear.bl_idname, text="Clear", icon="TRASH")
+
+        active = layout.operator(VOXTART_OT_character_assign_active.bl_idname, text="Use Active Blob", icon="EYEDROPPER")
+        active.slot = scene.voxtart_character_slot
+
+        try:
+            entries, errors = _gallery_entries(context)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            entries, errors = (), (str(error),)
+        layout.label(text=f"Gallery parts: {len(entries)}", icon="ASSET_MANAGER")
+        for entry in entries[:16]:
+            row = layout.row(align=True)
+            assign = row.operator(
+                VOXTART_OT_character_assign_blob.bl_idname,
+                text=f"{entry.category} / {entry.name}",
+                icon="MESH_CUBE",
+            )
+            assign.slot = scene.voxtart_character_slot
+            assign.blob_id = entry.blob_id
+            row.label(text=f"{len(entry.asset.voxels)}v / {len(entry.joints)}j")
+        if errors:
+            layout.label(text=f"Skipped {len(errors)} invalid asset(s)", icon="ERROR")
+
+        box = layout.box()
+        box.label(text=f"Assigned parts ({len(recipe.parts)}/{len(CHARACTER_SLOTS)})", icon="OUTLINER_OB_MESH")
+        for slot in CHARACTER_SLOTS:
+            row = box.row(align=True)
+            part = recipe.get(slot)
+            row.label(text=slot.replace("_", " "), icon="DOT")
+            if part is None:
+                row.label(text="Empty")
+                continue
+            row.label(text=part.name)
+            if slot != "ROOT":
+                remove = row.operator(VOXTART_OT_character_remove_part.bl_idname, text="", icon="X")
+                remove.slot = slot
+        if recipe.parts:
+            box.label(text="Parts snap through compatible opposite-facing joints.", icon="CONSTRAINT")
+
+
+_CLASSES = (
+    VOXTART_OT_character_assign_blob,
+    VOXTART_OT_character_assign_active,
+    VOXTART_OT_character_rebuild,
+    VOXTART_OT_character_remove_part,
+    VOXTART_OT_character_clear,
+    VOXTART_PT_character_editor,
+)
+
+
+def register() -> None:
+    for cls in _CLASSES:
+        bpy.utils.register_class(cls)
+    bpy.types.Scene.voxtart_character_name = StringProperty(
+        name="Character Name",
+        default="VOXTART Character",
+    )
+    bpy.types.Scene.voxtart_character_slot = EnumProperty(
+        name="Character Slot",
+        items=_SLOT_ITEMS,
+        default="ROOT",
+    )
+    bpy.types.Scene.voxtart_character_search = StringProperty(
+        name="Character Part Search",
+        default="",
+    )
+    bpy.types.Scene.voxtart_character_auto_snap = BoolProperty(
+        name="Auto Snap",
+        description="Use compatible Blob Gallery joints while rebuilding character parts",
+        default=True,
+    )
+
+
+def unregister() -> None:
+    for name in (
+        "voxtart_character_auto_snap",
+        "voxtart_character_search",
+        "voxtart_character_slot",
+        "voxtart_character_name",
+    ):
+        if hasattr(bpy.types.Scene, name):
+            delattr(bpy.types.Scene, name)
+    for cls in reversed(_CLASSES):
+        bpy.utils.unregister_class(cls)
+
+
+__all__ = [
+    "CHARACTER_BLOB_PROPERTY",
+    "CHARACTER_ID_PROPERTY",
+    "CHARACTER_OBJECT_ID_PROPERTY",
+    "CHARACTER_RECIPE_PROPERTY",
+    "CHARACTER_SLOT_PROPERTY",
+    "register",
+    "unregister",
+]

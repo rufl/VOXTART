@@ -1,0 +1,7 @@
+/* SPDX-FileCopyrightText: 2026 VOXTART contributors
+ *
+ * SPDX-License-Identifier: MIT
+ */
+
+#define IDI_VOXTART 101
+IDI_VOXTART ICON "assets/voxtart.ico"

@@ -87,4 +87,5 @@ compile_commands.json
 # Temporary Blender files.
 blendcache_*
 *.blend1
+/config/
 *.blend2

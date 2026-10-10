@@ -4,7 +4,6 @@
 
 """Blender-facing operators for the VOXTART voxel prototype."""
 
-from __future__ import annotations
 
 import json
 import math
@@ -26,23 +25,57 @@ from mathutils import Matrix, Vector
 from mathutils.bvhtree import BVHTree
 
 from .edit import connected_components, edit_asset
-from .io import load_asset, save_asset
+from .io import load_asset, load_asset_with_layers, save_asset
 from .kitbash import find_best_match
+from .layers import LAYER_STACK_PROPERTY, LayerStack
 from .meshing import scaled_mesh
 from .optimize import DecimationPolicy, decimate
+from .palette import DEFAULT_PALETTE, MAX_PALETTE_COLORS, nearest_palette_index, scene_palette
 from .pick import raycast_voxel
 from .voxel import VoxelAsset, VoxelSocket
+from .voxelizer import MAX_SHELL_THICKNESS, VOXELIZER_MODES, apply_voxelizer_mode
+from .volume_ops import (
+    ROTATION_DEGREES,
+    TRANSFORM_AXES,
+    crop_asset,
+    mirror_asset,
+    rotate_asset,
+    translate_asset,
+)
 
 
 ASSET_PROPERTY = "voxtart_asset_json"
 SCHEMA_PROPERTY = "voxtart_schema_version"
 MESH_BACKEND_PROPERTY = "voxtart_mesh_backend"
+MESH_BACKEND_OVERRIDE_PROPERTY = "voxtart_mesh_backend_override"
 COMPONENT_SELECTION_PROPERTY = "voxtart_component_selection"
 COMPONENT_OVERLAY_PROPERTY = "voxtart_component_overlay"
 PICKED_CELL_PROPERTY = "voxtart_picked_cell"
 PICKED_NORMAL_PROPERTY = "voxtart_picked_normal"
 PICKED_OVERLAY_PROPERTY = "voxtart_picked_overlay"
 PROTECTED_OVERLAY_PROPERTY = "voxtart_protected_overlay"
+MAX_VOXELIZE_CELLS = 2_000_000
+VOXELIZER_SOURCE_PROPERTY = "voxtart_voxelizer_source"
+VOXELIZER_MODE_PROPERTY = "voxtart_voxelizer_mode"
+VOXELIZER_THICKNESS_PROPERTY = "voxtart_voxelizer_shell_thickness"
+_VOXELIZER_MODE_ITEMS = (
+    ("SOLID", "Solid", "Keep every occupied sample from the mesh"),
+    ("SURFACE", "Surface", "Keep only the outer one-voxel surface"),
+    ("SHELL", "Shell", "Keep a configurable outer voxel shell"),
+)
+_TRANSFORM_OPERATION_ITEMS = (
+    ("MIRROR", "Mirror", "Reflect the asset across its occupied bounding-box midpoint"),
+    ("ROTATE", "Rotate", "Rotate the asset by a right angle on the selected axis"),
+    ("TRANSLATE", "Translate", "Move the asset by an integer voxel offset"),
+    ("CROP", "Crop", "Compact the asset to its occupied bounds"),
+)
+_TRANSFORM_AXIS_ITEMS = tuple(
+    (axis, axis, f"Transform around the {axis} axis") for axis in TRANSFORM_AXES
+)
+_TRANSFORM_DEGREE_ITEMS = tuple(
+    (str(degrees), f"{degrees}°", f"Rotate by {degrees} degrees")
+    for degrees in ROTATION_DEGREES[1:]
+)
 
 
 def _store_asset(obj: bpy.types.Object, asset: VoxelAsset) -> None:
@@ -50,11 +83,53 @@ def _store_asset(obj: bpy.types.Object, asset: VoxelAsset) -> None:
     obj[ASSET_PROPERTY] = json.dumps(asset.to_dict(), sort_keys=True, separators=(",", ":"))
 
 
+def _store_layer_stack(obj: bpy.types.Object, stack: LayerStack) -> None:
+    obj[LAYER_STACK_PROPERTY] = stack.encode()
+
+
 def _load_asset(obj: bpy.types.Object) -> VoxelAsset:
     raw = obj.get(ASSET_PROPERTY)
     if not isinstance(raw, str):
         raise ValueError("active object is not a VOXTART voxel asset")
     return VoxelAsset.from_dict(json.loads(raw))
+
+
+def _load_layer_stack(obj: bpy.types.Object, asset: VoxelAsset | None = None) -> LayerStack:
+    asset = asset or _load_asset(obj)
+    raw = obj.get(LAYER_STACK_PROPERTY)
+    if isinstance(raw, str):
+        try:
+            return LayerStack.decode(raw)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+    return LayerStack.from_asset(asset)
+
+
+def _asset_from_layer_stack(asset: VoxelAsset, stack: LayerStack) -> VoxelAsset:
+    return VoxelAsset(
+        grid_size=asset.grid_size,
+        palette=list(asset.palette),
+        voxels=stack.composite(asset.palette),
+        sockets=list(asset.sockets),
+        provenance=dict(asset.provenance),
+    )
+
+
+def _retarget_asset_palette(
+    asset: VoxelAsset,
+    palette,
+    layer_stack: LayerStack | None = None,
+) -> tuple[VoxelAsset, LayerStack]:
+    stack = layer_stack or LayerStack.from_asset(asset)
+    stack.remap_palette(asset.palette, palette)
+    replacement = VoxelAsset(
+        grid_size=asset.grid_size,
+        palette=list(palette),
+        voxels=stack.composite(palette),
+        sockets=list(asset.sockets),
+        provenance=dict(asset.provenance),
+    )
+    return replacement, stack
 
 
 def _new_mesh(name: str, asset: VoxelAsset, backend: str = "greedy") -> bpy.types.Mesh:
@@ -70,9 +145,9 @@ def _new_mesh(name: str, asset: VoxelAsset, backend: str = "greedy") -> bpy.type
 def _palette_materials(obj: bpy.types.Object, asset: VoxelAsset) -> None:
     obj.data.materials.clear()
     for index, color in enumerate(asset.palette):
-        material = bpy.data.materials.get(f"VOXTART Palette {index}")
+        material = bpy.data.materials.get(f"VOXTART {obj.name} Palette {index}")
         if material is None:
-            material = bpy.data.materials.new(f"VOXTART Palette {index}")
+            material = bpy.data.materials.new(f"VOXTART {obj.name} Palette {index}")
         material.diffuse_color = color
         obj.data.materials.append(material)
 
@@ -86,27 +161,53 @@ def _link_object(context: bpy.types.Context, obj: bpy.types.Object) -> None:
     context.view_layer.objects.active = obj
 
 
-def _create_asset_object(context: bpy.types.Context, name: str, asset: VoxelAsset,
-                         matrix_world=None) -> bpy.types.Object:
-    obj = bpy.data.objects.new(name, _new_mesh(f"{name} Mesh", asset))
+def _create_asset_object(
+    context: bpy.types.Context,
+    name: str,
+    asset: VoxelAsset,
+    matrix_world=None,
+    backend: str = "greedy",
+    layer_stack: LayerStack | None = None,
+) -> bpy.types.Object:
+    stack = layer_stack or LayerStack.from_asset(asset)
+    visible_asset = _asset_from_layer_stack(asset, stack)
+    obj = bpy.data.objects.new(name, _new_mesh(f"{name} Mesh", visible_asset, backend=backend))
     if matrix_world is not None:
         obj.matrix_world = matrix_world
-    _palette_materials(obj, asset)
-    _store_asset(obj, asset)
-    obj[MESH_BACKEND_PROPERTY] = "greedy"
+    _palette_materials(obj, visible_asset)
+    _store_asset(obj, visible_asset)
+    _store_layer_stack(obj, stack)
+    obj[MESH_BACKEND_PROPERTY] = backend
+    obj[MESH_BACKEND_OVERRIDE_PROPERTY] = False
     _link_object(context, obj)
-    _update_visual_overlays(obj, asset)
+    _update_visual_overlays(obj, visible_asset)
     return obj
 
 
-def _replace_asset_mesh(obj: bpy.types.Object, asset: VoxelAsset, backend: str | None = None) -> None:
-    backend = backend or str(obj.get(MESH_BACKEND_PROPERTY, "greedy"))
+def _replace_asset_mesh(
+    obj: bpy.types.Object,
+    asset: VoxelAsset,
+    backend: str | None = None,
+    layer_stack: LayerStack | None = None,
+) -> None:
+    stack = layer_stack or _load_layer_stack(obj, asset)
+    if backend is None:
+        backend = str(obj.get(MESH_BACKEND_PROPERTY, "greedy")).lower()
+        if not bool(obj.get(MESH_BACKEND_OVERRIDE_PROPERTY, False)):
+            layer_backend = str(getattr(stack.active, "surface_backend", "INHERIT")).lower()
+            if layer_backend in {"greedy", "marching"}:
+                backend = layer_backend
+    backend = str(backend).lower()
+    if backend not in {"greedy", "marching"}:
+        raise ValueError(f"unsupported mesh backend: {backend!r}")
+    visible_asset = _asset_from_layer_stack(asset, stack)
     old_mesh = obj.data
-    obj.data = _new_mesh(f"{obj.name} Mesh", asset, backend=backend)
-    _palette_materials(obj, asset)
-    _store_asset(obj, asset)
+    obj.data = _new_mesh(f"{obj.name} Mesh", visible_asset, backend=backend)
+    _palette_materials(obj, visible_asset)
+    _store_asset(obj, visible_asset)
+    _store_layer_stack(obj, stack)
     obj[MESH_BACKEND_PROPERTY] = backend
-    _update_visual_overlays(obj, asset)
+    _update_visual_overlays(obj, visible_asset)
     if old_mesh.users == 0:
         bpy.data.meshes.remove(old_mesh)
 
@@ -244,9 +345,44 @@ def _inside_bvh(tree: BVHTree, point: Vector, _minimum_x: float, maximum_x: floa
     return bool(intersections & 1)
 
 
-def _voxelize_object(obj: bpy.types.Object, grid_size: float) -> VoxelAsset:
+def _source_material_color(obj: bpy.types.Object, polygon_index: int):
+    polygons = getattr(obj.data, "polygons", ())
+    if polygon_index is None or not 0 <= polygon_index < len(polygons):
+        return None
+    polygon = polygons[polygon_index]
+    materials = getattr(obj.data, "materials", ())
+    material_index = int(getattr(polygon, "material_index", -1))
+    if not 0 <= material_index < len(materials):
+        return None
+    color = getattr(materials[material_index], "diffuse_color", None)
+    if color is None:
+        return None
+    try:
+        channels = tuple(float(channel) for channel in color)
+    except (TypeError, ValueError):
+        return None
+    if len(channels) == 3:
+        return (*channels, 1.0)
+    if len(channels) == 4:
+        return channels
+    return None
+
+
+def _voxelize_object(
+    obj: bpy.types.Object,
+    grid_size: float,
+    palette=None,
+    *,
+    mode: str = "SOLID",
+    shell_thickness: int = 1,
+) -> VoxelAsset:
     if obj.type != 'MESH' or not obj.data.vertices or not obj.data.polygons:
         raise ValueError("active object must be a non-empty mesh")
+    if grid_size <= 0.0:
+        raise ValueError("grid size must be positive")
+    palette = list(palette or DEFAULT_PALETTE)
+    if not palette:
+        raise ValueError("voxelizer requires a non-empty palette")
 
     vertices = [vertex.co.copy() for vertex in obj.data.vertices]
     polygons = [list(polygon.vertices) for polygon in obj.data.polygons]
@@ -256,17 +392,39 @@ def _voxelize_object(obj: bpy.types.Object, grid_size: float) -> VoxelAsset:
     maximum = Vector((max(corner[axis] for corner in bounds) for axis in range(3)))
     start = tuple(math.floor(minimum[axis] / grid_size) for axis in range(3))
     stop = tuple(math.ceil(maximum[axis] / grid_size) for axis in range(3))
+    estimated_cells = math.prod(max(0, stop[axis] - start[axis]) for axis in range(3))
+    if estimated_cells > MAX_VOXELIZE_CELLS:
+        raise ValueError(
+            f"voxelizer search volume is {estimated_cells:,} cells; increase Grid Size "
+            f"or keep it below {MAX_VOXELIZE_CELLS:,} cells"
+        )
 
-    asset = VoxelAsset(grid_size=grid_size, provenance={"source_object": obj.name})
+    asset = VoxelAsset(grid_size=grid_size, palette=palette, provenance={"source_object": obj.name})
     for x in range(start[0], stop[0]):
         for y in range(start[1], stop[1]):
             for z in range(start[2], stop[2]):
                 point = Vector(((x + 0.5) * grid_size, (y + 0.5) * grid_size, (z + 0.5) * grid_size))
-                if _inside_bvh(tree, point, minimum.x, maximum.x, grid_size):
-                    asset.set_voxel((x, y, z))
+                if not _inside_bvh(tree, point, minimum.x, maximum.x, grid_size):
+                    continue
+                palette_index = 0
+                try:
+                    nearest = tree.find_nearest(point)
+                except (AttributeError, RuntimeError):
+                    nearest = None
+                if nearest and len(nearest) >= 3:
+                    material_color = _source_material_color(obj, nearest[2])
+                    if material_color is not None:
+                        palette_index = nearest_palette_index(material_color, palette)
+                asset.set_voxel((x, y, z), palette_index)
     if not asset.voxels:
         raise ValueError("mesh produced no occupied voxels at this grid size")
-    return asset
+    return apply_voxelizer_mode(
+        asset,
+        mode=mode,
+        shell_thickness=shell_thickness,
+    )
+
+
 def _apply_edit(
     obj: bpy.types.Object,
     operation: str,
@@ -275,14 +433,25 @@ def _apply_edit(
     allow_protected: bool = False,
 ):
     asset = _load_asset(obj)
+    stack = _load_layer_stack(obj, asset)
+    if stack.active.locked:
+        raise ValueError(f"active layer is locked: {stack.active.name}")
+    editable = VoxelAsset(
+        grid_size=asset.grid_size,
+        palette=list(asset.palette),
+        voxels=dict(stack.active.voxels),
+        sockets=list(asset.sockets),
+        provenance=dict(asset.provenance),
+    )
     report = edit_asset(
-        asset,
+        editable,
         operation,
         callback,
         protected=_protected_cells(obj),
         allow_protected=allow_protected,
     )
-    _replace_asset_mesh(obj, asset)
+    stack.active.voxels = dict(editable.voxels)
+    _replace_asset_mesh(obj, _asset_from_layer_stack(asset, stack), layer_stack=stack)
     obj["voxtart_edit_report"] = json.dumps(report.to_dict(), sort_keys=True)
     return report
 
@@ -304,7 +473,13 @@ class VOXTART_OT_add_voxel_cube(bpy.types.Operator):
     grid_size: FloatProperty(name="Grid Size", min=0.0001, default=1.0)
 
     def execute(self, context):
-        asset = VoxelAsset.box(self.size, grid_size=self.grid_size)
+        palette = scene_palette(context.scene)
+        asset = VoxelAsset(grid_size=self.grid_size, palette=palette)
+        offset = -(self.size // 2)
+        for x in range(self.size):
+            for y in range(self.size):
+                for z in range(self.size):
+                    asset.set_voxel((offset + x, offset + y, offset + z))
         _create_asset_object(context, "Voxel Cube", asset)
         return {'FINISHED'}
 
@@ -312,10 +487,17 @@ class VOXTART_OT_add_voxel_cube(bpy.types.Operator):
 class VOXTART_OT_voxelize_active(bpy.types.Operator):
     bl_idname = "voxtart.voxelize_active"
     bl_label = "Voxelize Selected Mesh"
-    bl_description = "Convert the active mesh into a sparse voxel asset"
+    bl_description = "Convert the active mesh into a configurable sparse voxel asset"
     bl_options = {'REGISTER', 'UNDO'}
 
     grid_size: FloatProperty(name="Grid Size", min=0.0001, default=1.0)
+    mode: EnumProperty(name="Voxelizer Mode", items=_VOXELIZER_MODE_ITEMS, default="SOLID")
+    shell_thickness: IntProperty(
+        name="Shell Thickness",
+        min=1,
+        max=MAX_SHELL_THICKNESS,
+        default=1,
+    )
 
     @classmethod
     def poll(cls, context):
@@ -324,11 +506,73 @@ class VOXTART_OT_voxelize_active(bpy.types.Operator):
     def execute(self, context):
         source = context.active_object
         try:
-            asset = _voxelize_object(source, self.grid_size)
+            asset = _voxelize_object(
+                source,
+                self.grid_size,
+                scene_palette(context.scene),
+                mode=self.mode,
+                shell_thickness=self.shell_thickness,
+            )
         except ValueError as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
-        _create_asset_object(context, f"{source.name}_Voxel", asset, source.matrix_world.copy())
+        target = _create_asset_object(
+            context,
+            f"{source.name}_Voxel",
+            asset,
+            source.matrix_world.copy(),
+        )
+        target[VOXELIZER_SOURCE_PROPERTY] = source.name
+        target[VOXELIZER_MODE_PROPERTY] = self.mode
+        target[VOXELIZER_THICKNESS_PROPERTY] = self.shell_thickness
+        return {'FINISHED'}
+
+
+class VOXTART_OT_refresh_voxelizer(bpy.types.Operator):
+    bl_idname = "voxtart.refresh_voxelizer"
+    bl_label = "Refresh Linked Voxelizer"
+    bl_description = "Re-voxelize the linked source mesh with its stored voxelizer settings"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = getattr(context, "active_object", None)
+        return obj is not None and (
+            ASSET_PROPERTY in obj and VOXELIZER_SOURCE_PROPERTY in obj
+        )
+
+    def execute(self, context):
+        target = context.active_object
+        source_name = str(target.get(VOXELIZER_SOURCE_PROPERTY, "")).strip()
+        source = bpy.data.objects.get(source_name)
+        if source is None or source.type != "MESH":
+            self.report({'ERROR'}, f"voxelizer source mesh is unavailable: {source_name!r}")
+            return {'CANCELLED'}
+        try:
+            current = _load_asset(target)
+            asset = _voxelize_object(
+                source,
+                current.grid_size,
+                scene_palette(context.scene),
+                mode=str(target.get(VOXELIZER_MODE_PROPERTY, "SOLID")),
+                shell_thickness=int(target.get(VOXELIZER_THICKNESS_PROPERTY, 1)),
+            )
+        except (TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        _replace_asset_mesh(
+            target,
+            asset,
+            layer_stack=LayerStack.from_asset(asset),
+        )
+        target.matrix_world = source.matrix_world.copy()
+        target["voxtart_voxelizer_source"] = source.name
+        target["voxtart_voxelizer_report"] = json.dumps({
+            "source": source.name,
+            "mode": asset.provenance.get("voxelizer_mode", "SOLID"),
+            "voxels": len(asset.voxels),
+        }, sort_keys=True)
+        self.report({'INFO'}, f"refreshed {len(asset.voxels)} voxels from {source.name}")
         return {'FINISHED'}
 def _run_edit_operator(operator, context, operation: str, callback, allow_protected: bool):
     try:
@@ -551,7 +795,7 @@ class VOXTART_OT_set_protected_voxel(bpy.types.Operator):
 class VOXTART_OT_add_palette_color(bpy.types.Operator):
     bl_idname = "voxtart.add_palette_color"
     bl_label = "Add Palette Color"
-    bl_description = "Append a color to the active voxel asset palette"
+    bl_description = "Append a color when palette enforcement is disabled; otherwise use the VOXTART Palette window"
     bl_options = {'REGISTER', 'UNDO'}
 
     color: FloatVectorProperty(
@@ -570,14 +814,25 @@ class VOXTART_OT_add_palette_color(bpy.types.Operator):
     def execute(self, context):
         obj = context.active_object
         try:
-            asset = _load_asset(obj)
-            palette_index = asset.add_palette_color(self.color)
-            _replace_asset_mesh(obj, asset)
-            obj["voxtart_last_palette_index"] = palette_index
+            if bool(getattr(context.scene, "voxtart_palette_enforce", True)):
+                palette = scene_palette(context.scene)
+                color = tuple(float(channel) for channel in self.color)
+                if color not in palette:
+                    raise ValueError("palette enforcement is active; add colors in the VOXTART Palette window")
+                palette_index = palette.index(color)
+                context.scene.voxtart_edit_palette_index = palette_index
+                obj["voxtart_last_palette_index"] = palette_index
+            else:
+                asset = _load_asset(obj)
+                if len(asset.palette) >= MAX_PALETTE_COLORS:
+                    raise ValueError(f"palettes may contain at most {MAX_PALETTE_COLORS} colors")
+                palette_index = asset.add_palette_color(self.color)
+                _replace_asset_mesh(obj, asset)
+                obj["voxtart_last_palette_index"] = palette_index
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
-        self.report({'INFO'}, f"added palette color {palette_index}")
+        self.report({'INFO'}, f"palette color {palette_index}")
         return {'FINISHED'}
 
 
@@ -833,6 +1088,7 @@ class VOXTART_OT_rebuild_asset(bpy.types.Operator):
         obj = context.active_object
         try:
             asset = _load_asset(obj)
+            obj[MESH_BACKEND_OVERRIDE_PROPERTY] = True
             _replace_asset_mesh(obj, asset, backend=self.backend)
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
@@ -889,7 +1145,9 @@ class VOXTART_OT_decimate_asset(bpy.types.Operator):
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
-        _replace_asset_mesh(obj, optimized)
+        flattened = LayerStack.from_asset(optimized)
+        flattened.layers[0].name = "Flattened"
+        _replace_asset_mesh(obj, optimized, layer_stack=flattened)
         obj["voxtart_decimation_report"] = json.dumps(report.to_dict(), sort_keys=True)
         self.report(
             {'INFO'},
@@ -897,20 +1155,166 @@ class VOXTART_OT_decimate_asset(bpy.types.Operator):
         )
         return {'FINISHED'}
 
+def _layer_reference_bounds(stack: LayerStack, fallback):
+    cells = [cell for layer in stack.layers for cell in layer.voxels]
+    if not cells:
+        return fallback
+    minimum = tuple(min(cell[axis] for cell in cells) for axis in range(3))
+    maximum = tuple(max(cell[axis] for cell in cells) for axis in range(3))
+    return minimum, maximum
+
+
+def _apply_volume_operation(
+    asset: VoxelAsset,
+    operation: str,
+    axis: str,
+    degrees: int,
+    offset,
+    rebase: bool,
+    reference_bounds,
+) -> VoxelAsset:
+    if operation == "MIRROR":
+        return mirror_asset(asset, axis, reference_bounds=reference_bounds)
+    if operation == "ROTATE":
+        return rotate_asset(asset, axis, degrees, reference_bounds=reference_bounds)
+    if operation == "TRANSLATE":
+        return translate_asset(asset, offset)
+    if operation == "CROP":
+        if reference_bounds is None:
+            return crop_asset(asset, rebase=rebase)
+        return crop_asset(
+            asset,
+            reference_bounds[0],
+            reference_bounds[1],
+            rebase=rebase,
+        )
+    raise ValueError(f"unsupported volume operation: {operation!r}")
+
+
+class VOXTART_OT_transform_asset(bpy.types.Operator):
+    bl_idname = "voxtart.transform_asset"
+    bl_label = "Transform Voxel Asset"
+    bl_description = "Mirror, rotate, translate, or compact the active voxel asset and every layer"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    operation: EnumProperty(name="Operation", items=_TRANSFORM_OPERATION_ITEMS, default="MIRROR")
+    axis: EnumProperty(name="Axis", items=_TRANSFORM_AXIS_ITEMS, default="X")
+    degrees: EnumProperty(name="Degrees", items=_TRANSFORM_DEGREE_ITEMS, default="90")
+    offset: IntVectorProperty(name="Offset", size=3, default=(0, 0, 0))
+    rebase: BoolProperty(
+        name="Rebase To Origin",
+        description="Move the cropped minimum cell to the local origin",
+        default=True,
+    )
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object is not None and ASSET_PROPERTY in context.active_object
+
+    def execute(self, context):
+        obj = context.active_object
+        try:
+            asset = _load_asset(obj)
+            stack = _load_layer_stack(obj, asset)
+            reference_bounds = _layer_reference_bounds(stack, asset.bounds)
+            original_minimum = reference_bounds[0] if reference_bounds is not None else None
+            transformed = _apply_volume_operation(
+                asset,
+                self.operation,
+                self.axis,
+                int(self.degrees),
+                self.offset,
+                self.rebase,
+                reference_bounds,
+            )
+            for layer in stack.layers:
+                layer_asset = VoxelAsset(
+                    grid_size=asset.grid_size,
+                    palette=list(asset.palette),
+                    voxels=dict(layer.voxels),
+                )
+                layer_result = _apply_volume_operation(
+                    layer_asset,
+                    self.operation,
+                    self.axis,
+                    int(self.degrees),
+                    self.offset,
+                    self.rebase,
+                    reference_bounds,
+                )
+                layer.voxels = dict(layer_result.voxels)
+            if self.operation == "CROP" and self.rebase and original_minimum is not None:
+                local_offset = Vector(
+                    tuple(axis * asset.grid_size for axis in original_minimum)
+                )
+                obj.matrix_world.translation += obj.matrix_world.to_3x3() @ local_offset
+            _replace_asset_mesh(obj, transformed, layer_stack=stack)
+            report = {
+                "operation": self.operation,
+                "axis": self.axis,
+                "degrees": int(self.degrees),
+                "offset": list(self.offset),
+                "rebase": bool(self.rebase),
+                "before_voxels": len(asset.voxels),
+                "after_voxels": len(transformed.voxels),
+                "layers": len(stack.layers),
+            }
+            obj["voxtart_volume_transform_report"] = json.dumps(report, sort_keys=True)
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report(
+            {'INFO'},
+            f"{self.operation.lower()} transformed {len(asset.voxels)} to {len(transformed.voxels)} voxels",
+        )
+        return {'FINISHED'}
+
 
 class VOXTART_PT_voxel_panel(bpy.types.Panel):
-    bl_label = "VOXTART Voxel Authoring"
+    bl_label = "Voxel Authoring (Advanced)"
     bl_idname = "VOXTART_PT_voxel_panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
+    bl_category = 'VOXTART'
+    bl_order = 55
+    bl_options = {'DEFAULT_CLOSED'}
     def draw(self, context):
         layout = self.layout
         scene = context.scene
         layout.prop(scene, "voxtart_grid_size")
         layout.prop(scene, "voxtart_cube_size")
-        layout.operator(VOXTART_OT_add_voxel_cube.bl_idname, icon='CUBE')
-        layout.operator(VOXTART_OT_voxelize_active.bl_idname, icon='MOD_REMESH')
+        layout.label(text="Voxelizer", icon='MOD_REMESH')
+        layout.prop(scene, "voxtart_voxelizer_mode", text="Mode")
+        layout.prop(scene, "voxtart_voxelizer_shell_thickness", text="Shell Thickness")
+        voxelize = layout.operator(VOXTART_OT_voxelize_active.bl_idname, icon='MOD_REMESH')
+        voxelize.grid_size = scene.voxtart_grid_size
+        voxelize.mode = scene.voxtart_voxelizer_mode
+        voxelize.shell_thickness = scene.voxtart_voxelizer_shell_thickness
+        if (
+            context.active_object
+            and ASSET_PROPERTY in context.active_object
+            and VOXELIZER_SOURCE_PROPERTY in context.active_object
+        ):
+            layout.operator(VOXTART_OT_refresh_voxelizer.bl_idname, icon='FILE_REFRESH')
         layout.operator(VOXTART_OT_import_asset.bl_idname, text="Import VOXTART Asset")
+        layout.separator()
+        layout.label(text="Volume Tools", icon='MOD_DISPLACE')
+        layout.prop(scene, "voxtart_transform_operation", text="Operation")
+        operation = scene.voxtart_transform_operation
+        layout.prop(scene, "voxtart_transform_axis", text="Axis")
+        if operation == "ROTATE":
+            layout.prop(scene, "voxtart_transform_degrees", text="Degrees")
+        elif operation == "TRANSLATE":
+            layout.prop(scene, "voxtart_transform_offset", text="Offset")
+        elif operation == "CROP":
+            layout.prop(scene, "voxtart_transform_rebase", text="Rebase To Origin")
+        transform = layout.operator(VOXTART_OT_transform_asset.bl_idname, text="Apply Volume Tool")
+        transform.operation = operation
+        transform.axis = scene.voxtart_transform_axis
+        transform.degrees = scene.voxtart_transform_degrees
+        transform.offset = tuple(scene.voxtart_transform_offset)
+        transform.rebase = scene.voxtart_transform_rebase
+
         if not context.active_object or ASSET_PROPERTY not in context.active_object:
             return
 
@@ -1001,11 +1405,21 @@ class VOXTART_OT_import_asset(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         try:
-            asset = load_asset(self.filepath)
+            asset, layer_stack = load_asset_with_layers(self.filepath)
+            if bool(getattr(context.scene, "voxtart_palette_enforce", True)):
+                asset, layer_stack = _retarget_asset_palette(
+                    asset,
+                    scene_palette(context.scene),
+                    layer_stack,
+                )
+                asset.provenance["palette"] = str(getattr(context.scene, "voxtart_palette_name", "VOXTART Palette"))
+                source = str(getattr(context.scene, "voxtart_palette_source", ""))
+                if source:
+                    asset.provenance["palette_source"] = source
             filename = Path(self.filepath).name
             suffix = ".voxel.json"
             name = filename[:-len(suffix)] if filename.endswith(suffix) else Path(filename).stem
-            _create_asset_object(context, name or "VOXTART Asset", asset)
+            _create_asset_object(context, name or "VOXTART Asset", asset, layer_stack=layer_stack)
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
@@ -1025,7 +1439,8 @@ class VOXTART_OT_export_asset(bpy.types.Operator, ExportHelper):
 
     def execute(self, context):
         try:
-            save_asset(_load_asset(context.active_object), self.filepath)
+            obj = context.active_object
+            save_asset(_load_asset(obj), self.filepath, _load_layer_stack(obj))
         except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
             return {'CANCELLED'}
@@ -1041,7 +1456,7 @@ def _menu_add_voxel_cube(self, _context):
 _CLASSES = (
     VOXTART_OT_add_voxel_cube,
     VOXTART_OT_voxelize_active,
-    VOXTART_OT_pick_voxel,
+    VOXTART_OT_refresh_voxelizer,
     VOXTART_OT_edit_picked_voxel,
     VOXTART_OT_add_voxel,
     VOXTART_OT_remove_voxel,
@@ -1055,6 +1470,7 @@ _CLASSES = (
     VOXTART_OT_snap_active,
     VOXTART_OT_rebuild_asset,
     VOXTART_OT_decimate_asset,
+    VOXTART_OT_transform_asset,
     VOXTART_OT_import_asset,
     VOXTART_OT_export_asset,
     VOXTART_PT_voxel_panel,
@@ -1069,6 +1485,41 @@ def register():
     )
     bpy.types.Scene.voxtart_cube_size = IntProperty(
         name="Cube Size", description="Edge length in voxels", min=1, max=256, default=4
+    )
+    bpy.types.Scene.voxtart_voxelizer_mode = EnumProperty(
+        name="Voxelizer Mode", items=_VOXELIZER_MODE_ITEMS, default="SOLID"
+    )
+    bpy.types.Scene.voxtart_voxelizer_shell_thickness = IntProperty(
+        name="Voxelizer Shell Thickness",
+        min=1,
+        max=MAX_SHELL_THICKNESS,
+        default=1,
+    )
+    bpy.types.Scene.voxtart_transform_operation = EnumProperty(
+        name="Volume Operation",
+        items=_TRANSFORM_OPERATION_ITEMS,
+        default="MIRROR",
+    )
+    bpy.types.Scene.voxtart_transform_axis = EnumProperty(
+        name="Transform Axis",
+        items=_TRANSFORM_AXIS_ITEMS,
+        default="X",
+    )
+    bpy.types.Scene.voxtart_transform_degrees = EnumProperty(
+        name="Transform Degrees",
+        items=_TRANSFORM_DEGREE_ITEMS,
+        default="90",
+    )
+    bpy.types.Scene.voxtart_transform_offset = IntVectorProperty(
+        name="Transform Offset",
+        size=3,
+        default=(0, 0, 0),
+        min=-1024,
+        max=1024,
+    )
+    bpy.types.Scene.voxtart_transform_rebase = BoolProperty(
+        name="Rebase Cropped Volume",
+        default=True,
     )
     bpy.types.Scene.voxtart_edit_cell = IntVectorProperty(
         name="Edit Cell", size=3, default=(0, 0, 0), min=-1024, max=1024
@@ -1120,6 +1571,13 @@ def unregister():
     del bpy.types.Scene.voxtart_edit_palette_index
     del bpy.types.Scene.voxtart_palette_color
     del bpy.types.Scene.voxtart_edit_cell
+    del bpy.types.Scene.voxtart_transform_rebase
+    del bpy.types.Scene.voxtart_transform_offset
+    del bpy.types.Scene.voxtart_transform_degrees
+    del bpy.types.Scene.voxtart_transform_axis
+    del bpy.types.Scene.voxtart_transform_operation
+    del bpy.types.Scene.voxtart_voxelizer_shell_thickness
+    del bpy.types.Scene.voxtart_voxelizer_mode
     del bpy.types.Scene.voxtart_cube_size
     del bpy.types.Scene.voxtart_grid_size
     for cls in reversed(_CLASSES):
