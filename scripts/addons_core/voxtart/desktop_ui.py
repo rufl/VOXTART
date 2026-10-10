@@ -148,6 +148,10 @@ def set_native_chrome_visibility(visible: bool) -> None:
                 space.overlay.show_axis_y = visible
             except (AttributeError, RuntimeError, TypeError):
                 pass
+            try:
+                area.tag_redraw()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
 
 
 def _frame_object_in_viewports(obj) -> None:
@@ -174,6 +178,9 @@ def _frame_object_in_viewports(obj) -> None:
                     region=region,
                 ):
                     bpy.ops.view3d.view_selected(use_all_regions=False)
+                    region_3d = getattr(area.spaces.active, "region_3d", None)
+                    if region_3d is not None:
+                        region_3d.view_distance = max(1.0, float(region_3d.view_distance) * 1.2)
             except (AttributeError, RuntimeError, TypeError):
                 pass
 

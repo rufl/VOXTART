@@ -84,6 +84,7 @@ EDITOR_SELECTION_PROPERTY = COMPONENT_SELECTION_PROPERTY
 EDITOR_CLIPBOARD_PROPERTY = "voxtart_editor_clipboard"
 EDITOR_STROKE_PROPERTY = "voxtart_editor_stroke_recovery"
 FIRST_RUN_HINT_PROPERTY = "voxtart_first_run_hint"
+EDITOR_DETAILS_PROPERTY = "voxtart_editor_details"
 EDITOR_WORKSPACES = ("EDIT", "SCENE")
 EDITOR_WORKSPACE_ITEMS = (
     ("EDIT", "Edit", "Modify voxels with brushes and selections"),
@@ -276,6 +277,7 @@ def _editor_cursor(editor, event=None) -> str:
     if (
         getattr(editor, "toolbar_hover", None) is not None
         or getattr(editor, "topbar_hover", None) is not None
+        or getattr(editor, "palette_hover", None) is not None
     ):
         return "HAND"
     if getattr(event, "alt", False):
@@ -349,11 +351,13 @@ def _editor_topbar_action_bounds(region):
     width = float(getattr(region, "width", 0.0))
     top = float(getattr(region, "height", 0.0)) - 42.0
     more_x = max(8.0, width - 136.0)
-    save_x = max(8.0, more_x - 72.0)
+    details_x = max(8.0, more_x - 96.0)
+    save_x = max(8.0, details_x - 72.0)
     project_x = max(8.0, save_x - 104.0)
     return (
         ("PROJECT", (project_x, top, save_x - 8.0, top + 30.0)),
-        ("SAVE", (save_x, top, more_x - 8.0, top + 30.0)),
+        ("SAVE", (save_x, top, details_x - 8.0, top + 30.0)),
+        ("DETAILS", (details_x, top, more_x - 8.0, top + 30.0)),
         ("MORE_TOOLS", (more_x, top, max(more_x + 1.0, width - 12.0), top + 30.0)),
     )
 
@@ -367,6 +371,43 @@ def _editor_topbar_action_at(context, event):
     for action, bounds in _editor_topbar_action_bounds(region):
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
             return action
+    return None
+def _editor_palette_layout(editor, region):
+    palette = tuple(getattr(getattr(editor, "asset", None), "palette", ()) or ())
+    if not palette:
+        return (0.0, 0.0, 0.0, 0.0), ()
+    width = float(getattr(region, "width", 0.0))
+    swatch_size = 28.0
+    gap = 6.0
+    usable = max(120.0, width - 220.0)
+    columns = max(1, min(len(palette), int((usable - 24.0 + gap) // (swatch_size + gap))))
+    rows = (len(palette) + columns - 1) // columns
+    panel_width = max(
+        112.0,
+        24.0 + columns * swatch_size + max(0, columns - 1) * gap,
+    )
+    panel_width = min(max(112.0, width - 24.0), panel_width)
+    panel_height = 34.0 + rows * swatch_size + max(0, rows - 1) * gap
+    panel_x = max(8.0, width - panel_width - 16.0)
+    panel_y = 52.0
+    entries = []
+    for index in range(len(palette)):
+        row, column = divmod(index, columns)
+        x = panel_x + 12.0 + column * (swatch_size + gap)
+        y = panel_y + panel_height - 12.0 - swatch_size - row * (swatch_size + gap)
+        entries.append((index, (x, y, x + swatch_size, y + swatch_size)))
+    return (panel_x, panel_y, panel_x + panel_width, panel_y + panel_height), tuple(entries)
+
+
+def _editor_palette_index_at(editor, context, event):
+    region = getattr(context, "region", None)
+    if region is None:
+        return None
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    for index, bounds in _editor_palette_layout(editor, region)[1]:
+        if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
+            return index
     return None
 
 
@@ -404,9 +445,11 @@ def _draw_editor_topbar(editor, context) -> None:
         (0.58, 0.68, 0.78, 1.0),
     )
     visible = _native_chrome_visible(context.scene)
+    details = bool(context.scene.get(EDITOR_DETAILS_PROPERTY))
     labels = {
         "PROJECT": "Project",
         "SAVE": "Save",
+        "DETAILS": "Hide details" if details else "Details",
         "MORE_TOOLS": "Hide tools" if visible else "More tools",
     }
     try:
@@ -432,6 +475,44 @@ def _draw_editor_topbar(editor, context) -> None:
     finally:
         if gpu is not None:
             gpu.state.blend_set("NONE")
+def _draw_editor_palette(editor, context) -> None:
+    region = getattr(context, "region", None)
+    if region is None or gpu is None or batch_for_shader is None:
+        return
+    panel, entries = _editor_palette_layout(editor, region)
+    if not entries:
+        return
+    palette = tuple(getattr(editor.asset, "palette", ()) or ())
+    selected = int(getattr(context.scene, "voxtart_edit_palette_index", 0)) % len(palette)
+    x0, y0, x1, y1 = panel
+    try:
+        gpu.state.blend_set("ALPHA")
+        _draw_editor_rect(x0, y0, x1 - x0, y1 - y0, (0.035, 0.045, 0.06, 0.96))
+        _draw_editor_text("COLORS", x0 + 12.0, y1 - 18.0, 10.0, (0.62, 0.74, 0.86, 1.0))
+        _draw_editor_text(
+            f"Color {selected + 1}",
+            max(x0 + 58.0, x1 - 64.0),
+            y1 - 18.0,
+            10.0,
+            (0.92, 0.95, 1.0, 1.0),
+        )
+        for index, bounds in entries:
+            sx0, sy0, sx1, sy1 = bounds
+            active = index == selected
+            if active:
+                _draw_editor_rect(
+                    sx0 - 2.0,
+                    sy0 - 2.0,
+                    sx1 - sx0 + 4.0,
+                    sy1 - sy0 + 4.0,
+                    (0.98, 0.82, 0.35, 1.0),
+                )
+            color = tuple(float(value) for value in palette[index])
+            if len(color) < 4:
+                color = (*color[:3], 1.0)
+            _draw_editor_rect(sx0, sy0, sx1 - sx0, sy1 - sy0, color[:4])
+    finally:
+        gpu.state.blend_set("NONE")
 
 
 def _editor_toolbar_active(editor, item) -> bool:
@@ -734,6 +815,7 @@ def _draw_editor_overlay(editor, context) -> None:
         "SELECT": "Select blocks",
     }.get(mode, mode.title())
     _draw_editor_topbar(editor, context)
+    _draw_editor_palette(editor, context)
     _draw_editor_toolbar(editor, context)
     _draw_editor_text(
         mode_label if first_run else f"{mode_label}  ·  {shape.title()} brush",
@@ -744,31 +826,31 @@ def _draw_editor_overlay(editor, context) -> None:
     )
     if first_run:
         card_x = 84.0
-        card_y = max(88.0, float(region.height) - 148.0)
+        card_y = max(100.0, float(region.height) - 164.0)
         card_width = max(300.0, min(760.0, float(region.width) - card_x - 24.0))
-        _draw_editor_rect(card_x, card_y, card_width, 58.0, (0.045, 0.09, 0.14, 0.96))
+        _draw_editor_rect(card_x, card_y, card_width, 74.0, (0.045, 0.09, 0.14, 0.96))
         _draw_editor_text(
-            "TRY THESE",
+            "TRY THIS",
             card_x + 14.0,
-            card_y + 39.0,
+            card_y + 55.0,
             11.0,
             (0.98, 0.82, 0.35, 1.0),
         )
         _draw_editor_text(
-            "Left click a face: add a block  ·  Right click a block: erase it",
+            "Pick a color below, then click a face to add a block",
             card_x + 14.0,
-            card_y + 23.0,
+            card_y + 37.0,
             11.0,
             (0.9, 0.94, 1.0, 1.0),
         )
         _draw_editor_text(
-            "Move the mouse to orbit  ·  Ctrl+Z undoes your last change",
+            "Right click erases  ·  Move to orbit  ·  Ctrl+Z undoes",
             card_x + 14.0,
-            card_y + 8.0,
+            card_y + 20.0,
             10.0,
             (0.62, 0.74, 0.86, 1.0),
         )
-    else:
+    elif bool(scene.get(EDITOR_DETAILS_PROPERTY)):
         _draw_editor_text(
             "Left click Add  ·  Right click Erase  ·  Drag Paint  ·  Alt+click Pick color  ·  Middle mouse Orbit",
             18,
@@ -783,17 +865,25 @@ def _draw_editor_overlay(editor, context) -> None:
             11,
             (0.62, 0.72, 0.84, 1.0),
         )
+    if bool(scene.get(EDITOR_DETAILS_PROPERTY)):
+        _draw_editor_text(
+            f"Cell: {hit}  Normal: {normal}  Preview: {len(editor.preview_cells)}  Selection: {len(editor.selection)}",
+            18,
+            50,
+            11,
+            (0.65, 0.86, 0.72, 1.0),
+        )
+        _draw_editor_text(
+            f"Layer: {layer_name}{layer_lock}",
+            18,
+            34,
+            11,
+            (0.82, 0.76, 0.55, 1.0),
+        )
     _draw_editor_text(
-        f"Cell: {hit}  Normal: {normal}  Preview: {len(editor.preview_cells)}  Selection: {len(editor.selection)}",
+        editor.status,
         18,
         18,
-        11,
-        (0.65, 0.86, 0.72, 1.0),
-    )
-    _draw_editor_text(
-        f"Layer: {layer_name}{layer_lock}   {editor.status}",
-        18,
-        34,
         11,
         (0.82, 0.76, 0.55, 1.0),
     )
@@ -1601,6 +1691,23 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         _restore_overlay(self.obj, self.asset)
         self.status = f"Selected all {len(self.selection)} voxel(s)"
 
+    def _open_project_surface(self, context):
+        from . import desktop_shell
+
+        desktop_shell._set_mode(self.scene, "HOME")
+        self._finish(context, {"FINISHED"})
+        desktop_shell.open_shell()
+        return {"FINISHED"}
+
+    def _activate_palette(self, index: int) -> None:
+        palette = tuple(getattr(self.asset, "palette", ()) or ())
+        if not palette or not 0 <= index < len(palette):
+            return
+        self.scene.voxtart_edit_palette_index = index
+        if hasattr(self.scene, "voxtart_palette_index"):
+            self.scene.voxtart_palette_index = index
+        self.status = f"Color {index + 1} selected"
+
     def _activate_topbar_action(self, context, action: str) -> None:
         if action == "SAVE":
             try:
@@ -1617,6 +1724,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 else "Choose a project file"
             )
             return
+        if action == "DETAILS":
+            visible = not bool(self.scene.get(EDITOR_DETAILS_PROPERTY))
+            self.scene[EDITOR_DETAILS_PROPERTY] = visible
+            self.status = "Technical details shown" if visible else "Simple view"
+            _request_redraw(self, context, force=True)
+            return
         if action == "MORE_TOOLS":
             from . import desktop_ui
 
@@ -1625,15 +1738,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self.status = "Blender tools shown" if visible else "VOXTART tools only"
             return
         if action == "PROJECT":
-            from . import desktop_shell
-
-            desktop_shell._set_mode(self.scene, "HOME")
-            self._finish(context, {"FINISHED"})
-            desktop_shell.open_shell()
+            self._open_project_surface(context)
 
     def _finish(self, context, result=None):
         self.toolbar_hover = None
         self.topbar_hover = None
+        self.palette_hover = None
         if self.transform_active:
             self._cancel_transform(context)
         elif self.scene_transform_active:
@@ -1663,6 +1773,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         if event.type == "MOUSEMOVE":
             self.topbar_hover = _editor_topbar_action_at(context, event)
             if self.topbar_hover is not None:
+                self.palette_hover = None
+                self.toolbar_hover = None
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
+            self.palette_hover = _editor_palette_index_at(self, context, event)
+            if self.palette_hover is not None:
                 self.toolbar_hover = None
                 _set_editor_cursor(context, "HAND")
                 return {"RUNNING_MODAL"}
@@ -1672,9 +1788,18 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 if event.type == "LEFTMOUSE":
                     self._activate_topbar_action(context, topbar_action)
                 return {"RUNNING_MODAL"}
+            palette_index = _editor_palette_index_at(self, context, event)
+            if palette_index is not None:
+                if event.type == "LEFTMOUSE":
+                    self._activate_palette(palette_index)
+                    _request_redraw(self, context, force=True)
+                return {"RUNNING_MODAL"}
         if _scene_workspace(self.scene) == "SCENE" and not getattr(self, "transform_active", False):
             if event.type == "ESC":
-                return self._finish(context)
+                if self.scene_transform_active:
+                    self._cancel_scene_transform()
+                    return {"RUNNING_MODAL"}
+                return self._open_project_surface(context)
             return self._modal_scene(context, event)
         if getattr(self, "transform_active", False):
             if event.type == "ESC":
@@ -1708,9 +1833,14 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
             return {"RUNNING_MODAL"}
         if event.type == "ESC":
-            return self._finish(context)
+            if self.transaction is not None:
+                self._cancel_stroke(context)
+                self.status = "Stroke cancelled"
+                return {"RUNNING_MODAL"}
+            return self._open_project_surface(context)
         if event.type == "MOUSEMOVE":
             self.topbar_hover = None
+            self.palette_hover = None
             self.toolbar_hover = _editor_toolbar_item_at(self, context, event)
             _set_editor_cursor(context, _editor_cursor(self, event))
             if self.toolbar_hover is not None:
@@ -1896,6 +2026,9 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self.dragging = False
             self.toolbar_hover = None
             self.topbar_hover = None
+            self.palette_hover = None
+            if EDITOR_DETAILS_PROPERTY not in self.scene:
+                self.scene[EDITOR_DETAILS_PROPERTY] = False
             self.drag_mode = None
             self.last_hit = None
             self.status = recovery_status if (recovered or recovery_status) else "Ready"
@@ -2106,6 +2239,7 @@ def unregister() -> None:
 __all__ = [
     "BEGINNER_TOOLBAR_ITEMS",
     "EDITOR_CLIPBOARD_PROPERTY",
+    "EDITOR_DETAILS_PROPERTY",
     "EDITOR_MODE_ITEMS",
     "EDITOR_MODE_PROPERTY",
     "EDITOR_MODES",
