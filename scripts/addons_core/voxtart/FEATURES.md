@@ -69,9 +69,12 @@ The next P1 build path stays inside the project surface: select a source mesh,
 use **Voxelize selected** to create a linked sparse asset, then use **Optimize
 active** before opening it in the editor. The generated asset keeps the source
 relationship and the optimizer report while the source mesh remains available.
-Import, voxelization, optimization, character, and palette-library workflows
-remain available after this loop is stable, but they are not prerequisites for
-the first successful project.
+The portable `.voxel.json` path is also closed for P1: exporting the active
+authoritative asset and importing it as a new asset preserves its sparse voxels
+and palette data.
+Broader format exchange, character, and palette-library workflows remain
+available after this loop is stable, but they are not prerequisites for the
+first successful project.
 Rounded controls expose direct paths for creating, importing, voxelizing,
 painting, optimizing, and character work after the first-run path;
 hovering a control shows its label and available shortcut.

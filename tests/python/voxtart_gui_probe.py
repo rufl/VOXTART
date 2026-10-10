@@ -37,6 +37,12 @@ GUI_SAVE_PATH = Path(
         str(SCREENSHOT.with_suffix(".blend")),
     )
 )
+GUI_ASSET_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_ASSET_PATH",
+        str(SCREENSHOT.with_suffix(".voxel.json")),
+    )
+)
 STATE = {"attempts": 0}
 
 class _ShellHarness:
@@ -310,6 +316,7 @@ def _finish_mouse_clicks():
                 "shell_editor": STATE.get("shell_editor", False),
                 "shell_voxelize": STATE.get("shell_voxelize", False),
                 "shell_optimize": STATE.get("shell_optimize", False),
+                "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -569,6 +576,26 @@ def _probe():
                 if not voxelized_asset.get(optimizer_ui.OPTIMIZER_REPORT_PROPERTY):
                     return _fail("Optimize active did not write an optimization report")
                 STATE["shell_optimize"] = True
+                portable_source = operators._load_asset(voxelized_asset)
+                GUI_ASSET_PATH.parent.mkdir(parents=True, exist_ok=True)
+                export_result = bpy.ops.voxtart.export_asset(filepath=str(GUI_ASSET_PATH))
+                if "FINISHED" not in export_result or not GUI_ASSET_PATH.is_file():
+                    return _fail(
+                        f"Portable asset export did not write its file: {export_result!r}"
+                    )
+                import_result = bpy.ops.voxtart.import_asset(filepath=str(GUI_ASSET_PATH))
+                if "FINISHED" not in import_result:
+                    return _fail(f"Portable asset import did not finish: {import_result!r}")
+                imported_asset_object = bpy.context.active_object
+                if imported_asset_object is None or operators.ASSET_PROPERTY not in imported_asset_object:
+                    return _fail("Portable asset import did not activate a VOXTART asset")
+                imported_asset = operators._load_asset(imported_asset_object)
+                if (
+                    imported_asset.voxels != portable_source.voxels
+                    or imported_asset.palette != portable_source.palette
+                ):
+                    return _fail("Portable asset round-trip changed authoritative voxel data")
+                STATE["portable_roundtrip"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "build:editor" for key, _bounds in shell_state.targets):
