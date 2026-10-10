@@ -231,6 +231,11 @@ def _draw_icon(name: str, x: float, y: float, size: float, color=_TEXT) -> None:
         _draw_line(((x - size * 0.3, y - size * 0.35), (x - size * 0.05, y - size * 0.05), (x + size * 0.32, y + size * 0.34)), color, 1.8)
         _draw_line(((x + size * 0.1, y + size * 0.34), (x + size * 0.32, y + size * 0.34), (x + size * 0.32, y + size * 0.12)), color, 1.4)
         return
+    if name == "refresh":
+        _draw_circle(x, y, size * 0.29, color, 14)
+        _draw_line(((x - size * 0.08, y - size * 0.32), (x + size * 0.28, y - size * 0.32), (x + size * 0.28, y - size * 0.08)), _BG, 2.0)
+        _draw_line(((x + size * 0.08, y + size * 0.32), (x - size * 0.28, y + size * 0.32), (x - size * 0.28, y + size * 0.08)), _BG, 2.0)
+        return
     if name == "character":
         _draw_circle(x, y + size * 0.2, size * 0.19, color, 12)
         _draw_line(((x - size * 0.34, y - size * 0.4), (x, y - size * 0.05), (x + size * 0.34, y - size * 0.4)), color, 1.8)
@@ -262,6 +267,7 @@ _ICON_FOR_KEY = {
     "home:make": "cube",
     "home:open": "folder",
     "build:voxelize": "cube",
+    "build:refresh": "refresh",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
     "build:toolbox": "toolbox",
@@ -687,7 +693,7 @@ def _draw_mode(state, context, width: float, height: float) -> None:
     card_x = center_left + 42
     card_y = _BOTTOMBAR_HEIGHT + 52
     card_width = min(560.0, center_width - 84.0)
-    card_height = 250.0
+    card_height = 296.0 if mode == "BUILD" else 250.0
     _draw_round_rect(card_x, card_y, card_width, card_height, _BG, 12.0)
     _draw_line(_rounded_points(card_x, card_y, card_width, card_height, 12.0), _BORDER)
     active = _active_asset(context)
@@ -705,13 +711,16 @@ def _draw_mode(state, context, width: float, height: float) -> None:
     button_width = (card_width - 48 - button_gap) / 2.0
     left = card_x + 24
     right = left + button_width + button_gap
-    row_one = card_y + 76
-    row_two = card_y + 30
+    row_one = card_y + (122 if mode == "BUILD" else 76)
+    row_two = card_y + (76 if mode == "BUILD" else 30)
+    row_three = card_y + 30
     if mode == "BUILD":
         _draw_button(state, "home:make", "Add block toy", left, row_one, button_width, 34, accent=True)
         _draw_button(state, "build:voxelize", "Voxelize selected", right, row_one, button_width, 34)
-        _draw_button(state, "build:editor", "Open voxel editor", left, row_two, button_width, 34)
+        _draw_button(state, "build:refresh", "Refresh linked", left, row_two, button_width, 34)
         _draw_button(state, "build:optimize", "Optimize active", right, row_two, button_width, 34)
+        _draw_button(state, "build:editor", "Open voxel editor", left, row_three, button_width, 34)
+        _draw_button(state, "build:toolbox", "Open full toolbox", right, row_three, button_width, 34)
     elif mode == "PAINT":
         _draw_button(state, "paint:pick", "Pick voxel", left, row_one, button_width, 34, accent=True)
         _draw_button(state, "paint:paint", "Paint picked", right, row_one, button_width, 34)
@@ -868,6 +877,13 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                     shell_thickness=int(scene.voxtart_voxelizer_shell_thickness),
                 ),
                 "Selected mesh voxelized",
+            )
+            return
+        if key == "build:refresh":
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.refresh_voxelizer(),
+                "Linked asset refreshed",
             )
             return
         if key == "build:editor":

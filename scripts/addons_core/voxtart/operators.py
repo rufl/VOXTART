@@ -60,6 +60,7 @@ MAX_VOXELIZE_CELLS = 2_000_000
 VOXELIZER_SOURCE_PROPERTY = "voxtart_voxelizer_source"
 VOXELIZER_MODE_PROPERTY = "voxtart_voxelizer_mode"
 VOXELIZER_THICKNESS_PROPERTY = "voxtart_voxelizer_shell_thickness"
+VOXELIZER_REPORT_PROPERTY = "voxtart_voxelizer_report"
 _VOXELIZER_MODE_ITEMS = (
     ("SOLID", "Solid", "Keep every occupied sample from the mesh"),
     ("SURFACE", "Surface", "Keep only the outer one-voxel surface"),
@@ -577,7 +578,7 @@ class VOXTART_OT_refresh_voxelizer(bpy.types.Operator):
         )
         target.matrix_world = source.matrix_world.copy()
         target["voxtart_voxelizer_source"] = source.name
-        target["voxtart_voxelizer_report"] = json.dumps({
+        target[VOXELIZER_REPORT_PROPERTY] = json.dumps({
             "source": source.name,
             "mode": asset.provenance.get("voxelizer_mode", "SOLID"),
             "voxels": len(asset.voxels),

@@ -315,6 +315,7 @@ def _finish_mouse_clicks():
                 "shell_make": STATE.get("shell_make", False),
                 "shell_editor": STATE.get("shell_editor", False),
                 "shell_voxelize": STATE.get("shell_voxelize", False),
+                "shell_refresh": STATE.get("shell_refresh", False),
                 "shell_optimize": STATE.get("shell_optimize", False),
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "save_control": STATE.get("save_control", False),
@@ -571,6 +572,19 @@ def _probe():
                     or not operators._load_asset(voxelized_asset).voxels
                 ):
                     return _fail("Voxelize selected did not preserve its source relationship")
+                before_refresh_voxels = len(operators._load_asset(voxelized_asset).voxels)
+                for vertex in source_mesh.data.vertices:
+                    vertex.co *= 2.0
+                source_mesh.data.update()
+                shell_operator._activate(bpy.context, "build:refresh")
+                refreshed_asset = operators._load_asset(voxelized_asset)
+                if (
+                    len(refreshed_asset.voxels) <= before_refresh_voxels
+                    or voxelized_asset.get(operators.VOXELIZER_SOURCE_PROPERTY) != source_mesh.name
+                    or not voxelized_asset.get(operators.VOXELIZER_REPORT_PROPERTY)
+                ):
+                    return _fail("Refresh linked did not rebuild the asset from its source mesh")
+                STATE["shell_refresh"] = True
                 STATE["shell_voxelize"] = True
                 shell_operator._activate(bpy.context, "build:optimize")
                 if not voxelized_asset.get(optimizer_ui.OPTIMIZER_REPORT_PROPERTY):
@@ -598,6 +612,8 @@ def _probe():
                 STATE["portable_roundtrip"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "build:refresh" for key, _bounds in shell_state.targets):
+                    return _fail("Build surface did not expose Refresh linked")
                 if not any(key == "build:editor" for key, _bounds in shell_state.targets):
                     return _fail("Build surface did not expose Open voxel editor")
                 shell_operator._activate(bpy.context, "build:editor")
