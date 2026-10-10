@@ -35,6 +35,7 @@ Each new unsaved project opens with an editable light-yellow stepped pyramid:
 6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
 framed with breathing room in the viewport so the user can immediately place,
 erase, paint, or select voxels with the VOXTART editor.
+The starter asset also seeds a compact eight-color palette with the light-yellow swatch selected, so the visible strip is useful before any palette setup.
 The first editor session shows a small **Try this** card with plain-language
 mouse instructions, a visible **Colors** strip, and only the beginner actions:
 **Add block**, **Erase block**, **Color block**, and **Select blocks**. The card

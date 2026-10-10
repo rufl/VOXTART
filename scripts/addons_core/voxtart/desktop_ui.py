@@ -25,6 +25,16 @@ DEFAULT_PYRAMID_OBJECT_NAME = "VOXTART Starter Pyramid"
 DEFAULT_PYRAMID_PROPERTY = "voxtart_default_pyramid"
 DEFAULT_PYRAMID_LAYER_SIZES = (6, 4, 2)
 DEFAULT_PYRAMID_COLOR = (1.0, 0.9, 0.45, 1.0)
+DEFAULT_STARTER_PALETTE = (
+    DEFAULT_PYRAMID_COLOR,
+    (0.98, 0.42, 0.18, 1.0),
+    (0.24, 0.58, 0.96, 1.0),
+    (0.56, 0.34, 0.86, 1.0),
+    (0.18, 0.72, 0.44, 1.0),
+    (0.94, 0.24, 0.28, 1.0),
+    (0.78, 0.48, 0.22, 1.0),
+    (0.94, 0.94, 0.94, 1.0),
+)
 
 def _clear_factory_scene() -> bool:
     """Remove Blender's starter cube, camera, and light for a clean editor."""
@@ -42,7 +52,7 @@ def _clear_factory_scene() -> bool:
 def _default_pyramid_asset() -> VoxelAsset:
     asset = VoxelAsset(
         grid_size=1.0,
-        palette=[DEFAULT_PYRAMID_COLOR],
+        palette=list(DEFAULT_STARTER_PALETTE),
         provenance={
             "asset_type": "starter_pyramid",
             "base_size": "6",
@@ -432,6 +442,7 @@ def unregister() -> None:
 
 __all__ = [
     "DEFAULT_PYRAMID_COLOR",
+    "DEFAULT_STARTER_PALETTE",
     "DEFAULT_PYRAMID_LAYER_SIZES",
     "DEFAULT_PYRAMID_OBJECT_NAME",
     "DEFAULT_PYRAMID_PROPERTY",
