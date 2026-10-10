@@ -22,7 +22,14 @@ import gpu
 from gpu_extras.batch import batch_for_shader
 from .operators import ASSET_PROPERTY
 from .palette import DEFAULT_PALETTE
-from .voxel_editor import EDITOR_MODE_PROPERTY, EDITOR_SHAPE_PROPERTY, EDITOR_TOOLBAR_ITEMS
+from .voxel_editor import (
+    EDITOR_MODE_PROPERTY,
+    EDITOR_SHAPE_PROPERTY,
+    FIRST_RUN_HINT_PROPERTY,
+    EDITOR_TOOLBAR_ITEMS,
+    BEGINNER_TOOLBAR_ITEMS,
+    visible_editor_toolbar_items,
+)
 
 SHELL_MODE_PROPERTY = "voxtart_shell_mode"
 SHELL_OPEN_PROPERTY = "voxtart_shell_open"
@@ -34,6 +41,7 @@ _BOTTOMBAR_HEIGHT = 32
 _LEFT_WIDTH = 224
 _RIGHT_WIDTH = 272
 _SHELL_TOOLBAR_WIDTH = 64
+_SHELL_BEGINNER_TOOLBAR_WIDTH = 148
 
 _SHELL_TOOL_LABELS = {
     ("MODE", "ADD"): "Place",
@@ -409,6 +417,7 @@ def _draw_compact_tool_button(
     height: float,
     *,
     active=False,
+    label_first=False,
 ) -> None:
     hovered = getattr(state, "hovered", None) == key
     color = _PANEL_LIGHT if active or hovered else _PANEL
@@ -417,7 +426,11 @@ def _draw_compact_tool_button(
         _rounded_points(x, y, width, height, min(7.0, height / 2.0)),
         _ACCENT if active or hovered else _BORDER,
     )
-    _draw_centered(glyph, x, y + (height - 16.0) / 2.0, width, 16.0, _TEXT)
+    if label_first:
+        _draw_text(label, x + 10.0, y + (height - 13.0) / 2.0, 12.0, _TEXT)
+        _draw_text(shortcut, x + width - 18.0, y + (height - 11.0) / 2.0, 10.0, _MUTED)
+    else:
+        _draw_centered(glyph, x, y + (height - 16.0) / 2.0, width, 16.0, _TEXT)
     _register_tooltip(state, key, label, shortcut)
     state.targets.append((key, (x, y, x + width, y + height)))
 
@@ -432,21 +445,23 @@ def _shell_toolbar_active(scene, item) -> bool:
         and str(getattr(scene, EDITOR_SHAPE_PROPERTY, "VOXEL")) == value
     )
 
-
 def _draw_shell_toolbar(state, context, height: float) -> None:
+    items = visible_editor_toolbar_items(context.scene)
+    beginner = items is BEGINNER_TOOLBAR_ITEMS
+    toolbar_width = _SHELL_BEGINNER_TOOLBAR_WIDTH if beginner else _SHELL_TOOLBAR_WIDTH
     panel_x = _LEFT_WIDTH + 12.0
     panel_y = _BOTTOMBAR_HEIGHT + 12.0
     panel_top = height - _TOPBAR_HEIGHT - 12.0
     panel_height = max(80.0, panel_top - panel_y)
-    _draw_round_rect(panel_x, panel_y, _SHELL_TOOLBAR_WIDTH, panel_height, _PANEL, 10.0)
+    _draw_round_rect(panel_x, panel_y, toolbar_width, panel_height, _PANEL, 10.0)
     _draw_line(
-        _rounded_points(panel_x, panel_y, _SHELL_TOOLBAR_WIDTH, panel_height, 10.0),
+        _rounded_points(panel_x, panel_y, toolbar_width, panel_height, 10.0),
         _BORDER,
     )
     _draw_text("TOOLS", panel_x + 12.0, panel_top - 25.0, 11, _MUTED)
 
-    item_count = sum(item is not None for item in EDITOR_TOOLBAR_ITEMS)
-    separator_count = sum(item is None for item in EDITOR_TOOLBAR_ITEMS)
+    item_count = sum(item is not None for item in items)
+    separator_count = sum(item is None for item in items)
     button_gap = 4.0
     separator_gap = 9.0
     content_top = panel_top - 42.0
@@ -459,15 +474,15 @@ def _draw_shell_toolbar(state, context, height: float) -> None:
         - separator_count * separator_gap,
     )
     button_height = min(36.0, max(22.0, available / max(1, item_count)))
-    button_width = _SHELL_TOOLBAR_WIDTH - 16.0
+    button_width = toolbar_width - 16.0
     cursor = content_top
-    for item in EDITOR_TOOLBAR_ITEMS:
+    for item in items:
         if item is None:
             cursor -= separator_gap
             continue
         key = f"tool:{item[0]}:{item[1]}"
         y = cursor - button_height
-        label = _SHELL_TOOL_LABELS.get(item[:2], item[3])
+        label = item[3] if beginner else _SHELL_TOOL_LABELS.get(item[:2], item[3])
         _draw_compact_tool_button(
             state,
             key,
@@ -479,6 +494,7 @@ def _draw_shell_toolbar(state, context, height: float) -> None:
             button_width,
             button_height,
             active=_shell_toolbar_active(context.scene, item),
+            label_first=beginner,
         )
         cursor = y - button_gap
 
@@ -518,19 +534,25 @@ def _draw_left_panel(state, context, width: float, height: float) -> None:
 
     _draw_text("MY THINGS", x, panel_top - 94, 11, _MUTED)
     mode = _active_mode(context.scene)
+    first_run = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY))
     rows = (
-        ("project:blocks", "Blocks", "BUILD"),
-        ("project:characters", "Characters", "CHARACTER"),
-        ("project:layers", "Layers", "PAINT"),
+        (("project:blocks", "Blocks", "BUILD"),)
+        if first_run
+        else (
+            ("project:blocks", "Blocks", "BUILD"),
+            ("project:characters", "Characters", "CHARACTER"),
+            ("project:layers", "Layers", "PAINT"),
+        )
     )
     for index, (key, label, row_mode) in enumerate(rows):
         y = panel_top - 126 - index * 30
         _draw_button(state, key, label, x, y, _LEFT_WIDTH - 32, 24, active=mode == row_mode)
 
-    quick_y = panel_top - 240
-    _draw_text("QUICK ACTIONS", x, quick_y, 11, _MUTED)
-    _draw_button(state, "home:make", "New block toy", x, quick_y - 36, _LEFT_WIDTH - 32, 28, accent=True)
-    _draw_button(state, "home:open", "Open a model", x, quick_y - 70, _LEFT_WIDTH - 32, 28)
+    quick_y = panel_top - (180 if first_run else 240)
+    _draw_text("FIRST STEPS" if first_run else "QUICK ACTIONS", x, quick_y, 11, _MUTED)
+    _draw_button(state, "home:make", "Add block toy", x, quick_y - 36, _LEFT_WIDTH - 32, 28, accent=True)
+    if not first_run:
+        _draw_button(state, "home:open", "Open a model", x, quick_y - 70, _LEFT_WIDTH - 32, 28)
     _draw_text("All edits support undo.", x, _BOTTOMBAR_HEIGHT + 18, 10, _MUTED)
 
 
@@ -643,7 +665,12 @@ def _draw_home(state, width: float, height: float) -> None:
 
 
 def _draw_mode(state, context, width: float, height: float) -> None:
-    center_left = _LEFT_WIDTH + _SHELL_TOOLBAR_WIDTH + 24
+    toolbar_width = (
+        _SHELL_BEGINNER_TOOLBAR_WIDTH
+        if visible_editor_toolbar_items(context.scene) is BEGINNER_TOOLBAR_ITEMS
+        else _SHELL_TOOLBAR_WIDTH
+    )
+    center_left = _LEFT_WIDTH + toolbar_width + 24
     center_right = width - _RIGHT_WIDTH
     center_width = center_right - center_left
     mode = _active_mode(context.scene)
@@ -947,7 +974,10 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
         )
         context.scene[SHELL_OPEN_PROPERTY] = True
         if SHELL_MODE_PROPERTY not in context.scene:
-            context.scene[SHELL_MODE_PROPERTY] = "HOME"
+            has_starter = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY)) or any(
+                bool(obj.get("voxtart_default_pyramid")) for obj in bpy.data.objects
+            )
+            context.scene[SHELL_MODE_PROPERTY] = "BUILD" if has_starter else "HOME"
         if SHELL_STATUS_PROPERTY not in context.scene:
             context.scene[SHELL_STATUS_PROPERTY] = "Ready"
         context.window_manager.modal_handler_add(self)

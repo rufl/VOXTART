@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-"""VoxStart splash surface shown before the VOXTART project shell."""
+"""VoxStart splash surface shown before the VOXTART project editor."""
 
 from __future__ import annotations
 
@@ -84,13 +84,14 @@ def _finish() -> None:
     _ACTIVE_AREA = None
     if area is not None:
         area.tag_redraw()
-    from . import desktop_shell
+    from . import desktop_shell, desktop_ui
 
-    desktop_shell.open_shell()
+    if not desktop_ui.open_default_editor():
+        desktop_shell.open_shell()
 
 
 def show() -> bool:
-    """Show the splash briefly, then open the VOXTART project shell."""
+    """Show the splash briefly, then open the VOXTART project editor."""
     global _ACTIVE_AREA, _DRAW_HANDLE
     if bpy.app.background:
         return False

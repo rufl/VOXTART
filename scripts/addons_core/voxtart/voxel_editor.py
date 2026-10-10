@@ -83,6 +83,7 @@ EDITOR_WORKSPACE_PROPERTY = "voxtart_editor_workspace"
 EDITOR_SELECTION_PROPERTY = COMPONENT_SELECTION_PROPERTY
 EDITOR_CLIPBOARD_PROPERTY = "voxtart_editor_clipboard"
 EDITOR_STROKE_PROPERTY = "voxtart_editor_stroke_recovery"
+FIRST_RUN_HINT_PROPERTY = "voxtart_first_run_hint"
 EDITOR_WORKSPACES = ("EDIT", "SCENE")
 EDITOR_WORKSPACE_ITEMS = (
     ("EDIT", "Edit", "Modify voxels with brushes and selections"),
@@ -112,6 +113,20 @@ EDITOR_TOOLBAR_ITEMS = (
     ("SELECT", "COMPONENT", "N", "Component select", "N"),
     ("SELECT", "SURFACE", "R", "Surface select", "R"),
 )
+
+
+BEGINNER_TOOLBAR_ITEMS = (
+    ("MODE", "ADD", "+", "Add block", "B"),
+    ("MODE", "ERASE", "X", "Erase block", "E"),
+    ("MODE", "PAINT", "P", "Color block", "P"),
+    ("MODE", "SELECT", "S", "Select blocks", "S"),
+)
+
+
+def visible_editor_toolbar_items(scene=None):
+    if scene is not None and bool(scene.get(FIRST_RUN_HINT_PROPERTY)):
+        return BEGINNER_TOOLBAR_ITEMS
+    return EDITOR_TOOLBAR_ITEMS
 EDITOR_TOOLBAR_BUTTON_MAX = 32.0
 EDITOR_TOOLBAR_BUTTON_MIN = 20.0
 
@@ -281,32 +296,35 @@ def _set_editor_cursor(context, cursor: str) -> None:
         return
 
 
-def _editor_toolbar_layout(height: float):
-    item_count = sum(item is not None for item in EDITOR_TOOLBAR_ITEMS)
-    separator_count = sum(item is None for item in EDITOR_TOOLBAR_ITEMS)
+def _editor_toolbar_layout(height: float, scene=None):
+    items = visible_editor_toolbar_items(scene)
+    item_count = sum(item is not None for item in items)
+    separator_count = sum(item is None for item in items)
     available = max(0.0, float(height) - 120.0)
-    button = min(
+    button_height = min(
         EDITOR_TOOLBAR_BUTTON_MAX,
         max(
             EDITOR_TOOLBAR_BUTTON_MIN,
             (available - (item_count - 1) * 5.0 - separator_count * 9.0) / item_count,
         ),
     )
-    gap = max(3.0, min(6.0, button * 0.12))
-    separator = max(6.0, button * 0.2)
+    beginner = items is BEGINNER_TOOLBAR_ITEMS
+    button_width = 126.0 if beginner else button_height
+    gap = max(3.0, min(6.0, button_height * 0.12))
+    separator = max(6.0, button_height * 0.2)
     x = 8.0
     top = float(height) - 132.0
     cursor = top
     entries = []
-    for item in EDITOR_TOOLBAR_ITEMS:
+    for item in items:
         if item is None:
             cursor -= separator
             continue
-        y = cursor - button
-        entries.append((item, (x + 8.0, y, x + 8.0 + button, y + button)))
+        y = cursor - button_height
+        entries.append((item, (x + 8.0, y, x + 8.0 + button_width, y + button_height)))
         cursor = y - gap
     bottom = cursor + gap
-    panel = (x, bottom - 8.0, button + 16.0, top - bottom + 16.0)
+    panel = (x, bottom - 8.0, button_width + 16.0, top - bottom + 16.0)
     return panel, tuple(entries)
 
 
@@ -318,7 +336,7 @@ def _editor_toolbar_item_at(editor, context, event):
         return None
     x = float(getattr(event, "mouse_region_x", -1.0))
     y = float(getattr(event, "mouse_region_y", -1.0))
-    for item, bounds in _editor_toolbar_layout(region.height)[1]:
+    for item, bounds in _editor_toolbar_layout(region.height, editor.scene)[1]:
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
             return item
     return None
@@ -360,7 +378,7 @@ def _draw_editor_toolbar(editor, context) -> None:
     region = getattr(context, "region", None)
     if region is None:
         return
-    panel, entries = _editor_toolbar_layout(region.height)
+    panel, entries = _editor_toolbar_layout(region.height, context.scene)
     try:
         gpu.state.blend_set("ALPHA")
         _draw_editor_rect(*panel, (0.035, 0.045, 0.06, 0.96))
@@ -379,22 +397,39 @@ def _draw_editor_toolbar(editor, context) -> None:
             else:
                 color = (0.09, 0.11, 0.15, 0.96)
             _draw_editor_rect(x0, y0, width, height, color)
-            glyph_size = max(12.0, min(19.0, height * 0.42))
-            glyph_offset = (len(item[2]) * glyph_size * 0.25)
-            _draw_editor_text(
-                item[2],
-                x0 + width * 0.5 - glyph_offset,
-                y0 + height * 0.48,
-                glyph_size,
-                (0.96, 0.97, 1.0, 1.0),
-            )
-            _draw_editor_text(
-                item[4],
-                x1 - max(10.0, height * 0.24),
-                y0 + 5.0,
-                max(8.0, min(10.0, height * 0.23)),
-                (0.67, 0.74, 0.84, 1.0),
-            )
+            beginner = visible_editor_toolbar_items(context.scene) is BEGINNER_TOOLBAR_ITEMS
+            if beginner:
+                _draw_editor_text(
+                    item[3],
+                    x0 + 10.0,
+                    y0 + height * 0.5,
+                    max(10.0, min(13.0, height * 0.42)),
+                    (0.96, 0.97, 1.0, 1.0),
+                )
+                _draw_editor_text(
+                    item[4],
+                    x1 - max(10.0, height * 0.24),
+                    y0 + 5.0,
+                    max(8.0, min(10.0, height * 0.23)),
+                    (0.67, 0.74, 0.84, 1.0),
+                )
+            else:
+                glyph_size = max(12.0, min(19.0, height * 0.42))
+                glyph_offset = (len(item[2]) * glyph_size * 0.25)
+                _draw_editor_text(
+                    item[2],
+                    x0 + width * 0.5 - glyph_offset,
+                    y0 + height * 0.48,
+                    glyph_size,
+                    (0.96, 0.97, 1.0, 1.0),
+                )
+                _draw_editor_text(
+                    item[4],
+                    x1 - max(10.0, height * 0.24),
+                    y0 + 5.0,
+                    max(8.0, min(10.0, height * 0.23)),
+                    (0.67, 0.74, 0.84, 1.0),
+                )
         hovered_item = getattr(editor, "toolbar_hover", None)
         if hovered_item is not None:
             hovered_bounds = next(
@@ -592,7 +627,7 @@ def _draw_editor_overlay(editor, context) -> None:
     mode = _editor_input_mode(editor)
     workspace = _scene_workspace(scene)
     shape = _scene_shape(scene)
-    mirrors = "".join(axis for axis, enabled in zip(AXES, editor.mirrors) if enabled) or "-"
+    first_run = bool(scene.get(FIRST_RUN_HINT_PROPERTY))
     hit = editor.last_hit.cell if editor.last_hit is not None else "--"
     normal = (
         editor.last_hit.normal
@@ -602,28 +637,56 @@ def _draw_editor_overlay(editor, context) -> None:
     active_layer = getattr(editor.stack, "active", None)
     layer_name = active_layer.name if active_layer is not None else "--"
     layer_lock = " locked" if active_layer is not None and active_layer.locked else ""
+    asset_name = getattr(getattr(editor, "obj", None), "name", "Voxel asset")
     _draw_editor_toolbar(editor, context)
     _draw_editor_text(
-        f"VOXTART EDITOR   {workspace.title()} / {mode.title()}  |  {shape.title()}  |  Radius {scene.voxtart_editor_radius}  |  Mirror {mirrors}",
+        f"{asset_name}  ·  {len(editor.asset.voxels)} blocks  |  {workspace.title()} / {mode.title()} / {shape.title()}",
         18,
         region.height - 64,
         14,
         (0.92, 0.95, 1.0, 1.0),
     )
-    _draw_editor_text(
-        "LMB Place  RMB Erase  Drag to paint  Alt+click pick color  MMB orbit",
-        18,
-        region.height - 84,
-        11,
-        (0.62, 0.72, 0.84, 1.0),
-    )
-    _draw_editor_text(
-        "Tab workspace  B/T/E/P/S modes  V/L/O/C/F brushes  J/K/M/N/R selectors",
-        18,
-        region.height - 102,
-        11,
-        (0.62, 0.72, 0.84, 1.0),
-    )
+    if first_run:
+        card_x = 84.0
+        card_y = max(88.0, float(region.height) - 148.0)
+        card_width = max(300.0, min(760.0, float(region.width) - card_x - 24.0))
+        _draw_editor_rect(card_x, card_y, card_width, 58.0, (0.045, 0.09, 0.14, 0.96))
+        _draw_editor_text(
+            "TRY THESE",
+            card_x + 14.0,
+            card_y + 39.0,
+            11.0,
+            (0.98, 0.82, 0.35, 1.0),
+        )
+        _draw_editor_text(
+            "Left click a face: add a block  ·  Right click a block: erase it",
+            card_x + 14.0,
+            card_y + 23.0,
+            11.0,
+            (0.9, 0.94, 1.0, 1.0),
+        )
+        _draw_editor_text(
+            "Move the mouse to orbit  ·  Ctrl+Z undoes your last change",
+            card_x + 14.0,
+            card_y + 8.0,
+            10.0,
+            (0.62, 0.74, 0.86, 1.0),
+        )
+    else:
+        _draw_editor_text(
+            "Left click Add  ·  Right click Erase  ·  Drag Paint  ·  Alt+click Pick color  ·  Middle mouse Orbit",
+            18,
+            region.height - 84,
+            11,
+            (0.62, 0.72, 0.84, 1.0),
+        )
+        _draw_editor_text(
+            "Workspace Tab  ·  Add B  ·  Attach T  ·  Erase E  ·  Color P  ·  Select S  ·  Brushes V/L/O/C/F",
+            18,
+            region.height - 102,
+            11,
+            (0.62, 0.72, 0.84, 1.0),
+        )
     _draw_editor_text(
         f"Cell: {hit}  Normal: {normal}  Preview: {len(editor.preview_cells)}  Selection: {len(editor.selection)}",
         18,
@@ -856,9 +919,18 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self.preview_cells = ()
         if report.changed:
             self._record_history()
-            self.status = f"{report.operation.replace('_', ' ').title()} · {report.added + report.removed + report.painted} changed"
+            self.scene[FIRST_RUN_HINT_PROPERTY] = False
+            changed = report.added + report.removed + report.painted
+            unit = "block" if changed == 1 else "blocks"
+            verb = {
+                "editor_add": "Added",
+                "editor_attach": "Added",
+                "editor_erase": "Erased",
+                "editor_paint": "Colored",
+            }.get(report.operation, "Updated")
+            self.status = f"{verb} {changed} {unit} · Ctrl+Z to undo"
         else:
-            self.status = "No voxel changed"
+            self.status = "No block changed"
 
     def _grid_hit(self, context, event) -> RayHit | None:
         if context.region is None or context.region_data is None:
@@ -1892,6 +1964,7 @@ def unregister() -> None:
 
 
 __all__ = [
+    "BEGINNER_TOOLBAR_ITEMS",
     "EDITOR_CLIPBOARD_PROPERTY",
     "EDITOR_MODE_ITEMS",
     "EDITOR_MODE_PROPERTY",
@@ -1902,8 +1975,10 @@ __all__ = [
     "EDITOR_WORKSPACE_ITEMS",
     "EDITOR_WORKSPACES",
     "EDITOR_WORKSPACE_PROPERTY",
+    "FIRST_RUN_HINT_PROPERTY",
     "VOXTART_OT_voxel_editor",
     "VOXTART_PT_voxel_editor",
     "register",
     "unregister",
+    "visible_editor_toolbar_items",
 ]
