@@ -242,6 +242,28 @@ voxel cell and exactly that many scene units. Atlas UV rectangles and reported
 world extents are derived from source pixel dimensions, so changing scale
 cannot silently stretch or compress a tile.
 
+### Calibrated multi-view reconstruction
+
+The deterministic reconstruction core accepts one to six indexed
+orthographic views through `voxtart.reconstruct`:
+
+- `OrthographicView` records axis, direction, top-left origin, pixel rows, and
+  bounded integer depth;
+- transparent pixels become empty-ray constraints and indexed pixels become
+  occupied-ray constraints;
+- `SURFACE` selects the nearest viable cell, while `VOLUME` retains every
+  viable cell;
+- cells that remain possible but unselected are returned as an explicit
+  unresolved set rather than being silently guessed;
+- deterministic render-back metrics report missing, extra, conflicting, and
+  color-mismatched pixels;
+- source view names, count, and depth mode are preserved in asset provenance.
+
+The converter is intentionally indexed and orthographic. Image decoding,
+palette extraction, calibration UI, and arbitrary perspective inference remain
+separate follow-up capabilities.
+
+
 ### Animated voxel spritesheet export
 
 The **Spritesheet Export** panel renders the active voxel object at sampled
