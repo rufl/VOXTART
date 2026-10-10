@@ -117,6 +117,8 @@ while adding a compact voxel workflow:
   selection; arrows/PageUp/PageDown adjust the transform and `Enter` commits;
 - drag strokes mutate the active layer in memory, redraw at most 60 Hz, and
   rebuild the Blender mesh once on release;
+- a low-contrast, viewport-only wire seam traces occupied voxel edges so
+  adjacent cells remain visually legible without changing the rendered asset;
 - `1/2/3` toggles X/Y/Z mirroring and the viewport draws the mirror guides;
 - translucent brush previews, hovered-face outlines, hit normals, active mode,
   selection counts, active-layer lock state, and stroke change counts remain
