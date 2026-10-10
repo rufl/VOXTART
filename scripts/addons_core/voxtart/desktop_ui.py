@@ -19,6 +19,7 @@ from .voxel_editor import (
 DESKTOP_MODE_PROPERTY = "voxtart_desktop_mode"
 DESKTOP_VERSION_PROPERTY = "voxtart_desktop_version"
 DESKTOP_FULLSCREEN_PROPERTY = "voxtart_desktop_fullscreen"
+DESKTOP_NATIVE_CHROME_PROPERTY = "voxtart_native_chrome"
 DEFAULT_PYRAMID_OBJECT_NAME = "VOXTART Starter Pyramid"
 DEFAULT_PYRAMID_PROPERTY = "voxtart_default_pyramid"
 DEFAULT_PYRAMID_LAYER_SIZES = (6, 4, 2)
@@ -97,16 +98,54 @@ def _ensure_default_pyramid(context):
     return obj
 
 
-def _set_native_toolbar_visibility(visible: bool) -> None:
+def native_chrome_visible(scene=None) -> bool:
+    scene = scene or getattr(bpy.context, "scene", None)
+    return bool(scene is not None and scene.get(DESKTOP_NATIVE_CHROME_PROPERTY, False))
+
+
+def set_native_chrome_visibility(visible: bool) -> None:
+    """Show or hide Blender's native chrome around the VOXTART surface."""
+
+    visible = bool(visible)
+    scene = getattr(bpy.context, "scene", None)
+    if scene is not None:
+        scene[DESKTOP_NATIVE_CHROME_PROPERTY] = visible
     for window in tuple(bpy.context.window_manager.windows):
         screen = window.screen
         if screen is None:
             continue
+        try:
+            screen.show_statusbar = visible
+        except (AttributeError, RuntimeError, TypeError):
+            pass
         for area in tuple(screen.areas):
             if area.type != "VIEW_3D":
                 continue
+            space = area.spaces.active
+            for property_name in (
+                "show_region_toolbar",
+                "show_region_ui",
+                "show_region_header",
+                "show_region_footer",
+                "show_region_tool_header",
+            ):
+                try:
+                    setattr(space, property_name, visible)
+                except (AttributeError, RuntimeError, TypeError):
+                    pass
             try:
-                area.spaces.active.show_region_toolbar = bool(visible)
+                space.show_region_hud = False
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            try:
+                space.show_region_asset_shelf = False
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            try:
+                space.show_gizmo = visible
+                space.overlay.show_floor = visible
+                space.overlay.show_axis_x = visible
+                space.overlay.show_axis_y = visible
             except (AttributeError, RuntimeError, TypeError):
                 pass
 
@@ -137,10 +176,6 @@ def _frame_object_in_viewports(obj) -> None:
                     bpy.ops.view3d.view_selected(use_all_regions=False)
             except (AttributeError, RuntimeError, TypeError):
                 pass
-            try:
-                area.spaces.active.show_region_ui = True
-            except (AttributeError, RuntimeError, TypeError):
-                pass
 
 
 def open_default_editor() -> bool:
@@ -159,7 +194,7 @@ def open_default_editor() -> bool:
     if starter is None:
         return False
     _activate_object(starter)
-    _set_native_toolbar_visibility(True)
+    set_native_chrome_visibility(False)
     for window in tuple(bpy.context.window_manager.windows):
         screen = window.screen
         if screen is None:
@@ -253,7 +288,7 @@ class VOXTART_PT_desktop_home(bpy.types.Panel):
 
         footer = layout.box()
         footer.label(text="Need more control?", icon="PREFERENCES")
-        footer.label(text="Press Esc to open the full toolbox.")
+        footer.label(text="Use More tools when you need Blender controls.")
 
 _CLASSES = (VOXTART_PT_desktop_home,)
 
@@ -286,10 +321,10 @@ def configure_workspace() -> None:
         for area in view_areas:
             space = area.spaces.active
             for property_name, value in (
-                ("show_region_toolbar", True),
+                ("show_region_toolbar", False),
                 ("show_region_header", False),
                 ("show_region_footer", False),
-                ("show_region_ui", True),
+                ("show_region_ui", False),
                 ("show_region_hud", False),
                 ("show_region_asset_shelf", False),
                 ("show_region_tool_header", False),
@@ -298,10 +333,13 @@ def configure_workspace() -> None:
                     setattr(space, property_name, value)
                 except (AttributeError, RuntimeError, TypeError):
                     pass
-            space.show_gizmo = True
-            space.overlay.show_floor = True
-            space.overlay.show_axis_x = True
-            space.overlay.show_axis_y = True
+            try:
+                space.show_gizmo = False
+                space.overlay.show_floor = False
+                space.overlay.show_axis_x = False
+                space.overlay.show_axis_y = False
+            except (AttributeError, RuntimeError, TypeError):
+                pass
             space.shading.type = "MATERIAL"
 
         if len(screen.areas) <= 1 or not view_areas:
@@ -327,7 +365,7 @@ def configure_workspace() -> None:
         if "FINISHED" in result:
             scene[DESKTOP_FULLSCREEN_PROPERTY] = True
 
-    _set_native_toolbar_visibility(True)
+    set_native_chrome_visibility(False)
     if starter is not None:
         _frame_object_in_viewports(starter)
     scene[DESKTOP_MODE_PROPERTY] = True
@@ -351,11 +389,14 @@ __all__ = [
     "DEFAULT_PYRAMID_PROPERTY",
     "DESKTOP_FULLSCREEN_PROPERTY",
     "DESKTOP_MODE_PROPERTY",
+    "DESKTOP_NATIVE_CHROME_PROPERTY",
     "DESKTOP_VERSION_PROPERTY",
     "FIRST_RUN_HINT_PROPERTY",
     "VOXTART_PT_desktop_home",
     "configure_workspace",
+    "native_chrome_visible",
     "open_default_editor",
     "register",
+    "set_native_chrome_visibility",
     "unregister",
 ]

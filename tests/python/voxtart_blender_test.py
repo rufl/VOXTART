@@ -1133,6 +1133,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertFalse(desktop_splash.show())
         self.assertGreater(len(bpy.context.scene.voxtart_palette_colors), 0)
         self.assertTrue(scene.get(desktop_ui.DESKTOP_FULLSCREEN_PROPERTY))
+        self.assertFalse(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
         self.assertFalse(bpy.context.screen.show_statusbar)
         view_areas = tuple(
             area
@@ -1140,8 +1141,8 @@ class BlenderRegistrationTest(unittest.TestCase):
             if area.type == "VIEW_3D"
         )
         if view_areas:
-            self.assertTrue(any(area.spaces.active.show_region_ui for area in view_areas))
-            self.assertTrue(any(getattr(area.spaces.active, "show_region_toolbar", False) for area in view_areas))
+            self.assertFalse(any(area.spaces.active.show_region_ui for area in view_areas))
+            self.assertFalse(any(getattr(area.spaces.active, "show_region_toolbar", False) for area in view_areas))
             self.assertFalse(any(area.spaces.active.show_region_header for area in view_areas))
             self.assertFalse(any(area.spaces.active.show_region_footer for area in view_areas))
 

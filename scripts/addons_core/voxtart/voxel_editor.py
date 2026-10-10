@@ -273,7 +273,10 @@ def _request_redraw(editor, context, *, force: bool = False) -> None:
 
 
 def _editor_cursor(editor, event=None) -> str:
-    if getattr(editor, "toolbar_hover", None) is not None:
+    if (
+        getattr(editor, "toolbar_hover", None) is not None
+        or getattr(editor, "topbar_hover", None) is not None
+    ):
         return "HAND"
     if getattr(event, "alt", False):
         return "EYEDROPPER"
@@ -342,6 +345,95 @@ def _editor_toolbar_item_at(editor, context, event):
     return None
 
 
+def _editor_topbar_action_bounds(region):
+    width = float(getattr(region, "width", 0.0))
+    top = float(getattr(region, "height", 0.0)) - 42.0
+    more_x = max(8.0, width - 136.0)
+    save_x = max(8.0, more_x - 72.0)
+    project_x = max(8.0, save_x - 104.0)
+    return (
+        ("PROJECT", (project_x, top, save_x - 8.0, top + 30.0)),
+        ("SAVE", (save_x, top, more_x - 8.0, top + 30.0)),
+        ("MORE_TOOLS", (more_x, top, max(more_x + 1.0, width - 12.0), top + 30.0)),
+    )
+
+
+def _editor_topbar_action_at(context, event):
+    region = getattr(context, "region", None)
+    if region is None:
+        return None
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    for action, bounds in _editor_topbar_action_bounds(region):
+        if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
+            return action
+    return None
+
+
+def _native_chrome_visible(scene) -> bool:
+    try:
+        from . import desktop_ui
+
+        return desktop_ui.native_chrome_visible(scene)
+    except (AttributeError, RuntimeError, TypeError):
+        return False
+
+
+def _draw_editor_topbar(editor, context) -> None:
+    region = getattr(context, "region", None)
+    if region is None:
+        return
+    width = float(region.width)
+    height = float(region.height)
+    bar_y = height - 48.0
+    asset_name = getattr(getattr(editor, "obj", None), "name", "Voxel asset")
+    _draw_editor_rect(0.0, bar_y, width, 48.0, (0.025, 0.032, 0.045, 0.98))
+    _draw_editor_text("VOXTART", 18.0, bar_y + 28.0, 14.0, (0.98, 0.82, 0.35, 1.0))
+    _draw_editor_text(
+        f"{asset_name[:30]}  ·  {len(editor.asset.voxels)} blocks",
+        102.0,
+        bar_y + 28.0,
+        12.0,
+        (0.92, 0.95, 1.0, 1.0),
+    )
+    _draw_editor_text(
+        "Voxel editor",
+        102.0,
+        bar_y + 12.0,
+        10.0,
+        (0.58, 0.68, 0.78, 1.0),
+    )
+    visible = _native_chrome_visible(context.scene)
+    labels = {
+        "PROJECT": "Project",
+        "SAVE": "Save",
+        "MORE_TOOLS": "Hide tools" if visible else "More tools",
+    }
+    try:
+        if gpu is not None:
+            gpu.state.blend_set("ALPHA")
+        for action, bounds in _editor_topbar_action_bounds(region):
+            x0, y0, x1, y1 = bounds
+            hovered = action == getattr(editor, "topbar_hover", None)
+            _draw_editor_rect(
+                x0,
+                y0,
+                x1 - x0,
+                y1 - y0,
+                (0.16, 0.28, 0.48, 0.98) if hovered else (0.07, 0.09, 0.13, 0.98),
+            )
+            _draw_editor_text(
+                labels[action],
+                x0 + 10.0,
+                y0 + 10.0,
+                11.0,
+                (0.96, 0.98, 1.0, 1.0),
+            )
+    finally:
+        if gpu is not None:
+            gpu.state.blend_set("NONE")
+
+
 def _editor_toolbar_active(editor, item) -> bool:
     kind, value = item[:2]
     if kind == "MODE":
@@ -349,8 +441,6 @@ def _editor_toolbar_active(editor, item) -> bool:
     if kind == "SHAPE":
         return _scene_shape(editor.scene) == value
     return _scene_mode(editor.scene) == "SELECT" and _scene_shape(editor.scene) == value
-
-
 def _draw_editor_rect(x: float, y: float, width: float, height: float, color) -> None:
     if gpu is None or batch_for_shader is None:
         return
@@ -625,7 +715,6 @@ def _draw_editor_overlay(editor, context) -> None:
         return
     scene = context.scene
     mode = _editor_input_mode(editor)
-    workspace = _scene_workspace(scene)
     shape = _scene_shape(scene)
     first_run = bool(scene.get(FIRST_RUN_HINT_PROPERTY))
     hit = editor.last_hit.cell if editor.last_hit is not None else "--"
@@ -637,13 +726,20 @@ def _draw_editor_overlay(editor, context) -> None:
     active_layer = getattr(editor.stack, "active", None)
     layer_name = active_layer.name if active_layer is not None else "--"
     layer_lock = " locked" if active_layer is not None and active_layer.locked else ""
-    asset_name = getattr(getattr(editor, "obj", None), "name", "Voxel asset")
+    mode_label = {
+        "ADD": "Add blocks",
+        "ATTACH": "Add blocks",
+        "ERASE": "Erase blocks",
+        "PAINT": "Color blocks",
+        "SELECT": "Select blocks",
+    }.get(mode, mode.title())
+    _draw_editor_topbar(editor, context)
     _draw_editor_toolbar(editor, context)
     _draw_editor_text(
-        f"{asset_name}  ·  {len(editor.asset.voxels)} blocks  |  {workspace.title()} / {mode.title()} / {shape.title()}",
+        mode_label if first_run else f"{mode_label}  ·  {shape.title()} brush",
         18,
-        region.height - 64,
-        14,
+        region.height - 70,
+        13,
         (0.92, 0.95, 1.0, 1.0),
     )
     if first_run:
@@ -1505,9 +1601,39 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         _restore_overlay(self.obj, self.asset)
         self.status = f"Selected all {len(self.selection)} voxel(s)"
 
+    def _activate_topbar_action(self, context, action: str) -> None:
+        if action == "SAVE":
+            try:
+                result = (
+                    bpy.ops.wm.save_as_mainfile()
+                    if bpy.data.filepath
+                    else bpy.ops.wm.save_as_mainfile("INVOKE_DEFAULT")
+                )
+            except (RuntimeError, TypeError):
+                result = {"CANCELLED"}
+            self.status = (
+                "Project saved"
+                if "FINISHED" in result
+                else "Choose a project file"
+            )
+            return
+        if action == "MORE_TOOLS":
+            from . import desktop_ui
+
+            visible = not desktop_ui.native_chrome_visible(self.scene)
+            desktop_ui.set_native_chrome_visibility(visible)
+            self.status = "Blender tools shown" if visible else "VOXTART tools only"
+            return
+        if action == "PROJECT":
+            from . import desktop_shell
+
+            desktop_shell._set_mode(self.scene, "HOME")
+            self._finish(context, {"FINISHED"})
+            desktop_shell.open_shell()
+
     def _finish(self, context, result=None):
         self.toolbar_hover = None
-        _set_editor_cursor(context, "DEFAULT")
+        self.topbar_hover = None
         if self.transform_active:
             self._cancel_transform(context)
         elif self.scene_transform_active:
@@ -1534,6 +1660,18 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             )
             self.status = f"{_scene_workspace(self.scene).title()} workspace"
             return {"RUNNING_MODAL"}
+        if event.type == "MOUSEMOVE":
+            self.topbar_hover = _editor_topbar_action_at(context, event)
+            if self.topbar_hover is not None:
+                self.toolbar_hover = None
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
+        if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "PRESS":
+            topbar_action = _editor_topbar_action_at(context, event)
+            if topbar_action is not None:
+                if event.type == "LEFTMOUSE":
+                    self._activate_topbar_action(context, topbar_action)
+                return {"RUNNING_MODAL"}
         if _scene_workspace(self.scene) == "SCENE" and not getattr(self, "transform_active", False):
             if event.type == "ESC":
                 return self._finish(context)
@@ -1572,6 +1710,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         if event.type == "ESC":
             return self._finish(context)
         if event.type == "MOUSEMOVE":
+            self.topbar_hover = None
             self.toolbar_hover = _editor_toolbar_item_at(self, context, event)
             _set_editor_cursor(context, _editor_cursor(self, event))
             if self.toolbar_hover is not None:
@@ -1756,6 +1895,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self._reset_scene_transform()
             self.dragging = False
             self.toolbar_hover = None
+            self.topbar_hover = None
             self.drag_mode = None
             self.last_hit = None
             self.status = recovery_status if (recovered or recovery_status) else "Ready"
