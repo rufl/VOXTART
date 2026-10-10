@@ -13,7 +13,7 @@ import bpy
 from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, IntVectorProperty, StringProperty
 
 from . import operators
-from .image_intake import ImageFrame, PaletteIntakeSettings, index_image
+from .image_intake import ImageFrame, PaletteIntakeSettings, extract_palette_frames, index_image
 from .reconstruct import ReconstructionSettings, reconstruct_views
 
 
@@ -21,9 +21,18 @@ RECONSTRUCTION_REPORT_PROPERTY = "voxtart_reconstruction_report"
 RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY = "voxtart_reconstruction_unresolved_cells"
 RECONSTRUCTION_OVERLAY_PROPERTY = "voxtart_reconstruction_overlay"
 RECONSTRUCTION_SOURCE_PROPERTY = "voxtart_reconstruction_source"
+RECONSTRUCTION_SOURCES_PROPERTY = "voxtart_reconstruction_sources"
 RECONSTRUCTION_VIEW_PROPERTY = "voxtart_reconstruction_view"
+RECONSTRUCTION_VIEWS_PROPERTY = "voxtart_reconstruction_views"
 MAX_RECONSTRUCTION_PIXELS = 1_000_000
 MAX_RECONSTRUCTION_CELLS = 4_000_000
+VIEW_SLOTS = (1, 2, 3, 4, 5, 6)
+
+
+def _slot_property(slot: int, field: str) -> str:
+    if slot not in VIEW_SLOTS:
+        raise ValueError(f"reconstruction view slot must be one of {VIEW_SLOTS}: {slot!r}")
+    return f"voxtart_reconstruction_view_{slot}_{field}"
 
 _AXIS_ITEMS = (
     ("X", "X", "Use X as the view-depth axis"),
@@ -80,24 +89,22 @@ def _load_image_frame(filepath: str) -> tuple[ImageFrame, Path]:
                 pass
 
 
-def _store_result(obj: bpy.types.Object, source: Path, view, result) -> None:
+def _view_dict(view) -> dict[str, object]:
+    return {
+        "name": view.name,
+        "axis": view.axis,
+        "direction": view.direction,
+        "origin": list(view.origin),
+        "depth": view.depth,
+        "priority": view.priority,
+    }
+
+
+def _store_common_result(obj: bpy.types.Object, result) -> None:
     report = result.report.to_dict()
     obj[RECONSTRUCTION_REPORT_PROPERTY] = json.dumps(report, sort_keys=True, separators=(",", ":"))
     obj[RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY] = json.dumps(
         [list(cell) for cell in result.unresolved],
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    obj[RECONSTRUCTION_SOURCE_PROPERTY] = str(source)
-    obj[RECONSTRUCTION_VIEW_PROPERTY] = json.dumps(
-        {
-            "name": view.name,
-            "axis": view.axis,
-            "direction": view.direction,
-            "origin": list(view.origin),
-            "depth": view.depth,
-            "priority": view.priority,
-        },
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -108,6 +115,30 @@ def _store_result(obj: bpy.types.Object, source: Path, view, result) -> None:
         result.unresolved,
         "Unresolved",
         (0.75, 0.2, 1.0, 1.0),
+    )
+
+
+def _store_result(obj: bpy.types.Object, source: Path, view, result) -> None:
+    _store_common_result(obj, result)
+    obj[RECONSTRUCTION_SOURCE_PROPERTY] = str(source)
+    obj[RECONSTRUCTION_VIEW_PROPERTY] = json.dumps(
+        _view_dict(view),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _store_multiview_result(obj: bpy.types.Object, sources, views, result) -> None:
+    _store_common_result(obj, result)
+    obj[RECONSTRUCTION_SOURCES_PROPERTY] = json.dumps(
+        [str(source) for source in sources],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    obj[RECONSTRUCTION_VIEWS_PROPERTY] = json.dumps(
+        [_view_dict(view) for view in views],
+        sort_keys=True,
+        separators=(",", ":"),
     )
 
 
@@ -200,6 +231,94 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
         return {"FINISHED"}
 
 
+
+def _scene_intake_settings(scene) -> PaletteIntakeSettings:
+    return PaletteIntakeSettings(
+        background_mode=scene.voxtart_reconstruction_background,
+        alpha_threshold=float(scene.voxtart_reconstruction_alpha_threshold),
+        background_color=tuple(scene.voxtart_reconstruction_background_color),
+        background_tolerance=float(scene.voxtart_reconstruction_background_tolerance),
+        max_colors=int(scene.voxtart_reconstruction_max_colors),
+    )
+
+
+class VOXTART_OT_reconstruct_views(bpy.types.Operator):
+    bl_idname = "voxtart.reconstruct_views"
+    bl_label = "Reconstruct Calibrated Views"
+    bl_description = "Create one voxel asset from up to six calibrated orthographic images"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        scene = context.scene
+        entries = []
+        try:
+            for slot in VIEW_SLOTS:
+                filepath = str(getattr(scene, _slot_property(slot, "filepath")) or "").strip()
+                if not filepath:
+                    continue
+                frame, source = _load_image_frame(filepath)
+                depth = int(getattr(scene, _slot_property(slot, "depth")))
+                if frame.width * frame.height * depth > MAX_RECONSTRUCTION_CELLS:
+                    raise ValueError(
+                        f"view {slot} exceeds the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget"
+                    )
+                entries.append((slot, frame, source, depth))
+            if not entries:
+                raise ValueError("choose at least one calibrated reconstruction view")
+
+            intake_settings = _scene_intake_settings(scene)
+            palette = extract_palette_frames(
+                tuple(frame for _slot, frame, _source, _depth in entries),
+                intake_settings,
+            )
+            views = []
+            sources = []
+            source_provenance = {}
+            total_cells = 0
+            for slot, frame, source, depth in entries:
+                indexed = index_image(frame, intake_settings, palette=palette)
+                views.append(
+                    indexed.to_view(
+                        name=f"view_{slot}_{indexed.name}",
+                        axis=getattr(scene, _slot_property(slot, "axis")),
+                        direction=int(getattr(scene, _slot_property(slot, "direction"))),
+                        origin=tuple(getattr(scene, _slot_property(slot, "origin"))),
+                        depth=depth,
+                        priority=int(getattr(scene, _slot_property(slot, "priority"))),
+                    )
+                )
+                sources.append(source)
+                total_cells += frame.width * frame.height * depth
+                for key, value in indexed.provenance().items():
+                    source_provenance[f"view_{slot}_{key}"] = value
+            if total_cells > MAX_RECONSTRUCTION_CELLS:
+                raise ValueError(
+                    f"calibrated views exceed the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget"
+                )
+            result = reconstruct_views(
+                tuple(views),
+                palette,
+                ReconstructionSettings(mode=scene.voxtart_reconstruction_mode),
+                source_provenance=source_provenance,
+            )
+            obj = operators._create_asset_object(
+                context,
+                "VOXTART Multi-view Reconstruction",
+                result.asset,
+            )
+            _store_multiview_result(obj, sources, views, result)
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        self.report(
+            {"INFO"},
+            f"Reconstructed {result.report.view_count} views; "
+            f"{result.report.occupied_voxels} voxels; "
+            f"{result.report.unresolved_voxels} unresolved; "
+            f"{result.report.conflicting_rays} conflicts",
+        )
+        return {"FINISHED"}
+
 class VOXTART_PT_reconstruction(bpy.types.Panel):
     bl_label = "Image Reconstruction"
     bl_idname = "VOXTART_PT_reconstruction"
@@ -253,9 +372,58 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
         report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
 
 
+
+class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
+    bl_label = "Multi-view Reconstruction"
+    bl_idname = "VOXTART_PT_multiview_reconstruction"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "VOXTART"
+    bl_order = 21
+
+    def draw(self, context):
+        layout = self.layout
+        scene = context.scene
+        for slot in VIEW_SLOTS:
+            box = layout.box()
+            box.label(text=f"View {slot}", icon="IMAGE_DATA")
+            box.prop(scene, _slot_property(slot, "filepath"), text="Image")
+            row = box.row(align=True)
+            row.prop(scene, _slot_property(slot, "axis"), text="Axis")
+            row.prop(scene, _slot_property(slot, "direction"), text="Facing")
+            row = box.row(align=True)
+            row.prop(scene, _slot_property(slot, "origin"), text="Origin")
+            row.prop(scene, _slot_property(slot, "depth"), text="Depth")
+            row.prop(scene, _slot_property(slot, "priority"), text="Priority")
+        layout.prop(scene, "voxtart_reconstruction_background", text="Background")
+        layout.prop(scene, "voxtart_reconstruction_alpha_threshold")
+        if scene.voxtart_reconstruction_background in {"CORNER", "EXPLICIT"}:
+            layout.prop(scene, "voxtart_reconstruction_background_color")
+            layout.prop(scene, "voxtart_reconstruction_background_tolerance")
+        layout.prop(scene, "voxtart_reconstruction_max_colors")
+        layout.prop(scene, "voxtart_reconstruction_mode", text="Depth Mode")
+        layout.operator(VOXTART_OT_reconstruct_views.bl_idname, icon="IMAGE_DATA")
+
+        report = _report_from_object(context.active_object)
+        if report is None:
+            layout.label(text="No reconstruction report yet", icon="INFO")
+            return
+        report_box = layout.box()
+        report_box.label(text="Last Result", icon="CHECKMARK")
+        report_box.label(text=f"Views: {report.get('view_count', 0)}")
+        report_box.label(text=f"Voxels: {report.get('occupied_voxels', 0)}")
+        report_box.label(text=f"Unresolved: {report.get('unresolved_voxels', 0)}")
+        report_box.label(text=f"Conflicts: {report.get('conflicting_rays', 0)}")
+        report_box.label(text=f"Missing pixels: {report.get('missing_pixels', 0)}")
+        report_box.label(text=f"Extra pixels: {report.get('extra_pixels', 0)}")
+        report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
+
+
 _CLASSES = (
     VOXTART_OT_reconstruct_image,
+    VOXTART_OT_reconstruct_views,
     VOXTART_PT_reconstruction,
+    VOXTART_PT_multiview_reconstruction,
 )
 
 
@@ -328,6 +496,42 @@ def register() -> None:
         items=_MODE_ITEMS,
         default="SURFACE",
     )
+    for slot in VIEW_SLOTS:
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "filepath"),
+            StringProperty(name=f"View {slot} Image", subtype="FILE_PATH", default=""),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "axis"),
+            EnumProperty(name=f"View {slot} Axis", items=_AXIS_ITEMS, default="Z"),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "direction"),
+            EnumProperty(name=f"View {slot} Facing", items=_DIRECTION_ITEMS, default="1"),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "origin"),
+            IntVectorProperty(name=f"View {slot} Origin", size=3, default=(0, 0, 0)),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "depth"),
+            IntProperty(
+                name=f"View {slot} Depth",
+                min=1,
+                max=MAX_RECONSTRUCTION_CELLS,
+                default=1,
+            ),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "priority"),
+            IntProperty(name=f"View {slot} Priority", default=slot - 1),
+        )
 
 
 def unregister() -> None:
@@ -347,6 +551,11 @@ def unregister() -> None:
     ):
         if hasattr(bpy.types.Scene, name):
             delattr(bpy.types.Scene, name)
+    for slot in reversed(VIEW_SLOTS):
+        for field in ("priority", "depth", "origin", "direction", "axis", "filepath"):
+            name = _slot_property(slot, field)
+            if hasattr(bpy.types.Scene, name):
+                delattr(bpy.types.Scene, name)
     for cls in reversed(_CLASSES):
         bpy.utils.unregister_class(cls)
 
@@ -354,11 +563,15 @@ def unregister() -> None:
 __all__ = [
     "RECONSTRUCTION_REPORT_PROPERTY",
     "RECONSTRUCTION_SOURCE_PROPERTY",
+    "RECONSTRUCTION_SOURCES_PROPERTY",
     "RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY",
     "RECONSTRUCTION_OVERLAY_PROPERTY",
     "RECONSTRUCTION_VIEW_PROPERTY",
+    "RECONSTRUCTION_VIEWS_PROPERTY",
     "VOXTART_OT_reconstruct_image",
+    "VOXTART_OT_reconstruct_views",
     "VOXTART_PT_reconstruction",
+    "VOXTART_PT_multiview_reconstruction",
     "register",
     "unregister",
 ]

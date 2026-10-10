@@ -3632,6 +3632,22 @@ class ImageIntakeTest(unittest.TestCase):
         )
         self.assertEqual(limited.palette, ((1.0, 0.0, 0.0, 1.0),))
         self.assertEqual(limited.pixels, ((None, 0, 0), (0, 0, 0)))
+        other = image_intake.ImageFrame.from_rows(
+            "other",
+            [[(0.0, 0.0, 1.0, 1.0)]],
+        )
+        shared = image_intake.extract_palette_frames(
+            (frame, other),
+            image_intake.PaletteIntakeSettings(max_colors=3),
+        )
+        self.assertEqual(
+            shared,
+            (
+                (1.0, 0.0, 0.0, 1.0),
+                (0.0, 1.0, 0.0, 1.0),
+                (0.0, 0.0, 1.0, 1.0),
+            ),
+        )
 
     def test_background_modes_remove_only_configured_pixels(self):
         frame = image_intake.ImageFrame.from_rows(
