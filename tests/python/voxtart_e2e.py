@@ -341,6 +341,8 @@ def _run_gui_probe() -> None:
             or payload.get("starter_palette", 0) < 4
             or payload.get("shell_make") is not True
             or payload.get("shell_editor") is not True
+            or payload.get("shell_voxelize") is not True
+            or payload.get("shell_optimize") is not True
             or payload.get("startup_editor") is not True
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True

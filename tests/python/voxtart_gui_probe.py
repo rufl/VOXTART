@@ -19,7 +19,7 @@ SOURCE_ROOT = ROOT / "scripts" / "addons_core"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from voxtart import desktop_shell, desktop_ui, operators, voxel_editor  # noqa: E402
+from voxtart import desktop_shell, desktop_ui, operators, optimizer_ui, voxel_editor  # noqa: E402
 from voxtart.voxel import VoxelAsset  # noqa: E402
 
 
@@ -308,6 +308,8 @@ def _finish_mouse_clicks():
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
                 "shell_editor": STATE.get("shell_editor", False),
+                "shell_voxelize": STATE.get("shell_voxelize", False),
+                "shell_optimize": STATE.get("shell_optimize", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -537,6 +539,36 @@ def _probe():
                 if len(operators._load_asset(created_shell_asset).voxels) != 64:
                     return _fail("Make Blocks created an asset with the wrong voxel count")
                 STATE["shell_make"] = True
+                with bpy.context.temp_override(
+                    window=window,
+                    screen=screen,
+                    area=area,
+                    region=region,
+                ):
+                    bpy.ops.mesh.primitive_cube_add(size=2.0, location=(8.0, 0.0, 0.0))
+                source_mesh = bpy.context.active_object
+                if source_mesh is None or source_mesh.type != "MESH":
+                    return _fail("Build pipeline could not create a source mesh")
+                before_voxelized_assets = set(desktop_shell._asset_objects())
+                shell_operator._activate(bpy.context, "build:voxelize")
+                voxelized_assets = set(desktop_shell._asset_objects()).difference(
+                    before_voxelized_assets
+                )
+                if len(voxelized_assets) != 1:
+                    return _fail(
+                        f"Voxelize selected did not create exactly one asset: {voxelized_assets!r}"
+                    )
+                voxelized_asset = next(iter(voxelized_assets))
+                if (
+                    voxelized_asset.get(operators.VOXELIZER_SOURCE_PROPERTY) != source_mesh.name
+                    or not operators._load_asset(voxelized_asset).voxels
+                ):
+                    return _fail("Voxelize selected did not preserve its source relationship")
+                STATE["shell_voxelize"] = True
+                shell_operator._activate(bpy.context, "build:optimize")
+                if not voxelized_asset.get(optimizer_ui.OPTIMIZER_REPORT_PROPERTY):
+                    return _fail("Optimize active did not write an optimization report")
+                STATE["shell_optimize"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "build:editor" for key, _bounds in shell_state.targets):

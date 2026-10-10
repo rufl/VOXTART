@@ -62,6 +62,13 @@ The P1 authoring loop is intentionally complete before advanced workflows:
    palette indices, recovery state, and clipboard state.
 6. **Project** or `Esc` returns to the VOXTART project surface.
 
+
+### Build pipeline
+
+The next P1 build path stays inside the project surface: select a source mesh,
+use **Voxelize selected** to create a linked sparse asset, then use **Optimize
+active** before opening it in the editor. The generated asset keeps the source
+relationship and the optimizer report while the source mesh remains available.
 Import, voxelization, optimization, character, and palette-library workflows
 remain available after this loop is stable, but they are not prerequisites for
 the first successful project.
