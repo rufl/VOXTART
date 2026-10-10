@@ -141,6 +141,12 @@ def _check_left_click():
         added = set(asset.voxels).difference(baseline)
         if len(added) != 1:
             return _fail(f"Left click did not place exactly one voxel: added={sorted(added)}")
+        editor = STATE["editor"]
+        if STATE["scene"].get(voxel_editor.FIRST_RUN_HINT_PROPERTY) is not False:
+            return _fail("First-edit guidance did not close after a changed edit")
+        if not editor.status.startswith("Added ") or "Ctrl+Z" not in editor.status:
+            return _fail(f"First-edit feedback is not actionable: {editor.status!r}")
+        STATE["first_edit_feedback"] = editor.status
         STATE["after_left_voxels"] = set(asset.voxels)
         STATE["added_cell"] = next(iter(added))
         STATE["scene"].voxtart_editor_mode = "ERASE"
@@ -200,6 +206,9 @@ def _finish_mouse_clicks():
                 "shell_toolbar": STATE.get("shell_toolbar", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
+                "startup_editor": STATE.get("startup_editor", False),
+                "first_run_hint": STATE.get("first_run_hint", False),
+                "first_edit_feedback": STATE.get("first_edit_feedback", ""),
                 "shape": scene.voxtart_editor_shape,
                 "preview_count": len(editor.preview_cells),
                 "area": [STATE["area"].width, STATE["area"].height],
@@ -292,6 +301,19 @@ def _probe():
         if len(starter_asset.voxels) != 56 or starter_asset.palette != [desktop_ui.DEFAULT_PYRAMID_COLOR]:
             return _fail("VOXTART starter pyramid has the wrong geometry or palette")
         STATE["starter_pyramid"] = len(starter_asset.voxels)
+        STATE["startup_editor"] = voxel_editor._ACTIVE_EDITOR is not None
+        STATE["first_run_hint"] = bool(scene.get(voxel_editor.FIRST_RUN_HINT_PROPERTY))
+        if not STATE["startup_editor"]:
+            return _fail("VOXTART startup did not open the voxel editor")
+        if not STATE["first_run_hint"]:
+            return _fail("VOXTART startup did not enable first-edit guidance")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._ACTIVE_EDITOR._finish(bpy.context, {"CANCELLED"})
         with bpy.context.temp_override(
             window=window,
             screen=screen,
@@ -308,7 +330,15 @@ def _probe():
                 return _fail("Desktop shell state was not created")
             desktop_shell._draw_shell(shell_state, bpy.context)
             shell_toolbar_count = sum(key.startswith("tool:") for key, _bounds in shell_state.targets)
-            expected_toolbar_count = sum(item is not None for item in voxel_editor.EDITOR_TOOLBAR_ITEMS)
+            toolbar_items = voxel_editor.visible_editor_toolbar_items(scene)
+            expected_toolbar_count = sum(item is not None for item in toolbar_items)
+            if tuple(item[3] for item in toolbar_items if item is not None) != (
+                "Add block",
+                "Erase block",
+                "Color block",
+                "Select blocks",
+            ):
+                return _fail("First-run toolbar did not expose plain beginner labels")
             if shell_toolbar_count != expected_toolbar_count:
                 return _fail(
                     f"Desktop shell toolbar target count mismatch: "
@@ -319,7 +349,8 @@ def _probe():
                 for key, bounds in shell_state.targets
                 if key.startswith("tool:")
             ]
-            if not shell_toolbar_widths or max(shell_toolbar_widths) > 52.0:
+            maximum_width = 136.0 if STATE["first_run_hint"] else 52.0
+            if not shell_toolbar_widths or max(shell_toolbar_widths) > maximum_width:
                 return _fail(f"Desktop shell toolbar is not compact: {shell_toolbar_widths!r}")
             if any(key == "shell:close" for key, _bounds in shell_state.targets):
                 return _fail("VOXTART shell close control is still exposed")

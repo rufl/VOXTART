@@ -26,7 +26,7 @@ from voxtart import desktop_branding, desktop_shell, desktop_splash, desktop_ui 
 
 desktop_ui.configure_workspace()
 splash_shown = desktop_splash.show()
-if not splash_shown:
+if not splash_shown and not desktop_ui.open_default_editor():
     desktop_shell.open_shell()
 branding_applied = desktop_branding.apply()
 print(f"VOXTART_SPLASH_READY shown={splash_shown} title={desktop_splash.SPLASH_TITLE} version={desktop_splash.SPLASH_VERSION}")

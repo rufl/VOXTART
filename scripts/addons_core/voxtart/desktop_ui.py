@@ -12,6 +12,7 @@ from .voxel_editor import (
     EDITOR_MODE_PROPERTY,
     EDITOR_SHAPE_PROPERTY,
     EDITOR_WORKSPACE_PROPERTY,
+    FIRST_RUN_HINT_PROPERTY,
 )
 
 
@@ -73,6 +74,8 @@ def _ensure_default_pyramid(context):
     )
     if existing is not None:
         _activate_object(existing)
+        if FIRST_RUN_HINT_PROPERTY not in context.scene:
+            context.scene[FIRST_RUN_HINT_PROPERTY] = True
         return existing
     if bpy.data.objects:
         return None
@@ -90,6 +93,7 @@ def _ensure_default_pyramid(context):
     ):
         if hasattr(context.scene, property_name):
             setattr(context.scene, property_name, value)
+    context.scene[FIRST_RUN_HINT_PROPERTY] = True
     return obj
 
 
@@ -137,6 +141,47 @@ def _frame_object_in_viewports(obj) -> None:
                 area.spaces.active.show_region_ui = True
             except (AttributeError, RuntimeError, TypeError):
                 pass
+
+
+def open_default_editor() -> bool:
+    """Open the starter pyramid directly in the voxel editor."""
+
+    if bpy.app.background:
+        return False
+    starter = next(
+        (
+            obj
+            for obj in bpy.data.objects
+            if bool(obj.get(DEFAULT_PYRAMID_PROPERTY)) and ASSET_PROPERTY in obj
+        ),
+        None,
+    )
+    if starter is None:
+        return False
+    _activate_object(starter)
+    _set_native_toolbar_visibility(True)
+    for window in tuple(bpy.context.window_manager.windows):
+        screen = window.screen
+        if screen is None:
+            continue
+        for area in tuple(screen.areas):
+            if area.type != "VIEW_3D":
+                continue
+            region = next((item for item in area.regions if item.type == "WINDOW"), None)
+            if region is None:
+                continue
+            try:
+                with bpy.context.temp_override(
+                    window=window,
+                    screen=screen,
+                    area=area,
+                    region=region,
+                ):
+                    result = bpy.ops.voxtart.voxel_editor("INVOKE_DEFAULT")
+            except (AttributeError, RuntimeError, TypeError):
+                result = {"CANCELLED"}
+            return "RUNNING_MODAL" in result
+    return False
 
 
 class VOXTART_PT_desktop_home(bpy.types.Panel):
@@ -307,8 +352,10 @@ __all__ = [
     "DESKTOP_FULLSCREEN_PROPERTY",
     "DESKTOP_MODE_PROPERTY",
     "DESKTOP_VERSION_PROPERTY",
+    "FIRST_RUN_HINT_PROPERTY",
     "VOXTART_PT_desktop_home",
     "configure_workspace",
+    "open_default_editor",
     "register",
     "unregister",
 ]

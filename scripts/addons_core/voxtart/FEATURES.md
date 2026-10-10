@@ -22,13 +22,18 @@ run_voxtart.cmd
 
 The launcher starts a clean bundled Blender runtime, enables VOXTART
 automatically, hides the auxiliary Blender editors behind a full-screen 3D
-viewport, and configures the active workspace as **VOXTART**. The first screen
-uses plain-language choices in the default `Tool` sidebar tab: make something,
-open something, make a character, or try more block tools.
+viewport, and configures the active workspace as **VOXTART**. The short VoxStart
+splash then opens the voxel editor directly on the starter asset instead of
+making a new user choose a project shell first.
 Each new unsaved project opens with an editable light-yellow stepped pyramid:
 6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
 framed in the viewport so the user can immediately place, erase, paint, or
 select voxels with the VOXTART editor.
+The first editor session shows a small **Try these** card with plain-language
+mouse instructions and only the beginner actions: **Add block**, **Erase
+block**, **Color block**, and **Select blocks**. The card disappears after the
+first changed edit, which also reports the action and its block count in the
+status line with an undo reminder.
 The specialist panels remain under the `VOXTART` tab when you want more
 control. The VOXTART tab uses Blender's native `VIEW_3D` sidebar layout for
 tool settings, selected-object display controls, viewport shading, gizmos,
@@ -36,16 +41,19 @@ floor, and axes. The **View & Cameras** panel also exposes perspective,
 orthographic, camera view, axis alignment, frame selected, pivot distance,
 and the standard Blender overlay controls without replacing Blender's view
 state.
-The desktop shell follows a project-editor layout: project tab and modes at
-the top, project items on the left, palette and assets on the right, and a
-compact status bar at the bottom. Rounded icon controls expose direct paths
-for creating, importing, voxelizing, painting, optimizing, and character work;
+The desktop shell remains available as a secondary project surface. It uses a
+project-editor layout: project tab and modes at the top, project items on the
+left, palette and assets on the right, and a compact status bar at the bottom.
+When opened before the first edit, it defaults to **Build**, keeps only the
+starter-focused project category, and uses the same beginner tool labels.
+Rounded controls expose direct paths for creating, importing, voxelizing,
+painting, optimizing, and character work after the first-run path;
 hovering a control shows its label and available shortcut.
 On Windows, the host window is branded **VoxTart** and uses the voxel-cake
 icon at `assets/voxtart.ico`.
 The launcher suppresses Blender's native splash through an isolated preferences
 directory, then displays the custom **VoxStart 0.0.1-dogfood-(build)** splash
-with the transparent-background icon before opening the editor shell.
+with the transparent-background icon before opening the voxel editor.
 The packaged `VoxTart.exe` launcher embeds the same transparent icon and keeps
 the Blender host window hidden until its native title is already **VoxTart**,
 so the Blender version title is never exposed during startup.
@@ -93,18 +101,19 @@ The VOXTART tool shelf and Brush panel expose grid-aligned editing:
 pre-edit asset. Protected cells are skipped unless the operation explicitly
 enables protected editing.
 
-### MagicaVoxel-style voxel workspace
-
-The **Voxel Editor** is a modal, layer-aware workspace for the active asset.
-It keeps Blender's middle-mouse orbit, pan, and wheel zoom behavior available
-while adding a compact voxel workflow:
+The editor keeps Blender's middle-mouse orbit, pan, and wheel zoom behavior
+available while adding a compact voxel workflow:
 
 - `Tab` switches between **Edit** and **Scene** workspaces;
-- The Adobe-style vertical toolbar on the left groups the main mode, brush, and
-  selection tools; each button shows its glyph and shortcut, highlights the
-  active tool, and exposes a tooltip on hover.
+- the first-run toolbar uses readable **Add block**, **Erase block**, **Color
+  block**, and **Select blocks** labels before showing their shortcut letters;
+  advanced brushes and selection categories appear after the first changed edit;
+- the permanent overlay stays lightweight: the asset, block count, current
+  mode, one short guidance card or shortcut line, hit details, and edit status;
 - the compact VOXTART glyph rail keeps project tools one click away while
   Blender's native toolbar remains available for familiar viewport actions;
+- the full Adobe-style vertical toolbar groups advanced brush and selection
+  tools, highlights the active tool, and exposes a tooltip on hover.
 - The VOXTART sidebar exposes a Color Picker, active-layer controls, session
   History, and a Scene Hierarchy inspector beside the viewport.
 - In **Add** or **Attach**, **left click places** on a voxel face and **right
