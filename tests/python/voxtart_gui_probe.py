@@ -43,6 +43,12 @@ GUI_ASSET_PATH = Path(
         str(SCREENSHOT.with_suffix(".voxel.json")),
     )
 )
+GUI_MESH_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_MESH_PATH",
+        str(SCREENSHOT.with_suffix(".obj")),
+    )
+)
 STATE = {"attempts": 0}
 
 class _ShellHarness:
@@ -318,6 +324,7 @@ def _finish_mouse_clicks():
                 "shell_refresh": STATE.get("shell_refresh", False),
                 "shell_optimize": STATE.get("shell_optimize", False),
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
+                "mesh_export": STATE.get("mesh_export", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -610,10 +617,30 @@ def _probe():
                 ):
                     return _fail("Portable asset round-trip changed authoritative voxel data")
                 STATE["portable_roundtrip"] = True
+                GUI_MESH_PATH.parent.mkdir(parents=True, exist_ok=True)
+                mesh_export_result = bpy.ops.voxtart.export_optimized_mesh(
+                    filepath=str(GUI_MESH_PATH),
+                    format="OBJ",
+                    backend="GREEDY",
+                    export_selected=False,
+                )
+                if (
+                    "FINISHED" not in mesh_export_result
+                    or not GUI_MESH_PATH.is_file()
+                    or GUI_MESH_PATH.stat().st_size <= 0
+                    or "voxtart_last_mesh_export" not in imported_asset_object
+                ):
+                    return _fail(
+                        f"Optimized mesh export did not write its report and file: "
+                        f"{mesh_export_result!r}"
+                    )
+                STATE["mesh_export"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "build:refresh" for key, _bounds in shell_state.targets):
                     return _fail("Build surface did not expose Refresh linked")
+                if not any(key == "build:export" for key, _bounds in shell_state.targets):
+                    return _fail("Build surface did not expose Export mesh")
                 if not any(key == "build:editor" for key, _bounds in shell_state.targets):
                     return _fail("Build surface did not expose Open voxel editor")
                 shell_operator._activate(bpy.context, "build:editor")

@@ -268,6 +268,7 @@ _ICON_FOR_KEY = {
     "home:open": "folder",
     "build:voxelize": "cube",
     "build:refresh": "refresh",
+    "build:export": "export",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
     "build:toolbox": "toolbox",
@@ -720,7 +721,7 @@ def _draw_mode(state, context, width: float, height: float) -> None:
         _draw_button(state, "build:refresh", "Refresh linked", left, row_two, button_width, 34)
         _draw_button(state, "build:optimize", "Optimize active", right, row_two, button_width, 34)
         _draw_button(state, "build:editor", "Open voxel editor", left, row_three, button_width, 34)
-        _draw_button(state, "build:toolbox", "Open full toolbox", right, row_three, button_width, 34)
+        _draw_button(state, "build:export", "Export mesh", right, row_three, button_width, 34)
     elif mode == "PAINT":
         _draw_button(state, "paint:pick", "Pick voxel", left, row_one, button_width, 34, accent=True)
         _draw_button(state, "paint:paint", "Paint picked", right, row_one, button_width, 34)
@@ -893,6 +894,14 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             return
         if key == "build:optimize":
             _run_operator(scene, lambda: bpy.ops.voxtart.optimize_mesh(), "Active mesh optimized")
+            return
+        if key == "build:export":
+            self._finish(context)
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.export_optimized_mesh("INVOKE_DEFAULT"),
+                "Choose mesh export path",
+            )
             return
         if key == "build:toolbox":
             _set_status(scene, "Full toolbox opened")
