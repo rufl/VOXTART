@@ -333,6 +333,7 @@ def _run_gui_probe() -> None:
         if (
             payload.get("ok") is not True
             or payload.get("starter_pyramid") != 56
+            or payload.get("starter_palette", 0) < 4
             or payload.get("startup_editor") is not True
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True
@@ -344,6 +345,7 @@ def _run_gui_probe() -> None:
             or payload.get("details_toggle") is not True
             or payload.get("escape_project") is not True
             or payload.get("palette_selection") is not True
+            or payload.get("palette_non_default") is not True
             or payload.get("project_control") is not True
             or not str(payload.get("first_edit_feedback", "")).startswith("Added ")
             or payload.get("operator_running_modal") is not True

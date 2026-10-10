@@ -141,9 +141,12 @@ def _check_left_click():
         added = set(asset.voxels).difference(baseline)
         if len(added) != 1:
             return _fail(f"Left click did not place exactly one voxel: added={sorted(added)}")
-        editor = STATE["editor"]
+        added_cell = next(iter(added))
+        if asset.voxels[added_cell] != 1:
+            return _fail(f"Left click did not use the selected non-default palette: {asset.voxels[added_cell]!r}")
         if STATE["scene"].get(voxel_editor.FIRST_RUN_HINT_PROPERTY) is not False:
             return _fail("First-edit guidance did not close after a changed edit")
+        editor = STATE["editor"]
         if not editor.status.startswith("Added ") or "Ctrl+Z" not in editor.status:
             return _fail(f"First-edit feedback is not actionable: {editor.status!r}")
         STATE["first_edit_feedback"] = editor.status
@@ -208,6 +211,7 @@ def _finish_mouse_clicks():
                 "shell_toolbar": STATE.get("shell_toolbar", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
+                "starter_palette": STATE.get("starter_palette", 0),
                 "startup_editor": STATE.get("startup_editor", False),
                 "first_run_hint": STATE.get("first_run_hint", False),
                 "first_edit_feedback": STATE.get("first_edit_feedback", ""),
@@ -228,6 +232,7 @@ def _finish_mouse_clicks():
                         "show_region_footer",
                     )
                 },
+                "palette_non_default": STATE.get("palette_non_default", False),
                 "palette_selection": STATE.get("palette_selection", False),
                 "product_controls": STATE.get("product_controls", False),
                 "project_control": STATE.get("project_control", False),
@@ -325,9 +330,13 @@ def _probe():
         if starter is None or not starter.get(desktop_ui.DEFAULT_PYRAMID_PROPERTY):
             return _fail("VOXTART startup did not create the editable starter pyramid")
         starter_asset = operators._load_asset(starter)
-        if len(starter_asset.voxels) != 56 or starter_asset.palette != [desktop_ui.DEFAULT_PYRAMID_COLOR]:
+        if (
+            len(starter_asset.voxels) != 56
+            or starter_asset.palette != list(desktop_ui.DEFAULT_STARTER_PALETTE)
+        ):
             return _fail("VOXTART starter pyramid has the wrong geometry or palette")
         STATE["starter_pyramid"] = len(starter_asset.voxels)
+        STATE["starter_palette"] = len(starter_asset.palette)
         STATE["area_types"] = [area.type for area in screen.areas]
         STATE["startup_editor"] = voxel_editor._ACTIVE_EDITOR is not None
         STATE["first_run_hint"] = bool(scene.get(voxel_editor.FIRST_RUN_HINT_PROPERTY))
@@ -412,10 +421,13 @@ def _probe():
         existing = bpy.data.objects.get("P0 GUI Asset")
         if existing is not None:
             bpy.data.objects.remove(existing, do_unlink=True)
+        palette_asset = VoxelAsset.box(2)
+        palette_asset.add_palette_color((0.24, 0.58, 0.96, 1.0))
+        palette_asset.add_palette_color((0.94, 0.24, 0.28, 1.0))
         obj = operators._create_asset_object(
             bpy.context,
             "P0 GUI Asset",
-            VoxelAsset.box(2),
+            palette_asset,
         )
         for selected in tuple(bpy.context.selected_objects):
             selected.select_set(False)
@@ -452,12 +464,13 @@ def _probe():
         if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not False:
             return _fail("VOXTART editor did not default to simple diagnostics")
         palette_panel, palette_entries = voxel_editor._editor_palette_layout(editor, region)
-        if not palette_entries or len(palette_entries) != len(editor.asset.palette):
+        if len(palette_entries) < 3 or len(palette_entries) != len(editor.asset.palette):
             return _fail("VOXTART editor did not expose its palette swatches")
-        editor._activate_palette(0)
-        if scene.voxtart_edit_palette_index != 0:
-            return _fail("VOXTART editor palette swatch did not select color 1")
+        editor._activate_palette(1)
+        if scene.voxtart_edit_palette_index != 1:
+            return _fail("VOXTART editor palette swatch did not select a non-default color")
         STATE["palette_selection"] = True
+        STATE["palette_non_default"] = True
         with bpy.context.temp_override(
             window=window,
             screen=screen,

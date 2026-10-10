@@ -1093,7 +1093,7 @@ class BlenderRegistrationTest(unittest.TestCase):
             {level: sum(cell[2] == level for cell in asset.voxels) for level in (0, 1, 2)},
             {0: 36, 1: 16, 2: 4},
         )
-        self.assertEqual(asset.palette, [desktop_ui.DEFAULT_PYRAMID_COLOR])
+        self.assertEqual(asset.palette, list(desktop_ui.DEFAULT_STARTER_PALETTE))
         self.assertEqual(asset.provenance["asset_type"], "starter_pyramid")
         self.assertTrue(starter[desktop_ui.DEFAULT_PYRAMID_PROPERTY])
         seam_name = starter.get(operators.SEAM_OVERLAY_PROPERTY)
