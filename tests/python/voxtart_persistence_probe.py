@@ -55,7 +55,7 @@ def _write_phase() -> None:
     scene = bpy.context.scene
     obj = operators._create_asset_object(
         bpy.context,
-        "P0 Persistent Asset",
+        "P1 Persistent Asset",
         VoxelAsset(
             palette=[(1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)],
             voxels={(0, 0, 0): 0},
@@ -65,6 +65,8 @@ def _write_phase() -> None:
     editor.obj = obj
     editor.scene = scene
     editor._load_state(bpy.context)
+    scene.voxtart_editor_mode = "ADD"
+    scene.voxtart_edit_palette_index = 1
     editor.transaction = None
     editor.selection = ((0, 0, 0), (1, 0, 0))
     editor._begin_stroke()
@@ -79,6 +81,7 @@ def _write_phase() -> None:
         {
             "phase": "write",
             "recovery_property": voxel_editor.EDITOR_STROKE_PROPERTY in obj,
+            "palette_index": editor.asset.voxels.get((1, 0, 0)),
             "clipboard_property": voxel_editor.EDITOR_CLIPBOARD_PROPERTY in obj,
             "voxel_count": len(editor.asset.voxels),
         }
@@ -102,6 +105,8 @@ def _read_phase() -> None:
     expected = {(0, 0, 0), (1, 0, 0)}
     if expected - set(editor.asset.voxels):
         raise RuntimeError(f"Recovered voxels missing: {expected - set(editor.asset.voxels)}")
+    if editor.asset.voxels.get((1, 0, 0)) != 1:
+        raise RuntimeError("Recovered painted voxel lost its palette index")
     if len(voxel_editor._CLIPBOARD) != 2:
         raise RuntimeError(f"Persisted clipboard was not restored: {voxel_editor._CLIPBOARD!r}")
     if voxel_editor.EDITOR_STROKE_PROPERTY in obj:
@@ -109,6 +114,7 @@ def _read_phase() -> None:
     _write_marker(
         {
             "phase": "read",
+            "palette_index": editor.asset.voxels.get((1, 0, 0)),
             "recovered": True,
             "voxel_count": len(editor.asset.voxels),
             "clipboard_count": len(voxel_editor._CLIPBOARD),

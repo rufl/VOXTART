@@ -223,6 +223,8 @@ def _run_persistence_probe() -> None:
         write_payload = json.loads(marker.read_text(encoding="utf-8"))
         if write_payload.get("recovery_property") is not True:
             raise RuntimeError(f"Persistence fixture did not contain recovery state: {write_payload!r}")
+        if write_payload.get("palette_index") != 1:
+            raise RuntimeError(f"Persistence fixture did not retain palette index: {write_payload!r}")
         if not blend_path.is_file():
             raise RuntimeError("Persistence fixture did not save a .blend file")
         environment["VOXTART_PERSISTENCE_PHASE"] = "read"
@@ -245,6 +247,7 @@ def _run_persistence_probe() -> None:
             "phase": "read",
             "recovered": True,
             "clipboard_count": 2,
+            "palette_index": 1,
             "recovery_cleared": True,
         }
         if any(read_payload.get(key) != value for key, value in expected.items()):
@@ -334,6 +337,8 @@ def _run_gui_probe() -> None:
             payload.get("ok") is not True
             or payload.get("starter_pyramid") != 56
             or payload.get("starter_palette", 0) < 4
+            or payload.get("shell_make") is not True
+            or payload.get("shell_editor") is not True
             or payload.get("startup_editor") is not True
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True
@@ -345,6 +350,7 @@ def _run_gui_probe() -> None:
             or payload.get("details_toggle") is not True
             or payload.get("escape_project") is not True
             or payload.get("palette_selection") is not True
+            or payload.get("paint_undo_redo") is not True
             or payload.get("palette_non_default") is not True
             or payload.get("project_control") is not True
             or not str(payload.get("first_edit_feedback", "")).startswith("Added ")
