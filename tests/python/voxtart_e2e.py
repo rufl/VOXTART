@@ -337,6 +337,7 @@ def _run_gui_probe() -> None:
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True
             or payload.get("area_types") != ["VIEW_3D"]
+            or payload.get("window_fullscreen") is not True
             or any(payload.get("native_region_props", {}).values())
             or payload.get("more_tools_escape_hatch") is not True
             or payload.get("product_controls") is not True

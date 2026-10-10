@@ -20,6 +20,7 @@ DESKTOP_MODE_PROPERTY = "voxtart_desktop_mode"
 DESKTOP_VERSION_PROPERTY = "voxtart_desktop_version"
 DESKTOP_FULLSCREEN_PROPERTY = "voxtart_desktop_fullscreen"
 DESKTOP_NATIVE_CHROME_PROPERTY = "voxtart_native_chrome"
+DESKTOP_WINDOW_FULLSCREEN_PROPERTY = "voxtart_window_fullscreen"
 DEFAULT_PYRAMID_OBJECT_NAME = "VOXTART Starter Pyramid"
 DEFAULT_PYRAMID_PROPERTY = "voxtart_default_pyramid"
 DEFAULT_PYRAMID_LAYER_SIZES = (6, 4, 2)
@@ -184,6 +185,41 @@ def _frame_object_in_viewports(obj) -> None:
             except (AttributeError, RuntimeError, TypeError):
                 pass
 
+def enter_window_fullscreen() -> bool:
+    """Hide the host window chrome for the product surface."""
+
+    if bpy.app.background:
+        return False
+    scene = getattr(bpy.context, "scene", None)
+    if scene is not None and scene.get(DESKTOP_WINDOW_FULLSCREEN_PROPERTY):
+        return True
+    for window in tuple(bpy.context.window_manager.windows):
+        screen = window.screen
+        if screen is None:
+            continue
+        area = next((item for item in screen.areas if item.type == "VIEW_3D"), None)
+        if area is None:
+            continue
+        region = next((item for item in area.regions if item.type == "WINDOW"), None)
+        if region is None:
+            continue
+        try:
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                result = bpy.ops.wm.window_fullscreen_toggle()
+        except (AttributeError, RuntimeError, TypeError):
+            return False
+        if "FINISHED" in result:
+            if scene is not None:
+                scene[DESKTOP_WINDOW_FULLSCREEN_PROPERTY] = True
+            return True
+        return False
+    return False
+
 
 def open_default_editor() -> bool:
     """Open the starter pyramid directly in the voxel editor."""
@@ -222,7 +258,12 @@ def open_default_editor() -> bool:
                     result = bpy.ops.voxtart.voxel_editor("INVOKE_DEFAULT")
             except (AttributeError, RuntimeError, TypeError):
                 result = {"CANCELLED"}
-            return "RUNNING_MODAL" in result
+            running = "RUNNING_MODAL" in result
+            if running:
+                enter_window_fullscreen()
+                set_native_chrome_visibility(False)
+                _frame_object_in_viewports(starter)
+            return running
     return False
 
 
@@ -395,12 +436,14 @@ __all__ = [
     "DEFAULT_PYRAMID_OBJECT_NAME",
     "DEFAULT_PYRAMID_PROPERTY",
     "DESKTOP_FULLSCREEN_PROPERTY",
+    "DESKTOP_WINDOW_FULLSCREEN_PROPERTY",
     "DESKTOP_MODE_PROPERTY",
     "DESKTOP_NATIVE_CHROME_PROPERTY",
     "DESKTOP_VERSION_PROPERTY",
     "FIRST_RUN_HINT_PROPERTY",
     "VOXTART_PT_desktop_home",
     "configure_workspace",
+    "enter_window_fullscreen",
     "native_chrome_visible",
     "open_default_editor",
     "register",

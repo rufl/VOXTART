@@ -185,7 +185,7 @@ def _finish_mouse_clicks():
         editor.preview_cells = editor._stamp(editor.last_hit)
         editor.status = "GUI E2E LMB place + LMB erase passed"
         STATE["area"].tag_redraw()
-        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
         SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
         with bpy.context.temp_override(
             window=STATE["window"],
@@ -193,6 +193,8 @@ def _finish_mouse_clicks():
             area=STATE["area"],
             region=STATE["region"],
         ):
+            screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
+            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
             screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
         if "FINISHED" not in screenshot_result or not SCREENSHOT.is_file():
             return _fail(f"Could not capture GUI screenshot: {screenshot_result!r}")
@@ -211,7 +213,11 @@ def _finish_mouse_clicks():
                 "first_edit_feedback": STATE.get("first_edit_feedback", ""),
                 "native_chrome_hidden": STATE.get("native_chrome_hidden", False),
                 "area_types": STATE.get("area_types", []),
+                "window_fullscreen": bool(
+                    STATE["scene"].get(desktop_ui.DESKTOP_WINDOW_FULLSCREEN_PROPERTY)
+                ),
                 "more_tools_escape_hatch": STATE.get("more_tools_escape_hatch", False),
+                "region_info": STATE.get("region_info", []),
                 "details_toggle": STATE.get("details_toggle", False),
                 "native_region_props": {
                     name: bool(getattr(STATE["area"].spaces.active, name, False))
@@ -311,6 +317,10 @@ def _probe():
             if location is None:
                 return _fail("Desktop workspace did not expose a VIEW_3D area")
             window, screen, area, region = location
+        STATE["region_info"] = [
+            [region_item.type, region_item.width, region_item.height, region_item.y]
+            for region_item in area.regions
+        ]
         starter = bpy.data.objects.get(desktop_ui.DEFAULT_PYRAMID_OBJECT_NAME)
         if starter is None or not starter.get(desktop_ui.DEFAULT_PYRAMID_PROPERTY):
             return _fail("VOXTART startup did not create the editable starter pyramid")
