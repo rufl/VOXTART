@@ -300,6 +300,7 @@ def _run_gui_probe() -> None:
         environment["VOXTART_GUI_MARKER"] = str(marker)
         environment["VOXTART_GUI_SCREENSHOT"] = str(screenshot)
         environment["VOXTART_GUI_SAVE_PATH"] = str(directory_path / "gui_saved.blend")
+        environment["VOXTART_GUI_ASSET_PATH"] = str(directory_path / "gui_asset.voxel.json")
         command = [str(LAUNCHER), "--factory-startup", "--python", str(GUI_PROBE)]
         print("\n=== visible VoxTart GUI smoke ===")
         print("$ " + subprocess.list2cmdline(command))
@@ -343,6 +344,7 @@ def _run_gui_probe() -> None:
             or payload.get("shell_editor") is not True
             or payload.get("shell_voxelize") is not True
             or payload.get("shell_optimize") is not True
+            or payload.get("portable_roundtrip") is not True
             or payload.get("startup_editor") is not True
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True
