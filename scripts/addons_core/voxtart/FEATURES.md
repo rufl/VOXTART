@@ -27,17 +27,19 @@ splash then opens the voxel editor directly on the starter asset instead of
 making a new user choose a project shell first.
 The default editor surface hides Blender's header, native toolbar, sidebar,
 gizmos, grid, axes, footer, and status bar. VOXTART supplies its own compact
-top bar with **Project**, **Save**, and **More tools** controls; **More tools**
-is the explicit escape hatch for Blender's native controls.
+top bar with **Project**, **Save**, **Details**, and **More tools** controls.
+**More tools** is the explicit escape hatch for Blender's native controls;
+**Details** reveals technical hit, layer, selection, and shortcut diagnostics
+only when needed.
 Each new unsaved project opens with an editable light-yellow stepped pyramid:
 6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
-framed in the viewport so the user can immediately place, erase, paint, or
-select voxels with the VOXTART editor.
-The first editor session shows a small **Try these** card with plain-language
-mouse instructions and only the beginner actions: **Add block**, **Erase
-block**, **Color block**, and **Select blocks**. The card disappears after the
-first changed edit, which also reports the action and its block count in the
-status line with an undo reminder.
+framed with breathing room in the viewport so the user can immediately place,
+erase, paint, or select voxels with the VOXTART editor.
+The first editor session shows a small **Try this** card with plain-language
+mouse instructions, a visible **Colors** strip, and only the beginner actions:
+**Add block**, **Erase block**, **Color block**, and **Select blocks**. The card
+disappears after the first changed edit, which also reports the action and its
+block count with an undo reminder.
 The desktop shell remains available as a secondary project surface through the
 editor's **Project** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,
@@ -105,9 +107,14 @@ available while adding a compact voxel workflow:
 - `Tab` switches between **Edit** and **Scene** workspaces;
 - the first-run toolbar uses readable **Add block**, **Erase block**, **Color
   block**, and **Select blocks** labels before showing their shortcut letters;
-  advanced brushes and selection categories appear after the first changed edit;
-- the permanent overlay stays lightweight: the asset, block count, current
-  mode, one short guidance card or shortcut line, hit details, and edit status;
+- a visible **Colors** strip selects the active palette swatch without opening
+  Blender's sidebar;
+- advanced brushes and selection categories appear after the first changed edit;
+- the default overlay stays lightweight: the asset, block count, current mode,
+  one short guidance card, palette, and edit status;
+- **Details** reveals hit, layer, selection, and shortcut diagnostics on demand;
+- `Esc` returns to the VOXTART project surface rather than exposing a raw
+  Blender workspace;
 - the compact VOXTART toolbar keeps project tools one click away; Blender's
   native toolbar, sidebar, gizmos, grid, and axes stay hidden until **More
   tools** is selected;
@@ -142,7 +149,7 @@ available while adding a compact voxel workflow:
 - `Ctrl+D` clears the current selection;
 - `Ctrl+Z` and `Ctrl+Shift+Z`/`Ctrl+Y` restore per-stroke editor history;
 - `[` and `]` change brush radius, `H` toggles hollow stamping, and `Esc`
-  closes the session without committing an unfinished stroke.
+  cancels an unfinished stroke or returns to the VOXTART project surface.
 
 The editor writes through `VoxelEditTransaction`, so protected cells,
 active-layer ownership, sparse storage, and deterministic mesh rebuilds remain
@@ -162,7 +169,8 @@ others are disabled in the viewport, or restored with **Show All**. Camera
 viewport and render visibility remain separate Blender object properties.
 Open the editor directly from the VOXTART launcher, from the shell's **Open
 voxel editor** action, or from the global `Alt+Shift+Q` shortcut. Use
-**More tools** when opening Blender's native sidebar is intentional.
+**Details** for diagnostic hit/layer information and **More tools** when
+opening Blender's native sidebar is intentional.
 
 ### Dynamic voxelizer
 

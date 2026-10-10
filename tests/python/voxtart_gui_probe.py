@@ -210,9 +210,22 @@ def _finish_mouse_clicks():
                 "first_run_hint": STATE.get("first_run_hint", False),
                 "first_edit_feedback": STATE.get("first_edit_feedback", ""),
                 "native_chrome_hidden": STATE.get("native_chrome_hidden", False),
+                "area_types": STATE.get("area_types", []),
                 "more_tools_escape_hatch": STATE.get("more_tools_escape_hatch", False),
+                "details_toggle": STATE.get("details_toggle", False),
+                "native_region_props": {
+                    name: bool(getattr(STATE["area"].spaces.active, name, False))
+                    for name in (
+                        "show_region_toolbar",
+                        "show_region_ui",
+                        "show_region_header",
+                        "show_region_footer",
+                    )
+                },
+                "palette_selection": STATE.get("palette_selection", False),
                 "product_controls": STATE.get("product_controls", False),
                 "project_control": STATE.get("project_control", False),
+                "escape_project": STATE.get("escape_project", False),
                 "shape": scene.voxtart_editor_shape,
                 "preview_count": len(editor.preview_cells),
                 "area": [STATE["area"].width, STATE["area"].height],
@@ -305,6 +318,7 @@ def _probe():
         if len(starter_asset.voxels) != 56 or starter_asset.palette != [desktop_ui.DEFAULT_PYRAMID_COLOR]:
             return _fail("VOXTART starter pyramid has the wrong geometry or palette")
         STATE["starter_pyramid"] = len(starter_asset.voxels)
+        STATE["area_types"] = [area.type for area in screen.areas]
         STATE["startup_editor"] = voxel_editor._ACTIVE_EDITOR is not None
         STATE["first_run_hint"] = bool(scene.get(voxel_editor.FIRST_RUN_HINT_PROPERTY))
         STATE["native_chrome_hidden"] = not bool(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
@@ -346,6 +360,8 @@ def _probe():
             if shell_state is None:
                 return _fail("Desktop shell state was not created")
             desktop_shell._draw_shell(shell_state, bpy.context)
+            if any(key == "mode:CHARACTER" for key, _bounds in shell_state.targets):
+                return _fail("First-run shell exposed premature Character navigation")
             shell_toolbar_count = sum(key.startswith("tool:") for key, _bounds in shell_state.targets)
             toolbar_items = voxel_editor.visible_editor_toolbar_items(scene)
             expected_toolbar_count = sum(item is not None for item in toolbar_items)
@@ -415,12 +431,36 @@ def _probe():
         editor = voxel_editor._ACTIVE_EDITOR
         if editor is None:
             return _fail("Voxel editor did not become active")
+
         if tuple(action for action, _bounds in voxel_editor._editor_topbar_action_bounds(region)) != (
             "PROJECT",
             "SAVE",
+            "DETAILS",
             "MORE_TOOLS",
         ):
             return _fail("VOXTART editor did not expose product-native project controls")
+        if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not False:
+            return _fail("VOXTART editor did not default to simple diagnostics")
+        palette_panel, palette_entries = voxel_editor._editor_palette_layout(editor, region)
+        if not palette_entries or len(palette_entries) != len(editor.asset.palette):
+            return _fail("VOXTART editor did not expose its palette swatches")
+        editor._activate_palette(0)
+        if scene.voxtart_edit_palette_index != 0:
+            return _fail("VOXTART editor palette swatch did not select color 1")
+        STATE["palette_selection"] = True
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "DETAILS")
+            if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not True:
+                return _fail("VOXTART editor Details control did not reveal diagnostics")
+            editor._activate_topbar_action(bpy.context, "DETAILS")
+            if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not False:
+                return _fail("VOXTART editor Details control did not hide diagnostics")
+        STATE["details_toggle"] = True
         STATE["product_controls"] = True
         with bpy.context.temp_override(
             window=window,
@@ -445,6 +485,38 @@ def _probe():
         if editor is None:
             return _fail("Project control returned without an active voxel editor")
         STATE["project_control"] = True
+        escape_event = SimpleNamespace(
+            type="ESC",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=-1.0,
+            mouse_region_y=-1.0,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, escape_event)
+        if desktop_shell._ACTIVE_STATE is None:
+            return _fail("Escape did not return to the VOXTART project surface")
+        desktop_shell.VOXTART_OT_desktop_shell._finish(None, bpy.context)
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            result = bpy.ops.voxtart.voxel_editor("INVOKE_DEFAULT")
+            if "RUNNING_MODAL" not in result:
+                return _fail(f"Escape transition did not reopen the voxel editor: {result!r}")
+        editor = voxel_editor._ACTIVE_EDITOR
+        if editor is None:
+            return _fail("Escape transition returned without an active voxel editor")
+        STATE["escape_project"] = True
         with bpy.context.temp_override(
             window=window,
             screen=screen,

@@ -509,12 +509,15 @@ def _draw_topbar(state, context, width: float, height: float) -> None:
     _draw_text(_project_name()[:25], project_x + 34, y + 19, 13, _TEXT)
 
     mode = _active_mode(context.scene)
-    nav_x = project_x + project_width + 20
-    for key, label, button_width in (
+    first_run = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY))
+    nav_items = [
         ("BUILD", "Build", 98),
         ("PAINT", "Paint", 98),
-        ("CHARACTER", "Character", 118),
-    ):
+    ]
+    if not first_run:
+        nav_items.append(("CHARACTER", "Character", 118))
+    nav_x = project_x + project_width + 20
+    for key, label, button_width in nav_items:
         _draw_button(state, f"mode:{key}", label, nav_x, y + 8, button_width, 32, active=mode == key)
         nav_x += button_width + 8
 
@@ -623,7 +626,7 @@ def _draw_bottom_bar(context, width: float, height: float) -> None:
     )
 
 
-def _draw_home(state, width: float, height: float) -> None:
+def _draw_home(state, context, width: float, height: float) -> None:
     center_left = _LEFT_WIDTH
     center_right = width - _RIGHT_WIDTH
     center_width = center_right - center_left
@@ -639,14 +642,14 @@ def _draw_home(state, width: float, height: float) -> None:
 
     button_y = card_y + 78
     button_gap = 16
-    button_width = (card_width - 64 - button_gap * 2) / 3.0
-    for index, (key, title, subtitle, accent) in enumerate(
-        (
-            ("home:make", "Make Blocks", "Build a tiny world", True),
-            ("home:open", "Open a Model", "Bring in something", False),
-            ("mode:CHARACTER", "Character Tools", "Shape and rig later", False),
-        )
-    ):
+    cards = [
+        ("home:make", "Make Blocks", "Build a tiny world", True),
+        ("home:open", "Open a Model", "Bring in something", False),
+    ]
+    if not context.scene.get(FIRST_RUN_HINT_PROPERTY):
+        cards.append(("mode:CHARACTER", "Character Tools", "Shape and rig later", False))
+    button_width = (card_width - 64 - button_gap * (len(cards) - 1)) / len(cards)
+    for index, (key, title, subtitle, accent) in enumerate(cards):
         bx = card_x + 32 + index * (button_width + button_gap)
         hovered = state.hovered == key
         color = _ACCENT if accent and hovered else _ACCENT_DARK if accent else _PANEL_LIGHT
@@ -737,7 +740,7 @@ def _draw_shell(state, context) -> None:
             _draw_shell_toolbar(state, context, height)
         _draw_bottom_bar(context, width, height)
         if mode == "HOME":
-            _draw_home(state, width, height)
+            _draw_home(state, context, width, height)
         else:
             _draw_mode(state, context, width, height)
         _draw_tooltip(state, width, height)
