@@ -19,7 +19,7 @@ SOURCE_ROOT = ROOT / "scripts" / "addons_core"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from voxtart import desktop_shell, desktop_ui, operators, optimizer_ui, voxel_editor  # noqa: E402
+from voxtart import desktop_shell, desktop_ui, operators, optimizer_ui, palette_ui, voxel_editor  # noqa: E402
 from voxtart.voxel import VoxelAsset  # noqa: E402
 
 
@@ -47,6 +47,12 @@ GUI_MESH_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_MESH_PATH",
         str(SCREENSHOT.with_suffix(".obj")),
+    )
+)
+GUI_PALETTE_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_PALETTE_PATH",
+        str(SCREENSHOT.with_suffix(".hex")),
     )
 )
 STATE = {"attempts": 0}
@@ -325,6 +331,7 @@ def _finish_mouse_clicks():
                 "shell_optimize": STATE.get("shell_optimize", False),
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "mesh_export": STATE.get("mesh_export", False),
+                "palette_import": STATE.get("palette_import", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -635,8 +642,36 @@ def _probe():
                         f"{mesh_export_result!r}"
                     )
                 STATE["mesh_export"] = True
+                GUI_PALETTE_PATH.parent.mkdir(parents=True, exist_ok=True)
+                GUI_PALETTE_PATH.write_text("#112233\n#DDEEFF\n", encoding="utf-8")
+                scene.voxtart_palette_enforce = True
+                palette_result = bpy.ops.voxtart.palette_import(filepath=str(GUI_PALETTE_PATH))
+                expected_palette = [
+                    tuple(round(channel, 6) for channel in color)
+                    for color in (
+                        (17 / 255, 34 / 255, 51 / 255, 1.0),
+                        (221 / 255, 238 / 255, 1.0, 1.0),
+                    )
+                ]
+                actual_palette = [
+                    tuple(round(channel, 6) for channel in color)
+                    for color in palette_ui._palette_for_display(scene)
+                ]
+                imported_palette = [
+                    tuple(round(channel, 6) for channel in color)
+                    for color in operators._load_asset(imported_asset_object).palette
+                ]
+                if (
+                    "FINISHED" not in palette_result
+                    or actual_palette != expected_palette
+                    or imported_palette != expected_palette
+                ):
+                    return _fail(f"Palette file import did not update the active palette: {palette_result!r}")
+                STATE["palette_import"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "palette:import" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Import palette")
                 if not any(key == "build:refresh" for key, _bounds in shell_state.targets):
                     return _fail("Build surface did not expose Refresh linked")
                 if not any(key == "build:export" for key, _bounds in shell_state.targets):
