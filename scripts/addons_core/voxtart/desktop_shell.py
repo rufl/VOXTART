@@ -269,6 +269,7 @@ _ICON_FOR_KEY = {
     "build:voxelize": "cube",
     "build:refresh": "refresh",
     "build:export": "export",
+    "palette:import": "palette",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
     "build:toolbox": "toolbox",
@@ -595,6 +596,16 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         state.targets.append((f"palette:{index}", (sx, sy, sx + swatch_size, sy + swatch_size)))
 
     parts_y = start_y - 4 * (swatch_size + gap) - 26
+    _draw_button(
+        state,
+        "palette:import",
+        "Import palette",
+        x,
+        parts_y + 8,
+        _RIGHT_WIDTH - 32,
+        26,
+    )
+    parts_y -= 58
     _draw_text("PARTS", x, parts_y, 11, _MUTED)
     _draw_text("Voxel assets", x, parts_y - 25, 13, _TEXT)
     objects = _asset_objects()
@@ -860,6 +871,14 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             obj.select_set(True)
             context.view_layer.objects.active = obj
             _set_status(scene, f"Selected {obj.name}")
+            return
+        if key == "palette:import":
+            self._finish(context)
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.palette_import("INVOKE_DEFAULT"),
+                "Choose a palette file",
+            )
             return
         if key.startswith("palette:"):
             index = int(key.split(":", 1)[1])

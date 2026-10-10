@@ -76,13 +76,16 @@ and palette data.
 The Build surface's **Export mesh** action closes the P1 handoff to a
 material-aware optimized OBJ, while keeping the authoritative voxel asset
 unchanged and recording the export report.
-Other native formats, character, and palette-library workflows remain
-available after this loop is stable, but they are not prerequisites for the
-first successful project.
+Other native formats and character workflows remain available after this loop
+is stable, but they are not prerequisites for the first successful project.
+The palette panel's **Import palette** action closes local palette-file intake:
+it loads a palette into the visible Colors strip and, when enforcement is on,
+retargets the active asset to the imported colors.
+Remote palette sources, palette reduction, and the broader palette-library
+workflow remain advanced paths.
 Rounded controls expose direct paths for creating, importing, voxelizing,
 refreshing, painting, optimizing, exporting, and character work after the
-first-run path;
-hovering a control shows its label and available shortcut.
+first-run path; hovering a control shows its label and available shortcut.
 On Windows, the host window is branded **VoxTart** and uses the voxel-cake
 icon at `assets/voxtart.ico`.
 The launcher suppresses Blender's native splash through an isolated preferences
