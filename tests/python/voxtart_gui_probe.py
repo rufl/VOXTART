@@ -339,6 +339,7 @@ def _finish_mouse_clicks():
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
+                "character_prepare": STATE.get("character_prepare", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -714,6 +715,51 @@ def _probe():
                 ):
                     return _fail(f"VOX round-trip changed the native voxel model: {vox_import_result!r}")
                 STATE["native_vox_roundtrip"] = True
+                scene[voxel_editor.FIRST_RUN_HINT_PROPERTY] = False
+                desktop_shell._set_mode(scene, "HOME")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "mode:CHARACTER" for key, _bounds in shell_state.targets):
+                    return _fail("Post-first-edit project surface did not expose Character Tools")
+                shell_operator._activate(bpy.context, "mode:CHARACTER")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "character:prepare" for key, _bounds in shell_state.targets):
+                    return _fail("Character surface did not expose Prepare rig")
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
+                before_character_armatures = {
+                    obj.name for obj in bpy.data.objects if obj.type == "ARMATURE"
+                }
+                shell_operator._activate(bpy.context, "character:prepare")
+                character_armatures = [
+                    obj
+                    for obj in bpy.data.objects
+                    if obj.type == "ARMATURE" and obj.name not in before_character_armatures
+                ]
+                if (
+                    len(character_armatures) != 1
+                    or not character_armatures[0].get("voxtart_generated_rig")
+                    or native_object.get("voxtart_animation_armature") != character_armatures[0].name
+                    or len(character_armatures[0].data.bones) < 10
+                ):
+                    return _fail("Prepare rig did not create and bind a blockout armature")
+                STATE["character_prepare"] = True
+                character_armature = character_armatures[0]
+                native_object.parent = None
+                for modifier in tuple(native_object.modifiers):
+                    if modifier.type == "ARMATURE" and modifier.object == character_armature:
+                        native_object.modifiers.remove(modifier)
+                if "voxtart_animation_armature" in native_object:
+                    del native_object["voxtart_animation_armature"]
+                armature_data = character_armature.data
+                bpy.data.objects.remove(character_armature, do_unlink=True)
+                if armature_data.users == 0:
+                    bpy.data.armatures.remove(armature_data)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "palette:import" for key, _bounds in shell_state.targets):
