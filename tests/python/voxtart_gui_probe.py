@@ -321,6 +321,8 @@ def _probe():
             ]
             if not shell_toolbar_widths or max(shell_toolbar_widths) > 52.0:
                 return _fail(f"Desktop shell toolbar is not compact: {shell_toolbar_widths!r}")
+            if any(key == "shell:close" for key, _bounds in shell_state.targets):
+                return _fail("VOXTART shell close control is still exposed")
             area.tag_redraw()
             bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
             SHELL_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
