@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+"
+        "  <title>VoxTart voxel cake</title>
+"
+        "  <ellipse cx="128" cy="142" rx="108" ry="92" fill="#080b28"/>
+"
+        "  <ellipse cx="128" cy="118" rx="106" ry="84" fill="#d96225"/>
+"
+        "  <ellipse cx="128" cy="110" rx="94" ry="69" fill="#ffb45a"/>
+"
+        "  <ellipse cx="128" cy="110" rx="73" ry="51" fill="#181658"/>
+"
+        "  <path d="M128 60l27 15-27 15-27-15z" fill="#fff8e6"/>
+"
+        "  <path d="M101 75l27 15v31l-27-15z" fill="#d9caae"/>
+"
+        "  <path d="M155 75l-27 15v31l27-15z" fill="#f5e9d4"/>
+"
+        "  <path d="M128 43l15 8-15 8-15-8z" fill="#ef1f42"/>
+"
+        "  <path d="M113 51l15 8v17l-15-8z" fill="#b90f35"/>
+"
+        "  <path d="M143 51l-15 8v17l15-8z" fill="#ff4a58"/>
+"
+        "</svg>

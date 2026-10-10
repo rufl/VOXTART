@@ -55,7 +55,12 @@ class EditReport:
 
     @property
     def changed(self) -> bool:
-        return self.before_voxels != self.after_voxels or self.painted > 0
+        return (
+            self.before_voxels != self.after_voxels
+            or self.added > 0
+            or self.removed > 0
+            or self.painted > 0
+        )
 
     def to_dict(self) -> dict[str, int | str | bool]:
         return {**asdict(self), "changed": self.changed}
