@@ -266,7 +266,6 @@ _ICON_FOR_KEY = {
     "character:rebuild": "build",
     "character:export": "export",
     "character:toolbox": "toolbox",
-    "shell:close": "close",
 }
 
 
@@ -280,7 +279,6 @@ _SHORTCUT_FOR_KEY = {
     "paint:place": "Alt+Shift+V",
     "build:toolbox": "Esc",
     "character:toolbox": "Esc",
-    "shell:close": "Esc",
 }
 
 
@@ -505,8 +503,6 @@ def _draw_topbar(state, context, width: float, height: float) -> None:
         _draw_button(state, f"mode:{key}", label, nav_x, y + 8, button_width, 32, active=mode == key)
         nav_x += button_width + 8
 
-    close_width = 76
-    _draw_button(state, "shell:close", "Close", width - close_width - 16, y + 8, close_width, 32)
 
 
 
@@ -756,9 +752,6 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
 
     def _activate(self, context, key: str):
         scene = context.scene
-        if key == "shell:close":
-            self._finish(context)
-            return
         if key.startswith("mode:"):
             mode = key.split(":", 1)[1]
             _set_mode(scene, mode)
