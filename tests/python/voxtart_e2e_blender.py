@@ -228,7 +228,8 @@ class BlenderEndToEndTest(unittest.TestCase):
                 region=SimpleNamespace(height=900, width=1200),
                 region_data=None,
             )
-            _, toolbar_entries = voxel_editor._editor_toolbar_layout(900)
+            toolbar_panel, toolbar_entries = voxel_editor._editor_toolbar_layout(900)
+            self.assertLessEqual(toolbar_panel[2], 48.0)
             erase_item, erase_bounds = next(
                 (item, bounds)
                 for item, bounds in toolbar_entries

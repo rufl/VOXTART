@@ -33,7 +33,7 @@ _TOPBAR_HEIGHT = 48
 _BOTTOMBAR_HEIGHT = 32
 _LEFT_WIDTH = 224
 _RIGHT_WIDTH = 272
-_SHELL_TOOLBAR_WIDTH = 144
+_SHELL_TOOLBAR_WIDTH = 64
 
 _SHELL_TOOL_LABELS = {
     ("MODE", "ADD"): "Place",
@@ -398,6 +398,31 @@ def _draw_button(
     _register_tooltip(state, key, label, _SHORTCUT_FOR_KEY.get(key, ""))
     state.targets.append((key, (x, y, x + width, y + height)))
 
+
+def _draw_compact_tool_button(
+    state,
+    key: str,
+    glyph: str,
+    label: str,
+    shortcut: str,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    *,
+    active=False,
+) -> None:
+    hovered = getattr(state, "hovered", None) == key
+    color = _PANEL_LIGHT if active or hovered else _PANEL
+    _draw_round_rect(x, y, width, height, color, min(7.0, height / 2.0))
+    _draw_line(
+        _rounded_points(x, y, width, height, min(7.0, height / 2.0)),
+        _ACCENT if active or hovered else _BORDER,
+    )
+    _draw_centered(glyph, x, y + (height - 16.0) / 2.0, width, 16.0, _TEXT)
+    _register_tooltip(state, key, label, shortcut)
+    state.targets.append((key, (x, y, x + width, y + height)))
+
 def _shell_toolbar_active(scene, item) -> bool:
     kind, value = item[:2]
     if kind == "MODE":
@@ -445,17 +470,18 @@ def _draw_shell_toolbar(state, context, height: float) -> None:
         key = f"tool:{item[0]}:{item[1]}"
         y = cursor - button_height
         label = _SHELL_TOOL_LABELS.get(item[:2], item[3])
-        _draw_button(
+        _draw_compact_tool_button(
             state,
             key,
+            item[2],
             label,
+            item[4],
             panel_x + 8.0,
             y,
             button_width,
             button_height,
             active=_shell_toolbar_active(context.scene, item),
         )
-        _register_tooltip(state, key, item[3], item[4])
         cursor = y - button_gap
 
 
