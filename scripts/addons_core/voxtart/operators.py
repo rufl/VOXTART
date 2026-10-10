@@ -54,6 +54,8 @@ PICKED_CELL_PROPERTY = "voxtart_picked_cell"
 PICKED_NORMAL_PROPERTY = "voxtart_picked_normal"
 PICKED_OVERLAY_PROPERTY = "voxtart_picked_overlay"
 PROTECTED_OVERLAY_PROPERTY = "voxtart_protected_overlay"
+SEAM_OVERLAY_PROPERTY = "voxtart_seam_overlay"
+SEAM_OVERLAY_COLOR = (0.2, 0.17, 0.09, 1.0)
 MAX_VOXELIZE_CELLS = 2_000_000
 VOXELIZER_SOURCE_PROPERTY = "voxtart_voxelizer_source"
 VOXELIZER_MODE_PROPERTY = "voxtart_voxelizer_mode"
@@ -296,6 +298,14 @@ def _update_overlay(
 
 def _update_visual_overlays(obj: bpy.types.Object, asset: VoxelAsset | None = None) -> None:
     asset = asset or _load_asset(obj)
+    _update_overlay(
+        obj,
+        asset,
+        SEAM_OVERLAY_PROPERTY,
+        tuple(asset.voxels),
+        "Seams",
+        SEAM_OVERLAY_COLOR,
+    )
     selected = tuple(cell for cell in _overlay_cells(obj, COMPONENT_SELECTION_PROPERTY) if cell in asset.voxels)
     picked = tuple(cell for cell in _overlay_cells(obj, PICKED_CELL_PROPERTY) if cell in asset.voxels)
     protected = tuple(sorted(_protected_cells(obj)))

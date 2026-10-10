@@ -1096,6 +1096,14 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(asset.palette, [desktop_ui.DEFAULT_PYRAMID_COLOR])
         self.assertEqual(asset.provenance["asset_type"], "starter_pyramid")
         self.assertTrue(starter[desktop_ui.DEFAULT_PYRAMID_PROPERTY])
+        seam_name = starter.get(operators.SEAM_OVERLAY_PROPERTY)
+        self.assertIsInstance(seam_name, str)
+        seam = bpy.data.objects[seam_name]
+        self.assertFalse(seam.hide_viewport)
+        self.assertEqual(seam.display_type, "WIRE")
+        self.assertEqual(seam["voxtart_overlay_kind"], "Seams")
+        for actual, expected in zip(seam.color, operators.SEAM_OVERLAY_COLOR):
+            self.assertAlmostEqual(actual, expected, places=5)
         self.assertEqual(scene.voxtart_editor_mode, "ADD")
         self.assertEqual(scene.voxtart_editor_workspace, "EDIT")
         self.assertTrue(scene.get(desktop_ui.DESKTOP_MODE_PROPERTY))
