@@ -1084,6 +1084,20 @@ class BlenderRegistrationTest(unittest.TestCase):
     def test_desktop_workspace_contract(self):
         desktop_ui.configure_workspace()
         scene = bpy.context.scene
+        starter = bpy.data.objects.get(desktop_ui.DEFAULT_PYRAMID_OBJECT_NAME)
+        self.assertIsNotNone(starter)
+        self.assertIs(bpy.context.active_object, starter)
+        asset = operators._load_asset(starter)
+        self.assertEqual(len(asset.voxels), 56)
+        self.assertEqual(
+            {level: sum(cell[2] == level for cell in asset.voxels) for level in (0, 1, 2)},
+            {0: 36, 1: 16, 2: 4},
+        )
+        self.assertEqual(asset.palette, [desktop_ui.DEFAULT_PYRAMID_COLOR])
+        self.assertEqual(asset.provenance["asset_type"], "starter_pyramid")
+        self.assertTrue(starter[desktop_ui.DEFAULT_PYRAMID_PROPERTY])
+        self.assertEqual(scene.voxtart_editor_mode, "ADD")
+        self.assertEqual(scene.voxtart_editor_workspace, "EDIT")
         self.assertTrue(scene.get(desktop_ui.DESKTOP_MODE_PROPERTY))
         self.assertEqual(bpy.context.window.workspace.name, "VOXTART")
         self.assertIs(

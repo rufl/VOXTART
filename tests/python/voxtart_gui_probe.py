@@ -199,6 +199,7 @@ def _finish_mouse_clicks():
                 "view_workflow": STATE.get("view_workflow", False),
                 "shell_toolbar": STATE.get("shell_toolbar", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
+                "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "shape": scene.voxtart_editor_shape,
                 "preview_count": len(editor.preview_cells),
                 "area": [STATE["area"].width, STATE["area"].height],
@@ -284,6 +285,13 @@ def _probe():
             if location is None:
                 return _fail("Desktop workspace did not expose a VIEW_3D area")
             window, screen, area, region = location
+        starter = bpy.data.objects.get(desktop_ui.DEFAULT_PYRAMID_OBJECT_NAME)
+        if starter is None or not starter.get(desktop_ui.DEFAULT_PYRAMID_PROPERTY):
+            return _fail("VOXTART startup did not create the editable starter pyramid")
+        starter_asset = operators._load_asset(starter)
+        if len(starter_asset.voxels) != 56 or starter_asset.palette != [desktop_ui.DEFAULT_PYRAMID_COLOR]:
+            return _fail("VOXTART starter pyramid has the wrong geometry or palette")
+        STATE["starter_pyramid"] = len(starter_asset.voxels)
         with bpy.context.temp_override(
             window=window,
             screen=screen,
