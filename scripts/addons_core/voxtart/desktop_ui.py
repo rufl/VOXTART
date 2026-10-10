@@ -5,24 +5,124 @@
 """VOXTART-owned desktop landing panel and startup workspace controls."""
 
 import bpy
+from . import operators
 from .operators import ASSET_PROPERTY
+from .voxel import VoxelAsset
+from .voxel_editor import (
+    EDITOR_MODE_PROPERTY,
+    EDITOR_SHAPE_PROPERTY,
+    EDITOR_WORKSPACE_PROPERTY,
+)
 
 
 DESKTOP_MODE_PROPERTY = "voxtart_desktop_mode"
 DESKTOP_VERSION_PROPERTY = "voxtart_desktop_version"
 DESKTOP_FULLSCREEN_PROPERTY = "voxtart_desktop_fullscreen"
+DEFAULT_PYRAMID_OBJECT_NAME = "VOXTART Starter Pyramid"
+DEFAULT_PYRAMID_PROPERTY = "voxtart_default_pyramid"
+DEFAULT_PYRAMID_LAYER_SIZES = (6, 4, 2)
+DEFAULT_PYRAMID_COLOR = (1.0, 0.9, 0.45, 1.0)
 
-
-def _clear_factory_scene() -> None:
+def _clear_factory_scene() -> bool:
     """Remove Blender's starter cube, camera, and light for a clean editor."""
 
     if bpy.data.filepath:
-        return
+        return False
     objects = tuple(bpy.data.objects)
     if not objects or not all(obj.name in {"Cube", "Camera", "Light"} for obj in objects):
-        return
+        return False
     for obj in objects:
         bpy.data.objects.remove(obj, do_unlink=True)
+    return True
+
+
+def _default_pyramid_asset() -> VoxelAsset:
+    asset = VoxelAsset(
+        grid_size=1.0,
+        palette=[DEFAULT_PYRAMID_COLOR],
+        provenance={
+            "asset_type": "starter_pyramid",
+            "base_size": "6",
+            "layer_sizes": ",".join(str(size) for size in DEFAULT_PYRAMID_LAYER_SIZES),
+            "editable": "true",
+        },
+    )
+    for level, size in enumerate(DEFAULT_PYRAMID_LAYER_SIZES):
+        offset = -(size // 2)
+        for x in range(size):
+            for y in range(size):
+                asset.set_voxel((offset + x, offset + y, level))
+    return asset
+
+
+def _activate_object(obj) -> None:
+    for selected in tuple(bpy.context.selected_objects):
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+
+
+def _ensure_default_pyramid(context):
+    """Create the editable starter asset only for a new, unsaved project."""
+
+    if bpy.data.filepath:
+        return None
+    existing = next(
+        (obj for obj in bpy.data.objects if bool(obj.get(DEFAULT_PYRAMID_PROPERTY))),
+        None,
+    )
+    if existing is not None:
+        _activate_object(existing)
+        return existing
+    if bpy.data.objects:
+        return None
+    obj = operators._create_asset_object(
+        context,
+        DEFAULT_PYRAMID_OBJECT_NAME,
+        _default_pyramid_asset(),
+    )
+    obj[DEFAULT_PYRAMID_PROPERTY] = True
+    _activate_object(obj)
+    for property_name, value in (
+        (EDITOR_MODE_PROPERTY, "ADD"),
+        (EDITOR_SHAPE_PROPERTY, "VOXEL"),
+        (EDITOR_WORKSPACE_PROPERTY, "EDIT"),
+    ):
+        if hasattr(context.scene, property_name):
+            setattr(context.scene, property_name, value)
+    return obj
+
+
+def _frame_object_in_viewports(obj) -> None:
+    """Frame the starter asset in every available 3D viewport."""
+
+    if bpy.app.background:
+        return
+    _activate_object(obj)
+    for window in tuple(bpy.context.window_manager.windows):
+        screen = window.screen
+        if screen is None:
+            continue
+        for area in tuple(screen.areas):
+            if area.type != "VIEW_3D":
+                continue
+            region = next((item for item in area.regions if item.type == "WINDOW"), None)
+            if region is None:
+                continue
+            try:
+                with bpy.context.temp_override(
+                    window=window,
+                    screen=screen,
+                    area=area,
+                    region=region,
+                ):
+                    bpy.ops.view3d.view_selected(use_all_regions=False)
+            except (AttributeError, RuntimeError, TypeError):
+                pass
+            try:
+                area.spaces.active.show_region_ui = True
+            except (AttributeError, RuntimeError, TypeError):
+                pass
 
 
 class VOXTART_PT_desktop_home(bpy.types.Panel):
@@ -105,6 +205,7 @@ def configure_workspace() -> None:
     version = ".".join(str(value) for value in bpy.app.version[:3])
     _clear_factory_scene()
     scene = bpy.context.scene
+    starter = _ensure_default_pyramid(bpy.context)
     try:
         from .palette_ui import _ensure_palette
 
@@ -167,6 +268,8 @@ def configure_workspace() -> None:
         if "FINISHED" in result:
             scene[DESKTOP_FULLSCREEN_PROPERTY] = True
 
+    if starter is not None:
+        _frame_object_in_viewports(starter)
     scene[DESKTOP_MODE_PROPERTY] = True
     scene[DESKTOP_VERSION_PROPERTY] = version
 
@@ -182,6 +285,10 @@ def unregister() -> None:
 
 
 __all__ = [
+    "DEFAULT_PYRAMID_COLOR",
+    "DEFAULT_PYRAMID_LAYER_SIZES",
+    "DEFAULT_PYRAMID_OBJECT_NAME",
+    "DEFAULT_PYRAMID_PROPERTY",
     "DESKTOP_FULLSCREEN_PROPERTY",
     "DESKTOP_MODE_PROPERTY",
     "DESKTOP_VERSION_PROPERTY",

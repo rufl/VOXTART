@@ -332,6 +332,7 @@ def _run_gui_probe() -> None:
         payload = json.loads(marker.read_text(encoding="utf-8"))
         if (
             payload.get("ok") is not True
+            or payload.get("starter_pyramid") != 56
             or payload.get("operator_running_modal") is not True
             or payload.get("draw_overlay_handle") is not True
             or payload.get("draw_preview_handle") is not True

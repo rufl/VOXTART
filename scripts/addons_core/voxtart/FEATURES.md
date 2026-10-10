@@ -25,6 +25,10 @@ automatically, hides the auxiliary Blender editors behind a full-screen 3D
 viewport, and configures the active workspace as **VOXTART**. The first screen
 uses plain-language choices in the default `Tool` sidebar tab: make something,
 open something, make a character, or try more block tools.
+Each new unsaved project opens with an editable light-yellow stepped pyramid:
+6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
+framed in the viewport so the user can immediately place, erase, paint, or
+select voxels with the VOXTART editor.
 The specialist panels remain under the `VOXTART` tab when you want more
 control. The VOXTART tab uses Blender's native `VIEW_3D` sidebar layout for
 tool settings, selected-object display controls, viewport shading, gizmos,
