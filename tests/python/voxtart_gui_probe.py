@@ -20,6 +20,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 from voxtart import (
+    blob_gallery,
     blockbench_formats,
     desktop_shell,
     desktop_ui,
@@ -93,6 +94,12 @@ GUI_STACK_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_STACK_PATH",
         str(SCREENSHOT.with_suffix(".sstack.json")),
+    )
+)
+GUI_GALLERY_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_GALLERY_PATH",
+        str(SCREENSHOT.with_suffix(".blob-gallery")),
     )
 )
 STATE = {"attempts": 0}
@@ -376,6 +383,7 @@ def _finish_mouse_clicks():
                 "blockbench_roundtrip": STATE.get("blockbench_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "stack_roundtrip": STATE.get("stack_roundtrip", False),
+                "gallery_roundtrip": STATE.get("gallery_roundtrip", False),
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "character_prepare": STATE.get("character_prepare", False),
                 "character_extract": STATE.get("character_extract", False),
@@ -1145,6 +1153,71 @@ def _probe():
                     bpy.data.objects.remove(armature_object, do_unlink=True)
                     if armature_data.users == 0:
                         bpy.data.armatures.remove(armature_data)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
+                scene.voxtart_blob_gallery_path = str(GUI_GALLERY_PATH)
+                scene.voxtart_blob_name = "GUI Gallery Asset"
+                scene.voxtart_blob_category = "GUI Tests"
+                scene.voxtart_blob_tags = "gui,roundtrip"
+                desktop_shell._set_mode(scene, "BUILD")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "gallery:save" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Save active to Zoo")
+                native_gallery_asset = operators._load_asset(native_object)
+                shell_operator._activate(bpy.context, "gallery:save")
+                gallery = blob_gallery.BlobGallery(GUI_GALLERY_PATH)
+                gallery_entries, gallery_errors = gallery.scan()
+                if (
+                    scene.get(desktop_shell.SHELL_STATUS_PROPERTY) != "Active asset saved to Zoo"
+                    or len(gallery_entries) != 1
+                    or gallery_errors
+                ):
+                    return _fail(
+                        f"Blob Gallery save did not produce one valid entry: "
+                        f"{gallery_entries!r}, {gallery_errors!r}"
+                    )
+                gallery_entry = gallery_entries[0]
+                favorite_result = bpy.ops.voxtart.blob_gallery_toggle_favorite(
+                    blob_id=gallery_entry.blob_id,
+                    favorite=True,
+                )
+                favorite_entries, favorite_errors = gallery.scan(favorites_only=True)
+                before_gallery_insert_assets = set(desktop_shell._asset_objects())
+                insert_result = bpy.ops.voxtart.blob_gallery_insert(
+                    blob_id=gallery_entry.blob_id,
+                    snap_to_selection=False,
+                )
+                inserted_gallery_assets = set(desktop_shell._asset_objects()).difference(
+                    before_gallery_insert_assets
+                )
+                inserted_gallery_object = (
+                    next(iter(inserted_gallery_assets))
+                    if len(inserted_gallery_assets) == 1
+                    else None
+                )
+                inserted_gallery_asset = (
+                    operators._load_asset(inserted_gallery_object)
+                    if inserted_gallery_object is not None
+                    else None
+                )
+                if (
+                    "FINISHED" not in favorite_result
+                    or "FINISHED" not in insert_result
+                    or favorite_errors
+                    or len(favorite_entries) != 1
+                    or inserted_gallery_asset is None
+                    or inserted_gallery_asset.voxels != native_gallery_asset.voxels
+                    or inserted_gallery_object.get(blob_gallery.BLOB_ENTRY_PROPERTY)
+                    != gallery_entry.blob_id
+                ):
+                    return _fail(
+                        f"Blob Gallery favorite/insert failed: "
+                        f"{favorite_result!r}, {insert_result!r}"
+                    )
+                STATE["gallery_roundtrip"] = True
+                bpy.data.objects.remove(inserted_gallery_object, do_unlink=True)
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)

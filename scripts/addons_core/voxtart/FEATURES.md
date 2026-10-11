@@ -487,9 +487,11 @@ names. OpenRaster reads `stack.xml` offsets and visibility.
 
 ### Blob Gallery / Zoo
 
-The local Blob Gallery stores validated `.voxtart.blob.json` documents. Each
-entry contains the authoritative asset, metadata, category, tags, provenance,
-and named joints.
+The local Blob Gallery stores validated `.voxtart.blob.json` documents. The
+project shell exposes a direct **Save active to Zoo** shortcut; the full Zoo
+Gallery panel provides the matching search, insert, placement, and sharing
+workflows. Each entry contains the authoritative asset, metadata, category,
+tags, provenance, and named joints.
 
 - save, load, import, export, remove, search, and category filtering;
 - favorite flags stored separately from portable asset documents;
