@@ -304,6 +304,7 @@ def _run_gui_probe() -> None:
         environment["VOXTART_GUI_MESH_PATH"] = str(directory_path / "gui_export.obj")
         environment["VOXTART_GUI_PALETTE_PATH"] = str(directory_path / "gui_palette.hex")
         environment["VOXTART_GUI_VOX_PATH"] = str(directory_path / "gui_roundtrip.vox")
+        environment["VOXTART_GUI_GAME_RIG_PATH"] = str(directory_path / "gui_game_rig.glb")
         command = [str(LAUNCHER), "--factory-startup", "--python", str(GUI_PROBE)]
         print("\n=== visible VoxTart GUI smoke ===")
         print("$ " + subprocess.list2cmdline(command))
@@ -353,6 +354,8 @@ def _run_gui_probe() -> None:
             or payload.get("palette_import") is not True
             or payload.get("native_vox_roundtrip") is not True
             or payload.get("character_prepare") is not True
+            or payload.get("character_extract") is not True
+            or payload.get("character_export") is not True
             or payload.get("startup_editor") is not True
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True
