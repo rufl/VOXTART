@@ -307,6 +307,7 @@ def _run_gui_probe() -> None:
         environment["VOXTART_GUI_BLOCKBENCH_PATH"] = str(directory_path / "gui_roundtrip.bbmodel")
         environment["VOXTART_GUI_MINECRAFT_PATH"] = str(directory_path / "gui_roundtrip.schem")
         environment["VOXTART_GUI_STACK_PATH"] = str(directory_path / "gui_roundtrip.sstack.json")
+        environment["VOXTART_GUI_GALLERY_PATH"] = str(directory_path / "gui_gallery")
         environment["VOXTART_GUI_GAME_RIG_PATH"] = str(directory_path / "gui_game_rig.glb")
         command = [str(LAUNCHER), "--factory-startup", "--python", str(GUI_PROBE)]
         print("\n=== visible VoxTart GUI smoke ===")
@@ -354,6 +355,7 @@ def _run_gui_probe() -> None:
             or payload.get("palette_reduce") is not True
             or payload.get("blockbench_roundtrip") is not True
             or payload.get("minecraft_roundtrip") is not True
+            or payload.get("gallery_roundtrip") is not True
             or payload.get("stack_roundtrip") is not True
             or payload.get("native_vox_roundtrip") is not True
             or payload.get("character_prepare") is not True
