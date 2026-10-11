@@ -279,10 +279,13 @@ _ICON_FOR_KEY = {
     "paint:remove": "remove",
     "paint:place": "place",
     "character:prepare": "character",
+    "character:import": "folder",
     "character:extract": "build",
-    "character:rebuild": "build",
+    "character:bake": "build",
+    "character:preview": "paint",
     "character:export": "export",
     "character:toolbox": "toolbox",
+    "character:rebuild": "build",
 }
 
 
@@ -708,7 +711,7 @@ def _draw_mode(state, context, width: float, height: float) -> None:
     title, subtitle = {
         "BUILD": ("Build Blocks", "Create, convert, and optimize voxel assets."),
         "PAINT": ("Paint Blocks", "Pick a voxel, choose a color, and edit it."),
-        "CHARACTER": ("Character Tools", "Prepare, rebuild, and export a block character."),
+        "CHARACTER": ("Character Tools", "Prepare, animate, and export a block character."),
     }[mode]
     _draw_text(title, center_left + 42, height - _TOPBAR_HEIGHT - 54, 25, _TEXT)
     _draw_text(subtitle, center_left + 42, height - _TOPBAR_HEIGHT - 78, 13, _MUTED)
@@ -716,7 +719,7 @@ def _draw_mode(state, context, width: float, height: float) -> None:
     card_x = center_left + 42
     card_y = _BOTTOMBAR_HEIGHT + 52
     card_width = min(560.0, center_width - 84.0)
-    card_height = 296.0 if mode == "BUILD" else 250.0
+    card_height = 296.0 if mode == "BUILD" else (360.0 if mode == "CHARACTER" else 250.0)
     _draw_round_rect(card_x, card_y, card_width, card_height, _BG, 12.0)
     _draw_line(_rounded_points(card_x, card_y, card_width, card_height, 12.0), _BORDER)
     active = _active_asset(context)
@@ -734,9 +737,10 @@ def _draw_mode(state, context, width: float, height: float) -> None:
     button_width = (card_width - 48 - button_gap) / 2.0
     left = card_x + 24
     right = left + button_width + button_gap
-    row_one = card_y + (122 if mode == "BUILD" else 76)
-    row_two = card_y + (76 if mode == "BUILD" else 30)
-    row_three = card_y + 30
+    row_one = card_y + (122 if mode == "BUILD" else 164 if mode == "CHARACTER" else 76)
+    row_two = card_y + (76 if mode == "BUILD" else 120 if mode == "CHARACTER" else 30)
+    row_three = card_y + (76 if mode == "CHARACTER" else 30)
+    row_four = card_y + 32
     if mode == "BUILD":
         _draw_button(state, "home:make", "Add block toy", left, row_one, button_width, 34, accent=True)
         _draw_button(state, "build:voxelize", "Voxelize selected", right, row_one, button_width, 34)
@@ -751,9 +755,13 @@ def _draw_mode(state, context, width: float, height: float) -> None:
         _draw_button(state, "paint:place", "Place adjacent", right, row_two, button_width, 34)
     else:
         _draw_button(state, "character:prepare", "Prepare rig", left, row_one, button_width, 34, accent=True)
-        _draw_button(state, "character:extract", "Extract game rig", right, row_one, button_width, 34)
-        _draw_button(state, "character:export", "Export game rig", left, row_two, button_width, 34)
-        _draw_button(state, "character:toolbox", "Open full toolbox", right, row_two, button_width, 34)
+        _draw_button(state, "character:import", "Import animation", right, row_one, button_width, 34)
+        _draw_button(state, "character:extract", "Extract game rig", left, row_two, button_width, 34)
+        _draw_button(state, "character:bake", "Bake actions", right, row_two, button_width, 34)
+        _draw_button(state, "character:preview", "Preview action", left, row_three, button_width, 34)
+        _draw_button(state, "character:export", "Export game rig", right, row_three, button_width, 34)
+        _draw_button(state, "character:toolbox", "Open full toolbox", left, row_four, button_width, 34)
+        _draw_button(state, "character:rebuild", "Rebuild character", right, row_four, button_width, 34)
 
 
 def _draw_shell(state, context) -> None:
@@ -963,8 +971,22 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
         if key == "character:prepare":
             _run_operator(scene, lambda: bpy.ops.voxtart.prepare_character(), "Character rig prepared")
             return
+        if key == "character:import":
+            self._finish(context)
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.import_animation_library("INVOKE_DEFAULT"),
+                "Choose an animation source",
+            )
+            return
         if key == "character:extract":
             _run_operator(scene, lambda: bpy.ops.voxtart.extract_game_rig(), "Game rig extracted")
+            return
+        if key == "character:bake":
+            _run_operator(scene, lambda: bpy.ops.voxtart.bake_game_rig_actions(), "Animation actions baked")
+            return
+        if key == "character:preview":
+            _run_operator(scene, lambda: bpy.ops.voxtart.preview_game_rig_action(), "Animation preview ready")
             return
         if key == "character:rebuild":
             _run_operator(scene, lambda: bpy.ops.voxtart.character_rebuild(), "Character rebuilt")
