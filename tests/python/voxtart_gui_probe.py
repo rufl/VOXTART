@@ -19,7 +19,16 @@ SOURCE_ROOT = ROOT / "scripts" / "addons_core"
 if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
-from voxtart import desktop_shell, desktop_ui, operators, optimizer_ui, palette_ui, voxel_editor  # noqa: E402
+from voxtart import (
+    blockbench_formats,
+    desktop_shell,
+    desktop_ui,
+    minecraft_formats,
+    operators,
+    optimizer_ui,
+    palette_ui,
+    voxel_editor,
+)
 from voxtart.voxel import VoxelAsset  # noqa: E402
 
 
@@ -65,6 +74,18 @@ GUI_GAME_RIG_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_GAME_RIG_PATH",
         str(SCREENSHOT.with_suffix(".glb")),
+    )
+)
+GUI_BLOCKBENCH_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_BLOCKBENCH_PATH",
+        str(SCREENSHOT.with_suffix(".bbmodel")),
+    )
+)
+GUI_MINECRAFT_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_MINECRAFT_PATH",
+        str(SCREENSHOT.with_suffix(".schem")),
     )
 )
 STATE = {"attempts": 0}
@@ -345,6 +366,8 @@ def _finish_mouse_clicks():
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
                 "palette_reduce": STATE.get("palette_reduce", False),
+                "blockbench_roundtrip": STATE.get("blockbench_roundtrip", False),
+                "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "character_prepare": STATE.get("character_prepare", False),
                 "character_extract": STATE.get("character_extract", False),
@@ -755,6 +778,134 @@ def _probe():
                 ):
                     return _fail(f"VOX round-trip changed the native voxel model: {vox_import_result!r}")
                 STATE["native_vox_roundtrip"] = True
+                desktop_shell._set_mode(scene, "BUILD")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                required_interchange_keys = {"format:blockbench", "format:minecraft"}
+                visible_interchange_keys = {key for key, _bounds in shell_state.targets}
+                if not required_interchange_keys.issubset(visible_interchange_keys):
+                    return _fail("Project surface did not expose Blockbench and Minecraft imports")
+                before_interchange_assets = set(desktop_shell._asset_objects())
+                GUI_BLOCKBENCH_PATH.parent.mkdir(parents=True, exist_ok=True)
+                GUI_BLOCKBENCH_PATH.write_text(
+                    json.dumps(
+                        {
+                            "meta": {"format_version": "5.0", "model_format": "free"},
+                            "voxtart_palette": [
+                                [0.2, 0.3, 0.4, 1.0],
+                                [0.8, 0.7, 0.6, 1.0],
+                            ],
+                            "elements": [
+                                {
+                                    "name": "body",
+                                    "from": [0, 0, 0],
+                                    "to": [2, 2, 2],
+                                    "color": 0,
+                                },
+                                {
+                                    "name": "cap",
+                                    "from": [0, 2, 0],
+                                    "to": [2, 3, 2],
+                                    "color": 1,
+                                },
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                expected_blockbench = blockbench_formats.decode_blockbench(
+                    GUI_BLOCKBENCH_PATH.read_bytes(),
+                    grid_size=float(scene.voxtart_grid_size),
+                )
+                blockbench_import_result = bpy.ops.voxtart.import_blockbench(
+                    filepath=str(GUI_BLOCKBENCH_PATH)
+                )
+                blockbench_object = bpy.context.active_object
+                blockbench_asset = (
+                    operators._load_asset(blockbench_object)
+                    if blockbench_object is not None
+                    and operators.ASSET_PROPERTY in blockbench_object
+                    else None
+                )
+                blockbench_export_result = bpy.ops.voxtart.export_blockbench(
+                    filepath=str(GUI_BLOCKBENCH_PATH),
+                    units_per_voxel=float(scene.voxtart_blockbench_units_per_voxel),
+                )
+                blockbench_roundtrip = blockbench_formats.decode_blockbench(
+                    GUI_BLOCKBENCH_PATH.read_bytes(),
+                    grid_size=float(scene.voxtart_grid_size),
+                )
+                if (
+                    "FINISHED" not in blockbench_import_result
+                    or "FINISHED" not in blockbench_export_result
+                    or blockbench_asset is None
+                    or blockbench_asset.voxels != expected_blockbench.voxels
+                    or blockbench_roundtrip.voxels != blockbench_asset.voxels
+                    or blockbench_object.get("voxtart_import_format") != "BLOCKBENCH"
+                ):
+                    return _fail(
+                        "Blockbench round-trip changed voxel data: "
+                        f"{blockbench_import_result!r}, {blockbench_export_result!r}"
+                    )
+                STATE["blockbench_roundtrip"] = True
+                GUI_MINECRAFT_PATH.parent.mkdir(parents=True, exist_ok=True)
+                minecraft_source_volume = minecraft_formats.MinecraftVolume(
+                    3,
+                    2,
+                    2,
+                    {
+                        (0, 0, 0): "minecraft:stone",
+                        (1, 0, 0): "minecraft:stone",
+                        (0, 1, 0): "minecraft:stone",
+                        (1, 1, 0): "minecraft:stone",
+                    },
+                )
+                minecraft_formats.encode_minecraft_file(
+                    minecraft_source_volume,
+                    GUI_MINECRAFT_PATH,
+                    "SCHEM",
+                )
+                minecraft_import_result = bpy.ops.voxtart.import_minecraft(
+                    filepath=str(GUI_MINECRAFT_PATH),
+                    format="SCHEM",
+                    grid_size=float(scene.voxtart_minecraft_grid_size),
+                )
+                minecraft_object = bpy.context.active_object
+                minecraft_asset = (
+                    operators._load_asset(minecraft_object)
+                    if minecraft_object is not None
+                    and operators.ASSET_PROPERTY in minecraft_object
+                    else None
+                )
+                minecraft_export_result = bpy.ops.voxtart.export_minecraft(
+                    filepath=str(GUI_MINECRAFT_PATH),
+                    format="SCHEM",
+                    default_block="minecraft:stone",
+                )
+                minecraft_roundtrip = minecraft_formats.decode_minecraft_file(
+                    GUI_MINECRAFT_PATH,
+                    format_hint="SCHEM",
+                )
+                if (
+                    "FINISHED" not in minecraft_import_result
+                    or "FINISHED" not in minecraft_export_result
+                    or minecraft_asset is None
+                    or len(minecraft_asset.voxels) != len(minecraft_roundtrip.blocks)
+                    or not minecraft_roundtrip.blocks
+                    or minecraft_object.get("voxtart_import_format") != "SCHEM"
+                ):
+                    return _fail(
+                        "Minecraft round-trip changed block data: "
+                        f"{minecraft_import_result!r}, {minecraft_export_result!r}"
+                    )
+                STATE["minecraft_roundtrip"] = True
+                for interchange_object in set(desktop_shell._asset_objects()).difference(
+                    before_interchange_assets
+                ):
+                    bpy.data.objects.remove(interchange_object, do_unlink=True)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
                 scene[voxel_editor.FIRST_RUN_HINT_PROPERTY] = False
                 desktop_shell._set_mode(scene, "HOME")
                 desktop_shell._draw_shell(shell_state, bpy.context)

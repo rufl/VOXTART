@@ -446,10 +446,12 @@ Blender workflow.
 ### Blockbench
 
 The Blockbench panel imports and exports generic cube-based `.bbmodel`
-files. Import supports cube elements, rotated elements, mesh bounds, indexed
-or explicit colors, visibility/export flags, and Bedrock
-`minecraft:geometry` bone cubes. Export writes deterministic merged voxel
-runs, UUIDs, palette metadata, and grid size.
+files. The project shell exposes a direct **Import Blockbench** shortcut,
+while the full panel provides the matching export workflow. Import supports
+cube elements, rotated elements, mesh bounds, indexed or explicit colors,
+visibility/export flags, and Bedrock `minecraft:geometry` bone cubes. Export
+writes deterministic merged voxel runs, UUIDs, palette metadata, and grid
+size.
 
 ### Minecraft
 
@@ -460,10 +462,11 @@ The Minecraft panel imports and exports:
 - structure NBT (`.nbt`);
 - Anvil regions (`.mca`) and world directories.
 
-The codec includes raw/gzip/zlib NBT, palettes and block properties, packed
-section indices, legacy blocks, region chunk tables, and world-origin
-preservation. Air is sparse and transparent palette colors map to a selected
-default block on export.
+The project shell exposes a direct **Import Minecraft** shortcut; the full
+panel provides the matching export workflow. The codec includes raw/gzip/zlib
+NBT, palettes and block properties, packed section indices, legacy blocks,
+region chunk tables, and world-origin preservation. Air is sparse and
+transparent palette colors map to a selected default block on export.
 
 ### SpriteStack and layered images
 
