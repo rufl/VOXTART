@@ -279,6 +279,7 @@ _ICON_FOR_KEY = {
     "paint:remove": "remove",
     "paint:place": "place",
     "character:prepare": "character",
+    "character:extract": "build",
     "character:rebuild": "build",
     "character:export": "export",
     "character:toolbox": "toolbox",
@@ -750,7 +751,7 @@ def _draw_mode(state, context, width: float, height: float) -> None:
         _draw_button(state, "paint:place", "Place adjacent", right, row_two, button_width, 34)
     else:
         _draw_button(state, "character:prepare", "Prepare rig", left, row_one, button_width, 34, accent=True)
-        _draw_button(state, "character:rebuild", "Rebuild character", right, row_one, button_width, 34)
+        _draw_button(state, "character:extract", "Extract game rig", right, row_one, button_width, 34)
         _draw_button(state, "character:export", "Export game rig", left, row_two, button_width, 34)
         _draw_button(state, "character:toolbox", "Open full toolbox", right, row_two, button_width, 34)
 
@@ -961,6 +962,9 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             return
         if key == "character:prepare":
             _run_operator(scene, lambda: bpy.ops.voxtart.prepare_character(), "Character rig prepared")
+            return
+        if key == "character:extract":
+            _run_operator(scene, lambda: bpy.ops.voxtart.extract_game_rig(), "Game rig extracted")
             return
         if key == "character:rebuild":
             _run_operator(scene, lambda: bpy.ops.voxtart.character_rebuild(), "Character rebuilt")

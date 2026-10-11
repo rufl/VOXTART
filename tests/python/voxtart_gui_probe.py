@@ -61,6 +61,12 @@ GUI_VOX_PATH = Path(
         str(SCREENSHOT.with_suffix(".vox")),
     )
 )
+GUI_GAME_RIG_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_GAME_RIG_PATH",
+        str(SCREENSHOT.with_suffix(".glb")),
+    )
+)
 STATE = {"attempts": 0}
 
 class _ShellHarness:
@@ -340,6 +346,8 @@ def _finish_mouse_clicks():
                 "palette_import": STATE.get("palette_import", False),
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "character_prepare": STATE.get("character_prepare", False),
+                "character_extract": STATE.get("character_extract", False),
+                "character_export": STATE.get("character_export", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
@@ -746,16 +754,58 @@ def _probe():
                     return _fail("Prepare rig did not create and bind a blockout armature")
                 STATE["character_prepare"] = True
                 character_armature = character_armatures[0]
+                if not any(key == "character:extract" for key, _bounds in shell_state.targets):
+                    return _fail("Character surface did not expose Extract game rig")
+                scene.voxtart_game_rig_bind_meshes = True
+                before_game_rigs = {obj.name for obj in bpy.data.objects if obj.type == "ARMATURE"}
+                shell_operator._activate(bpy.context, "character:extract")
+                game_rigs = [
+                    obj
+                    for obj in bpy.data.objects
+                    if obj.type == "ARMATURE" and obj.name not in before_game_rigs
+                ]
+                if (
+                    len(game_rigs) != 1
+                    or not game_rigs[0].get("voxtart_game_rig")
+                    or game_rigs[0].get("voxtart_game_rig_source") != character_armature.name
+                    or len(game_rigs[0].data.bones) < 5
+                ):
+                    return _fail("Extract game rig did not create a compact target armature")
+                game_rig = game_rigs[0]
+                STATE["character_extract"] = True
+                GUI_GAME_RIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+                game_rig_export_result = bpy.ops.voxtart.export_game_rig(
+                    filepath=str(GUI_GAME_RIG_PATH),
+                    export_format="GLTF",
+                    include_meshes=True,
+                )
+                if (
+                    "FINISHED" not in game_rig_export_result
+                    or not GUI_GAME_RIG_PATH.is_file()
+                    or GUI_GAME_RIG_PATH.stat().st_size <= 0
+                    or not game_rig.get("voxtart_game_rig_last_export")
+                    or game_rig.get("voxtart_game_rig_last_export_format") != "GLTF"
+                ):
+                    return _fail(
+                        f"Game rig export did not write its report and file: "
+                        f"{game_rig_export_result!r}"
+                    )
+                STATE["character_export"] = True
+                scene.voxtart_game_rig_bind_meshes = False
+                scene.voxtart_animation_source = ""
+                scene.voxtart_animation_target = ""
                 native_object.parent = None
                 for modifier in tuple(native_object.modifiers):
-                    if modifier.type == "ARMATURE" and modifier.object == character_armature:
+                    if modifier.type == "ARMATURE":
                         native_object.modifiers.remove(modifier)
-                if "voxtart_animation_armature" in native_object:
-                    del native_object["voxtart_animation_armature"]
-                armature_data = character_armature.data
-                bpy.data.objects.remove(character_armature, do_unlink=True)
-                if armature_data.users == 0:
-                    bpy.data.armatures.remove(armature_data)
+                for property_name in ("voxtart_animation_armature",):
+                    if property_name in native_object:
+                        del native_object[property_name]
+                for armature_object in (game_rig, character_armature):
+                    armature_data = armature_object.data
+                    bpy.data.objects.remove(armature_object, do_unlink=True)
+                    if armature_data.users == 0:
+                        bpy.data.armatures.remove(armature_data)
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)
