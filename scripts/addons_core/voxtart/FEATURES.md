@@ -473,9 +473,11 @@ transparent palette colors map to a selected default block on export.
 The SpriteStack / Layered Voxels panel imports JSON slice manifests, image
 sequences, SpriteStack-style VOX slices, OpenRaster (`.ora`), PSD, Krita
 (`.kra`) PNG-backed layers, and layered image documents available through
-Blender. Stack settings control axis (`X`, `Y`, `Z`), bottom/top ordering,
-alpha threshold, voxel scale, palette limit, and rebuild behavior. A stack
-can be exported as a portable `.sstack.json` manifest.
+Blender. The project shell exposes a direct **Import layered stack** shortcut;
+the full panel provides rebuild and portable manifest export. Stack settings
+control axis (`X`, `Y`, `Z`), bottom/top ordering, alpha threshold, voxel
+scale, palette limit, and rebuild behavior. A stack can be exported as a
+portable `.sstack.json` manifest.
 
 PSD decoding supports common 8-bit and 16-bit RGB/greyscale channels,
 raw/RLE/ZIP channel compression, visibility, opacity, offsets, and layer

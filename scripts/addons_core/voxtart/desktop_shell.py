@@ -273,6 +273,7 @@ _ICON_FOR_KEY = {
     "palette:reduce": "optimize",
     "voxel:import": "folder",
     "format:blockbench": "cube",
+    "format:stack": "layers",
     "format:minecraft": "cube",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
@@ -649,7 +650,16 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         _RIGHT_WIDTH - 32,
         26,
     )
-    parts_y -= 116
+    _draw_button(
+        state,
+        "format:stack",
+        "Import layered stack",
+        x,
+        parts_y - 86,
+        _RIGHT_WIDTH - 32,
+        26,
+    )
+    parts_y -= 146
     _draw_text("PARTS", x, parts_y, 11, _MUTED)
     _draw_text("Voxel assets", x, parts_y - 25, 13, _TEXT)
     objects = _asset_objects()
@@ -943,6 +953,14 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                 scene,
                 lambda: bpy.ops.voxtart.import_minecraft("INVOKE_DEFAULT"),
                 "Choose a Minecraft map or schematic",
+            )
+            return
+        if key == "format:stack":
+            self._finish(context)
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.import_stack("INVOKE_DEFAULT"),
+                "Choose a layered stack or image document",
             )
             return
         if key == "palette:reduce":
