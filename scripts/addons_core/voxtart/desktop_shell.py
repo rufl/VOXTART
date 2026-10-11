@@ -272,6 +272,8 @@ _ICON_FOR_KEY = {
     "palette:import": "palette",
     "palette:reduce": "optimize",
     "voxel:import": "folder",
+    "format:blockbench": "cube",
+    "format:minecraft": "cube",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
     "build:toolbox": "toolbox",
@@ -629,7 +631,25 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         _RIGHT_WIDTH - 32,
         26,
     )
-    parts_y -= 86
+    _draw_button(
+        state,
+        "format:blockbench",
+        "Import Blockbench",
+        x,
+        parts_y - 26,
+        _RIGHT_WIDTH - 32,
+        26,
+    )
+    _draw_button(
+        state,
+        "format:minecraft",
+        "Import Minecraft",
+        x,
+        parts_y - 56,
+        _RIGHT_WIDTH - 32,
+        26,
+    )
+    parts_y -= 116
     _draw_text("PARTS", x, parts_y, 11, _MUTED)
     _draw_text("Voxel assets", x, parts_y - 25, 13, _TEXT)
     objects = _asset_objects()
@@ -907,6 +927,22 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                 scene,
                 lambda: bpy.ops.voxtart.import_voxel_format("INVOKE_DEFAULT"),
                 "Choose a VOX or QB model",
+            )
+            return
+        if key == "format:blockbench":
+            self._finish(context)
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.import_blockbench("INVOKE_DEFAULT"),
+                "Choose a Blockbench model",
+            )
+            return
+        if key == "format:minecraft":
+            self._finish(context)
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.import_minecraft("INVOKE_DEFAULT"),
+                "Choose a Minecraft map or schematic",
             )
             return
         if key == "palette:reduce":
