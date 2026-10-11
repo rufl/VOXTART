@@ -270,6 +270,7 @@ _ICON_FOR_KEY = {
     "build:refresh": "refresh",
     "build:export": "export",
     "palette:import": "palette",
+    "palette:reduce": "optimize",
     "voxel:import": "folder",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
@@ -606,7 +607,16 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         "palette:import",
         "Import palette",
         x,
-        parts_y + 36,
+        parts_y + 64,
+        _RIGHT_WIDTH - 32,
+        26,
+    )
+    _draw_button(
+        state,
+        "palette:reduce",
+        "Reduce palette",
+        x,
+        parts_y + 34,
         _RIGHT_WIDTH - 32,
         26,
     )
@@ -615,7 +625,7 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         "voxel:import",
         "Import VOX / QB",
         x,
-        parts_y + 6,
+        parts_y + 4,
         _RIGHT_WIDTH - 32,
         26,
     )
@@ -897,6 +907,16 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                 scene,
                 lambda: bpy.ops.voxtart.import_voxel_format("INVOKE_DEFAULT"),
                 "Choose a VOX or QB model",
+            )
+            return
+        if key == "palette:reduce":
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.palette_reduce(
+                    max_colors=int(scene.voxtart_palette_reduce_colors),
+                    method=str(scene.voxtart_palette_reduce_method),
+                ),
+                "Palette reduced",
             )
             return
         if key == "palette:import":
