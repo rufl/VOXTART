@@ -347,6 +347,8 @@ def _finish_mouse_clicks():
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "character_prepare": STATE.get("character_prepare", False),
                 "character_extract": STATE.get("character_extract", False),
+                "character_bake": STATE.get("character_bake", False),
+                "character_preview": STATE.get("character_preview", False),
                 "character_export": STATE.get("character_export", False),
                 "save_control": STATE.get("save_control", False),
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
@@ -772,6 +774,59 @@ def _probe():
                 ):
                     return _fail("Extract game rig did not create a compact target armature")
                 game_rig = game_rigs[0]
+                required_character_keys = {
+                    "character:import",
+                    "character:bake",
+                    "character:preview",
+                    "character:export",
+                }
+                visible_character_keys = {key for key, _bounds in shell_state.targets}
+                if not required_character_keys.issubset(visible_character_keys):
+                    return _fail("Character surface did not expose animation retargeting controls")
+                character_armature.animation_data_create()
+                source_bone = character_armature.pose.bones.get("root")
+                if source_bone is None:
+                    return _fail("Blockout rig did not expose a root pose bone")
+                source_bone.rotation_mode = "XYZ"
+                scene.frame_set(1)
+                source_bone.rotation_euler.z = 0.0
+                source_bone.keyframe_insert(data_path="rotation_euler", frame=1)
+                source_bone.rotation_euler.z = 0.35
+                source_bone.keyframe_insert(data_path="rotation_euler", frame=5)
+                source_action = character_armature.animation_data.action
+                if source_action is None:
+                    return _fail("Could not create a source animation action")
+                source_action.name = "VOXTART GUI Walk"
+                scene.voxtart_animation_source = character_armature.name
+                scene.voxtart_animation_target = game_rig.name
+                scene.voxtart_animation_action = source_action.name
+                scene.voxtart_animation_bake_action_names = source_action.name
+                scene.voxtart_animation_bake_all_actions = False
+                scene.voxtart_animation_bake_prefix = "Game_"
+                shell_operator._activate(bpy.context, "character:bake")
+                baked_action = (
+                    game_rig.animation_data.action
+                    if game_rig.animation_data is not None
+                    else None
+                )
+                if (
+                    baked_action is None
+                    or not baked_action.get("voxtart_game_rig_baked")
+                    or baked_action.frame_range[1] < 5.0
+                    or not game_rig.get("voxtart_game_rig_baked_actions")
+                ):
+                    return _fail("Native action bake did not create a game-rig action")
+                STATE["character_bake"] = True
+                scene.voxtart_animation_preview_action = baked_action.name
+                shell_operator._activate(bpy.context, "character:preview")
+                if (
+                    game_rig.animation_data is None
+                    or game_rig.animation_data.action != baked_action
+                    or scene.voxtart_animation_preview_action != baked_action.name
+                    or scene.frame_current != int(baked_action.frame_range[0])
+                ):
+                    return _fail("Game-rig preview did not assign the baked action")
+                STATE["character_preview"] = True
                 STATE["character_extract"] = True
                 GUI_GAME_RIG_PATH.parent.mkdir(parents=True, exist_ok=True)
                 game_rig_export_result = bpy.ops.voxtart.export_game_rig(

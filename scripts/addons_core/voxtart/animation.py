@@ -584,10 +584,10 @@ def _resolve_action(source: bpy.types.Object, action_name: str | None):
 
 
 def _set_active_object(context: bpy.types.Context, obj: bpy.types.Object) -> None:
-    bpy.ops.object.select_all(action="DESELECT")
+    for selected in tuple(getattr(context, "selected_objects", ())):
+        selected.select_set(False)
     obj.select_set(True)
     context.view_layer.objects.active = obj
-
 
 def _retarget_with_mwni(
     context: bpy.types.Context,
@@ -688,8 +688,10 @@ def _retarget_natively(
     finally:
         if not preserve_constraints:
             for owner, constraint in constraints:
-                if constraint in owner.constraints:
+                try:
                     owner.constraints.remove(constraint)
+                except (ReferenceError, RuntimeError):
+                    pass
         if getattr(target, "mode", "OBJECT") != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
 

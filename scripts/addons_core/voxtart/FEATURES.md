@@ -79,12 +79,14 @@ unchanged and recording the export report.
 The project surface's **Import VOX / QB** action closes P1 native voxel
 interchange; the release gate round-trips VOX while the same operator retains
 Qubicle QB support.
-The Character surface's **Prepare rig**, **Extract game rig**, and **Export
-game rig** actions close the P1 character handoff. Prepare creates an editable
+The Character surface's **Prepare rig**, **Import animation**, **Extract game
+rig**, **Bake actions**, **Preview action**, and **Export game rig** controls
+close the native character-animation handoff. Prepare creates an editable
 blockout armature and binds the active mesh; Extract creates a compact target
-armature; Export writes a GLB while leaving the source mesh available for
-further edits. Broader animation retargeting and FBX export remain advanced
-paths.
+armature; the native baker maps source actions onto that target, and Export
+writes a GLB while leaving the source mesh available for further edits.
+Optional external retargeting add-ons, manual mapping, and Rigify fitting
+remain advanced paths.
 The palette panel's **Import palette** action closes local palette-file intake:
 it loads a palette into the visible Colors strip and, when enforcement is on,
 retargets the active asset to the imported colors.
