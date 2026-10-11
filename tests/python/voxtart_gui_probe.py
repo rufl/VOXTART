@@ -27,6 +27,7 @@ from voxtart import (
     operators,
     optimizer_ui,
     palette_ui,
+    stacking,
     voxel_editor,
 )
 from voxtart.voxel import VoxelAsset  # noqa: E402
@@ -86,6 +87,12 @@ GUI_MINECRAFT_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_MINECRAFT_PATH",
         str(SCREENSHOT.with_suffix(".schem")),
+    )
+)
+GUI_STACK_PATH = Path(
+    os.environ.get(
+        "VOXTART_GUI_STACK_PATH",
+        str(SCREENSHOT.with_suffix(".sstack.json")),
     )
 )
 STATE = {"attempts": 0}
@@ -368,6 +375,7 @@ def _finish_mouse_clicks():
                 "palette_reduce": STATE.get("palette_reduce", False),
                 "blockbench_roundtrip": STATE.get("blockbench_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
+                "stack_roundtrip": STATE.get("stack_roundtrip", False),
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "character_prepare": STATE.get("character_prepare", False),
                 "character_extract": STATE.get("character_extract", False),
@@ -780,10 +788,14 @@ def _probe():
                 STATE["native_vox_roundtrip"] = True
                 desktop_shell._set_mode(scene, "BUILD")
                 desktop_shell._draw_shell(shell_state, bpy.context)
-                required_interchange_keys = {"format:blockbench", "format:minecraft"}
+                required_interchange_keys = {
+                    "format:blockbench",
+                    "format:minecraft",
+                    "format:stack",
+                }
                 visible_interchange_keys = {key for key, _bounds in shell_state.targets}
                 if not required_interchange_keys.issubset(visible_interchange_keys):
-                    return _fail("Project surface did not expose Blockbench and Minecraft imports")
+                    return _fail("Project surface did not expose interchange imports")
                 before_interchange_assets = set(desktop_shell._asset_objects())
                 GUI_BLOCKBENCH_PATH.parent.mkdir(parents=True, exist_ok=True)
                 GUI_BLOCKBENCH_PATH.write_text(
@@ -898,6 +910,97 @@ def _probe():
                         f"{minecraft_import_result!r}, {minecraft_export_result!r}"
                     )
                 STATE["minecraft_roundtrip"] = True
+                required_stack_document = stacking.StackDocument.from_layers(
+                    (
+                        stacking.StackLayer(
+                            "Base",
+                            2,
+                            2,
+                            (
+                                (0.9, 0.2, 0.2, 1.0),
+                                (0.9, 0.2, 0.2, 1.0),
+                                (0.9, 0.2, 0.2, 1.0),
+                                (0.9, 0.2, 0.2, 1.0),
+                            ),
+                        ),
+                        stacking.StackLayer(
+                            "Highlight",
+                            2,
+                            2,
+                            (
+                                (0.2, 0.8, 0.3, 1.0),
+                                (0.2, 0.8, 0.3, 1.0),
+                                (0.2, 0.8, 0.3, 1.0),
+                                (0.2, 0.8, 0.3, 1.0),
+                            ),
+                            offset=(1, 0),
+                            opacity=0.75,
+                        ),
+                    ),
+                    canvas_size=(3, 2),
+                    source_format="sprite-stack-manifest",
+                )
+                scene.voxtart_stack_axis = "Z"
+                scene.voxtart_stack_order = "BOTTOM_TO_TOP"
+                scene.voxtart_stack_alpha_threshold = 0.05
+                scene.voxtart_stack_voxel_scale = 1.0
+                scene.voxtart_stack_palette_limit = 16
+                GUI_STACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+                GUI_STACK_PATH.write_text(
+                    required_stack_document.encode() + "\n",
+                    encoding="utf-8",
+                )
+                stack_import_result = bpy.ops.voxtart.import_stack(
+                    filepath=str(GUI_STACK_PATH)
+                )
+                stack_object = bpy.context.active_object
+                stack_document = (
+                    stacking.StackDocument.decode(stack_object[stacking.STACK_PROPERTY])
+                    if stack_object is not None
+                    and isinstance(stack_object.get(stacking.STACK_PROPERTY), str)
+                    else None
+                )
+                stack_asset = (
+                    operators._load_asset(stack_object)
+                    if stack_object is not None
+                    and operators.ASSET_PROPERTY in stack_object
+                    else None
+                )
+                expected_stack_asset = (
+                    stacking.stack_to_voxel_asset(
+                        stack_document,
+                        axis=str(scene.voxtart_stack_axis),
+                        layer_order=str(scene.voxtart_stack_order),
+                        alpha_threshold=float(scene.voxtart_stack_alpha_threshold),
+                        voxel_scale=float(scene.voxtart_stack_voxel_scale),
+                        palette_limit=int(scene.voxtart_stack_palette_limit),
+                    )
+                    if stack_document is not None
+                    else None
+                )
+                stack_export_result = bpy.ops.voxtart.export_stack_manifest(
+                    filepath=str(GUI_STACK_PATH)
+                )
+                exported_stack_document = stacking.StackDocument.decode(
+                    GUI_STACK_PATH.read_text(encoding="utf-8")
+                )
+                if (
+                    "FINISHED" not in stack_import_result
+                    or "FINISHED" not in stack_export_result
+                    or stack_object is None
+                    or stack_document is None
+                    or stack_asset is None
+                    or expected_stack_asset is None
+                    or stack_asset.voxels != expected_stack_asset.voxels
+                    or exported_stack_document.to_dict() != stack_document.to_dict()
+                    or len(stack_document.layers) != 2
+                    or not stack_object.get("voxtart_stack_mode")
+                ):
+                    return _fail(
+                        "Layered stack round-trip changed document data: "
+                        f"{stack_import_result!r}, {stack_export_result!r}"
+                    )
+                STATE["stack_roundtrip"] = True
                 for interchange_object in set(desktop_shell._asset_objects()).difference(
                     before_interchange_assets
                 ):
