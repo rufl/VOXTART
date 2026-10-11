@@ -344,6 +344,7 @@ def _finish_mouse_clicks():
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
+                "palette_reduce": STATE.get("palette_reduce", False),
                 "native_vox_roundtrip": STATE.get("native_vox_roundtrip", False),
                 "character_prepare": STATE.get("character_prepare", False),
                 "character_extract": STATE.get("character_extract", False),
@@ -686,7 +687,36 @@ def _probe():
                 ):
                     return _fail(f"Palette file import did not update the active palette: {palette_result!r}")
                 STATE["palette_import"] = True
-                native_source = operators._load_asset(imported_asset_object)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                imported_asset_object.select_set(True)
+                bpy.context.view_layer.objects.active = imported_asset_object
+                desktop_shell._set_mode(scene, "BUILD")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "palette:reduce" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Reduce palette")
+                before_reduced_cells = dict(operators._load_asset(imported_asset_object).voxels)
+                scene.voxtart_palette_reduce_colors = 1
+                shell_operator._activate(bpy.context, "palette:reduce")
+                reduced_asset = operators._load_asset(imported_asset_object)
+                try:
+                    reduction_report = json.loads(
+                        imported_asset_object.get("voxtart_palette_reduction_report", "{}")
+                    )
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    reduction_report = {}
+                if (
+                    len(reduced_asset.palette) != 1
+                    or set(reduced_asset.voxels) != set(before_reduced_cells)
+                    or reduction_report.get("target_colors") != 1
+                    or reduction_report.get("target_voxels") != len(before_reduced_cells)
+                ):
+                    return _fail(
+                        f"Palette reduction changed asset occupancy or report: "
+                        f"{reduction_report!r}"
+                    )
+                STATE["palette_reduce"] = True
+                native_source = reduced_asset
                 before_native_assets = set(desktop_shell._asset_objects())
                 GUI_VOX_PATH.parent.mkdir(parents=True, exist_ok=True)
                 vox_export_result = bpy.ops.voxtart.export_voxel_format(

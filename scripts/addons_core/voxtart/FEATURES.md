@@ -87,11 +87,13 @@ armature; the native baker maps source actions onto that target, and Export
 writes a GLB while leaving the source mesh available for further edits.
 Optional external retargeting add-ons, manual mapping, and Rigify fitting
 remain advanced paths.
-The palette panel's **Import palette** action closes local palette-file intake:
-it loads a palette into the visible Colors strip and, when enforcement is on,
-retargets the active asset to the imported colors.
-Remote palette sources, palette reduction, and the broader palette-library
-workflow remain advanced paths.
+The palette panel's **Import palette** and **Reduce palette** actions close
+local palette-file intake and deterministic reduction. Import loads a palette
+into the visible Colors strip and, when enforcement is on, retargets the active
+asset to the imported colors. Reduce preserves occupied cells while recording
+the weighted median-cut report and resulting palette size.
+Remote palette sources and the broader palette-library workflow remain advanced
+paths.
 Rounded controls expose direct paths for creating, importing, voxelizing,
 refreshing, painting, optimizing, exporting, and character work after the
 first-run path; hovering a control shows its label and available shortcut.

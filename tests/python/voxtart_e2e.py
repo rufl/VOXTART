@@ -352,6 +352,7 @@ def _run_gui_probe() -> None:
             or payload.get("portable_roundtrip") is not True
             or payload.get("mesh_export") is not True
             or payload.get("palette_import") is not True
+            or payload.get("palette_reduce") is not True
             or payload.get("native_vox_roundtrip") is not True
             or payload.get("character_prepare") is not True
             or payload.get("character_extract") is not True
