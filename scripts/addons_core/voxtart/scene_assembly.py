@@ -163,7 +163,8 @@ class SceneAssembly:
             raise ValueError("scene assembly must contain a JSON object")
         if data.get("format") != ASSEMBLY_FORMAT:
             raise ValueError(f"unsupported scene assembly format: {data.get('format')!r}")
-        if int(data.get("format_version", -1)) != ASSEMBLY_FORMAT_VERSION:
+        format_version = data.get("format_version", -1)
+        if isinstance(format_version, bool) or not isinstance(format_version, int) or format_version != ASSEMBLY_FORMAT_VERSION:
             raise ValueError("unsupported scene assembly version")
         raw_placements = data.get("placements", ())
         if not isinstance(raw_placements, (list, tuple)):

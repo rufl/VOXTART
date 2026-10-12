@@ -226,7 +226,8 @@ class CharacterRecipe:
             raise ValueError("character recipe must be a JSON object")
         if data.get("format") != CHARACTER_FORMAT:
             raise ValueError(f"unsupported character format: {data.get('format')!r}")
-        if int(data.get("format_version", -1)) != CHARACTER_FORMAT_VERSION:
+        format_version = data.get("format_version", -1)
+        if isinstance(format_version, bool) or not isinstance(format_version, int) or format_version != CHARACTER_FORMAT_VERSION:
             raise ValueError("unsupported character version")
         raw_parts = data.get("parts", ())
         if not isinstance(raw_parts, (list, tuple)):

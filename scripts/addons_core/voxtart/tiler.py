@@ -320,14 +320,14 @@ class TilerSettings:
         axis = str(self.axis).upper()
         if axis not in TILER_AXES:
             raise ValueError(f"unsupported tiler axis: {self.axis!r}")
-        side = int(self.side)
-        if side not in (-1, 1):
+        side = self.side
+        if isinstance(side, bool) or not isinstance(side, int) or side not in (-1, 1):
             raise ValueError("tiler side must be -1 or 1")
-        depth = int(self.depth)
-        if isinstance(self.depth, bool) or not 1 <= depth <= MAX_TILE_DEPTH:
+        depth = self.depth
+        if isinstance(depth, bool) or not isinstance(depth, int) or not 1 <= depth <= MAX_TILE_DEPTH:
             raise ValueError(f"tiler depth must be between 1 and {MAX_TILE_DEPTH}")
-        rotation = int(self.rotation)
-        if isinstance(self.rotation, bool) or rotation not in TILER_ROTATIONS:
+        rotation = self.rotation
+        if isinstance(rotation, bool) or not isinstance(rotation, int) or rotation not in TILER_ROTATIONS:
             raise ValueError("tiler rotation must be a right-angle turn")
         mode = str(self.mode).upper()
         if mode not in TILER_MODES:

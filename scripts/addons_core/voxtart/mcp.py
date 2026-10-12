@@ -14,6 +14,7 @@ model receives the same bounded MCP tools exposed to external clients.
 
 import http.server
 import json
+import math
 import os
 import queue
 import secrets
@@ -206,6 +207,27 @@ def _coerce_cell(value: Any, field: str = "cell") -> tuple[int, int, int]:
         raise MCPToolError(f"{field} must contain exactly three integer coordinates")
     return tuple(value)  # type: ignore[return-value]
 
+
+def _coerce_int(value: Any, field: str, *, minimum: int | None = None, maximum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise MCPToolError(f"{field} must be an integer")
+    if minimum is not None and value < minimum:
+        raise MCPToolError(f"{field} must be at least {minimum}")
+    if maximum is not None and value > maximum:
+        raise MCPToolError(f"{field} must be at most {maximum}")
+    return value
+
+
+def _coerce_float(value: Any, field: str) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise MCPToolError(f"{field} must be a finite number") from error
+    if not math.isfinite(result):
+        raise MCPToolError(f"{field} must be a finite number")
+    return result
+
+
 def _bounded_volume(minimum: tuple[int, int, int], maximum: tuple[int, int, int]) -> None:
     spans = tuple(maximum[axis] - minimum[axis] + 1 for axis in range(3))
     if any(span <= 0 for span in spans):
@@ -220,10 +242,10 @@ def _coerce_color(value: Any) -> tuple[float, float, float, float]:
         raise MCPToolError("color must contain four RGBA values")
     try:
         color = tuple(float(item) for item in value)
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, OverflowError) as error:
         raise MCPToolError("color must contain numeric RGBA values") from error
-    if any(item < 0.0 or item > 1.0 for item in color):
-        raise MCPToolError("color values must be in the range [0, 1]")
+    if any(not math.isfinite(item) or item < 0.0 or item > 1.0 for item in color):
+        raise MCPToolError("color values must be finite and in the range [0, 1]")
     return color  # type: ignore[return-value]
 
 
@@ -242,12 +264,10 @@ def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, An
         size = arguments.get("size", 1)
         if isinstance(size, bool) or not isinstance(size, int) or not 1 <= size <= MAX_BOX_SIZE:
             raise MCPToolError(f"size must be an integer between 1 and {MAX_BOX_SIZE}")
-        grid_size = float(arguments.get("grid_size", 1.0))
+        grid_size = _coerce_float(arguments.get("grid_size", 1.0), "grid_size")
         if grid_size <= 0.0:
             raise MCPToolError("grid_size must be positive")
-        palette_index = int(arguments.get("palette_index", 0))
-        if palette_index < 0 or palette_index >= 256:
-            raise MCPToolError("palette_index must be between 0 and 255")
+        palette_index = _coerce_int(arguments.get("palette_index", 0), "palette_index", minimum=0, maximum=255)
         palette = [(0.8, 0.8, 0.8, 1.0)] * (palette_index + 1)
         if "color" in arguments:
             palette[palette_index] = _coerce_color(arguments["color"])
@@ -274,11 +294,14 @@ def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, An
             if not isinstance(entry, Mapping):
                 raise MCPToolError("each voxel entry must be an object")
             cell = _coerce_cell(entry.get("cell"))
-            palette_index = int(entry.get("palette_index", 0))
-            if not 0 <= palette_index < len(normalized_palette):
-                raise MCPToolError(f"palette_index out of range: {palette_index}")
+            palette_index = _coerce_int(
+                entry.get("palette_index", 0),
+                "palette_index",
+                minimum=0,
+                maximum=len(normalized_palette) - 1,
+            )
             voxels[cell] = palette_index
-        grid_size = float(arguments.get("grid_size", 1.0))
+        grid_size = _coerce_float(arguments.get("grid_size", 1.0), "grid_size")
         if grid_size <= 0.0:
             raise MCPToolError("grid_size must be positive")
         asset = VoxelAsset(grid_size=grid_size, palette=normalized_palette, voxels=voxels)
@@ -289,9 +312,12 @@ def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, An
         obj = _find_asset_object(context, arguments.get("object_name"))
         asset = _object_asset(obj)
         operation = str(arguments.get("operation", ""))
-        palette_index = int(arguments.get("palette_index", 0))
-        if not 0 <= palette_index < len(asset.palette):
-            raise MCPToolError(f"palette_index out of range: {palette_index}")
+        palette_index = _coerce_int(
+            arguments.get("palette_index", 0),
+            "palette_index",
+            minimum=0,
+            maximum=len(asset.palette) - 1,
+        )
         from . import operators
         from .edit import VoxelEditTransaction
 

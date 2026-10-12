@@ -43,15 +43,31 @@ def _color(value: Iterable[float]) -> Color:
     return result  # type: ignore[return-value]
 
 
+def _integer(value: Any, field: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 10)
+        except ValueError as error:
+            raise ValueError(f"{field} must be an integer") from error
+    raise ValueError(f"{field} must be an integer")
+
+
 def _dimension(value: Any, field: str) -> int:
-    result = int(value)
-    if isinstance(value, bool) or result <= 0 or result > MAX_STACK_DIMENSION:
+    result = _integer(value, field)
+    if result <= 0 or result > MAX_STACK_DIMENSION:
         raise ValueError(f"{field} must be between 1 and {MAX_STACK_DIMENSION}")
     return result
 
 
 def _offset(value: Iterable[int]) -> tuple[int, int]:
-    result = tuple(int(axis) for axis in value)
+    try:
+        result = tuple(_integer(axis, "stack layer offset") for axis in value)
+    except TypeError as error:
+        raise ValueError("stack layer offsets must contain two integers") from error
     if len(result) != 2:
         raise ValueError("stack layer offsets must contain two integers")
     return result  # type: ignore[return-value]
@@ -242,7 +258,8 @@ class StackDocument:
             raise ValueError("stack document must be an object")
         if data.get("format") != STACK_FORMAT:
             raise ValueError(f"unsupported stack format: {data.get('format')!r}")
-        if int(data.get("schema_version", -1)) != STACK_SCHEMA_VERSION:
+        schema_version = data.get("schema_version", -1)
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != STACK_SCHEMA_VERSION:
             raise ValueError("unsupported stack schema version")
         raw_layers = data.get("layers", ())
         if not isinstance(raw_layers, (list, tuple)):

@@ -164,9 +164,22 @@ class VoxelCoreTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             voxel.VoxelSocket((0, 0, 0), (1, 0, 0), rotation=45)
         with self.assertRaises(ValueError):
-            voxel.VoxelAsset(grid_size=0.0)
+            voxel.VoxelSocket((0, 0, 0), (1, 0, 0), rotation=90.0)
         with self.assertRaises(ValueError):
-            voxel.VoxelAsset.from_dict({"schema_version": 99, "grid_size": 1, "palette": PALETTE})
+            voxel.VoxelAsset(grid_size=0.0)
+        for invalid_grid_size in (float("nan"), float("inf"), float("-inf")):
+            with self.assertRaises(ValueError):
+                voxel.VoxelAsset(grid_size=invalid_grid_size)
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(palette=[(float("nan"), 0.0, 0.0, 1.0)])
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset.from_dict({"schema_version": True, "grid_size": 1, "palette": PALETTE})
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset.from_dict({"schema_version": 1, "grid_size": 1, "palette": PALETTE, "voxels": [[0, 0, 0, 1.5]]})
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(palette=[(object(), 0.0, 0.0, 1.0)])
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(grid_size=object())
         with self.assertRaises(ValueError):
             make_asset().set_voxel((0, 0, 0), 99)
 
@@ -666,6 +679,12 @@ class TilerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             tiler.TilerSettings(pixel_scale=1.0, rotation=45)
         with self.assertRaises(ValueError):
+            tiler.TilerSettings(pixel_scale=1.0, side=1.5)
+        with self.assertRaises(ValueError):
+            tiler.TilerSettings(pixel_scale=1.0, depth=1.5)
+        with self.assertRaises(ValueError):
+            tiler.TilerSettings(pixel_scale=1.0, rotation=90.5)
+        with self.assertRaises(ValueError):
             tiler.TilerSettings(pixel_scale=1.0, mode="PAINT")
         with self.assertRaises(ValueError):
             tiler.tile_to_voxel_asset(
@@ -950,6 +969,16 @@ class LayerAndIOTest(unittest.TestCase):
         self.assertEqual(restored.layers[0].surface_backend, "MARCHING")
         self.assertEqual(restored.to_dict(), stack.to_dict())
         restored.flatten(palette_values)
+        with self.assertRaises(ValueError):
+            restored.set_active(1.5)
+        with self.assertRaises(ValueError):
+            restored.move_active(1.5)
+        with self.assertRaises(ValueError):
+            layers.Layer(opacity=object())
+        with self.assertRaises(ValueError):
+            restored.composite([(object(), 0.0, 0.0, 1.0)])
+        with self.assertRaises(ValueError):
+            restored.remap_palette_indices({0.5: 1})
         self.assertEqual(len(restored.layers), 1)
 
     def test_asset_io_with_and_without_layers(self):
@@ -1221,6 +1250,10 @@ class CharacterEditorTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             character_editor.CharacterRecipe.from_dict(
                 {"format": character_editor.CHARACTER_FORMAT, "format_version": 99, "parts": []}
+            )
+        with self.assertRaises(ValueError):
+            character_editor.CharacterRecipe.from_dict(
+                {"format": character_editor.CHARACTER_FORMAT, "format_version": 1.5, "parts": []}
             )
         with self.assertRaises(ValueError):
             character_editor.CharacterRecipe.from_dict(
@@ -1631,6 +1664,8 @@ class BoundaryAndFailureTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             asset_placer.disc_samples((0, 0, 0), -1, 1)
         with self.assertRaises(ValueError):
+            asset_placer.disc_samples((0, 0, 0), 1, 1.5)
+        with self.assertRaises(ValueError):
             asset_placer.randomized_transform(
                 (0, 0, 0),
                 (0, 0, 0),
@@ -1649,6 +1684,8 @@ class BoundaryAndFailureTest(unittest.TestCase):
         self.assertEqual(asset_placer.thumbnail_pixels(make_asset({}), 8, 8), (0.0,) * (8 * 8 * 4))
         with self.assertRaises(ValueError):
             asset_placer.thumbnail_pixels(make_asset(), 7, 8)
+        with self.assertRaises(ValueError):
+            asset_placer.thumbnail_pixels(make_asset(), 8.5, 8)
 
     def test_voxel_picking(self):
         asset = make_asset({(0, 0, 0): 0, (1, 0, 0): 1})
@@ -1706,6 +1743,10 @@ class BoundaryAndFailureTest(unittest.TestCase):
             layers.Layer(voxels={(0, 0, 0): -1})
         with self.assertRaises(ValueError):
             layers.Layer.from_dict({"voxels": [[0, 0, 0]]})
+        with self.assertRaises(ValueError):
+            layers.Layer(opacity=float("nan"))
+        with self.assertRaises(ValueError):
+            layers.LayerStack(active_index=1.5)
         stack = layers.LayerStack()
         with self.assertRaises(IndexError):
             stack.set_active(2)
@@ -1830,6 +1871,10 @@ class BoundaryAndFailureTest(unittest.TestCase):
         )
         self.assertTrue(tool_error["result"]["isError"])
         self.assertIn("protocolVersion", dispatcher.dispatch({"jsonrpc": "2.0", "id": 8, "method": "initialize"})["result"])
+        malformed_initialize = dispatcher.dispatch(
+            {"jsonrpc": "2.0", "id": 11, "method": "initialize", "params": {"protocolVersion": []}}
+        )
+        self.assertEqual(malformed_initialize["result"]["protocolVersion"], mcp_protocol.MCP_PROTOCOL_VERSION)
         self.assertIn("resourceTemplates", dispatcher.dispatch({"jsonrpc": "2.0", "id": 9, "method": "resources/templates/list"})["result"])
         self.assertIn("prompts", dispatcher.dispatch({"jsonrpc": "2.0", "id": 10, "method": "prompts/list"})["result"])
 
@@ -1887,6 +1932,10 @@ class BoundaryAndFailureTest(unittest.TestCase):
             scene_assembly.SceneAssembly.decode("bad")
         with self.assertRaises(ValueError):
             scene_assembly.SceneAssembly.from_dict({"format": "bad", "format_version": 1})
+        with self.assertRaises(ValueError):
+            scene_assembly.SceneAssembly.from_dict(
+                {"format": scene_assembly.ASSEMBLY_FORMAT, "format_version": 1.5, "placements": []}
+            )
         source = make_asset(sockets=[voxel.VoxelSocket((0, 0, 0), (1, 0, 0), "*")])
         target = make_asset(sockets=[voxel.VoxelSocket((2, 0, 0), (-1, 0, 0), "hand")])
         self.assertEqual(kitbash.socket_compatibility(source.sockets[0], target.sockets[0]), 1)
@@ -1915,6 +1964,20 @@ class BoundaryAndFailureTest(unittest.TestCase):
             volume.set((99, 0, 0), "stone")
         with self.assertRaises(ValueError):
             minecraft_formats.MinecraftVolume(0, 1, 1)
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume(1.5, 1, 1)
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume(1, 1, 1, {(0.5, 0, 0): "stone"})
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume(1, 1, 1, origin=(0.0, 0, 0))
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume.from_world_blocks({(0.5, 0, 0): "air"})
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume(True, 1, 1)
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume("invalid", 1, 1)
+        with self.assertRaises(ValueError):
+            minecraft_formats.MinecraftVolume(1, 1, 1, {None: "stone"})
         self.assertEqual(len(minecraft_formats.MinecraftVolume.from_world_blocks({}).blocks), 0)
         for hint, encoder in (
             ("SCHEM", minecraft_formats.encode_sponge_schematic),
@@ -1956,7 +2019,17 @@ class BoundaryAndFailureTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             stacking.StackLayer("bad", 1, 1, ())
         with self.assertRaises(ValueError):
+            stacking.StackLayer("bad", 1.5, 1, ((1.0, 0.0, 0.0, 1.0),))
+        with self.assertRaises(ValueError):
+            stacking.StackLayer("bad", 1, 1, ((1.0, 0.0, 0.0, 1.0),), offset=(1.5, 0))
+        with self.assertRaises(ValueError):
+            stacking.StackLayer("bad", "invalid", 1, ((1.0, 0.0, 0.0, 1.0),))
+        with self.assertRaises(ValueError):
             stacking.StackLayer.from_dict({"width": 1, "height": 1, "pixels": {"encoding": "bad", "data": ""}})
+        with self.assertRaises(ValueError):
+            stacking.StackLayer("bad", 0, 1, ())
+        with self.assertRaises(ValueError):
+            stacking.StackLayer("bad", 1, 1, ((1.0, 0.0, 0.0, 1.0),), offset=None)
         document = stacking.StackDocument.from_layers([layer], canvas_size=(2, 1))
         with self.assertRaises(ValueError):
             stacking.decode_stack_manifest("[]", lambda _name, _data: layer)
@@ -2138,6 +2211,8 @@ class BoundaryAndFailureTest(unittest.TestCase):
             asset_io.decode_asset("[]")
         with self.assertRaises(ValueError):
             asset_io.decode_asset(json.dumps({"format": asset_io.FORMAT_NAME, "format_version": 2}))
+        with self.assertRaises(ValueError):
+            asset_io.decode_asset(json.dumps({"format": asset_io.FORMAT_NAME, "format_version": 1.5}))
         payload = json.loads(asset_io.encode_asset(asset))
         payload["layers"] = "bad"
         with self.assertRaises(ValueError):
@@ -2182,6 +2257,8 @@ class BoundaryAndFailureTest(unittest.TestCase):
             layers.Layer(voxels={(True, 0, 0): 0})
         with self.assertRaises(ValueError):
             layers.LayerStack(schema_version=99)
+        with self.assertRaises(ValueError):
+            layers.LayerStack(schema_version=True)
         with self.assertRaises(ValueError):
             layers.LayerStack(layers=[layers.Layer() for _ in range(layers.MAX_LAYERS + 1)])
         lower = layers.Layer(name="Lower", voxels={(0, 0, 0): 0})
@@ -2660,6 +2737,10 @@ class BoundaryAndFailureTest(unittest.TestCase):
         )
         with self.assertRaises(ValueError):
             blob_gallery.BlobGalleryEntry("hero", "Hero", asset, schema_version=99)
+        invalid_version = entry.to_dict()
+        invalid_version["format_version"] = 1.5
+        with self.assertRaises(ValueError):
+            blob_gallery.BlobGalleryEntry.from_dict(invalid_version)
         with self.assertRaises(TypeError):
             blob_gallery.BlobGalleryEntry("hero", "Hero", object())
         with self.assertRaises(TypeError):
@@ -3355,6 +3436,8 @@ class BoundaryAndFailureTest(unittest.TestCase):
             stacking.StackDocument.from_dict({"format": stacking.STACK_FORMAT, "schema_version": 2, "layers": []})
         with self.assertRaises(ValueError):
             stacking.StackDocument.from_dict({"format": stacking.STACK_FORMAT, "schema_version": 1, "layers": {}})
+        with self.assertRaises(ValueError):
+            stacking.StackDocument.from_dict({"format": stacking.STACK_FORMAT, "schema_version": True, "layers": []})
         with self.assertRaises(ValueError):
             stacking._manifest_layers(1)
         with self.assertRaises(ValueError):
