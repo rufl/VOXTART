@@ -458,12 +458,24 @@ def _draw_editor_topbar(editor, context) -> None:
         for action, bounds in _editor_topbar_action_bounds(region):
             x0, y0, x1, y1 = bounds
             hovered = action == getattr(editor, "topbar_hover", None)
-            _draw_editor_rect(
+            button_color = (
+                (0.16, 0.28, 0.48, 0.98)
+                if hovered
+                else (0.07, 0.09, 0.13, 0.98)
+            )
+            border_color = (
+                (0.35, 0.62, 1.0, 0.98)
+                if hovered
+                else (0.15, 0.2, 0.29, 0.98)
+            )
+            _draw_editor_panel(
                 x0,
                 y0,
                 x1 - x0,
                 y1 - y0,
-                (0.16, 0.28, 0.48, 0.98) if hovered else (0.07, 0.09, 0.13, 0.98),
+                button_color,
+                border=border_color,
+                radius=7.0,
             )
             _draw_editor_text(
                 labels[action],
@@ -487,7 +499,15 @@ def _draw_editor_palette(editor, context) -> None:
     x0, y0, x1, y1 = panel
     try:
         gpu.state.blend_set("ALPHA")
-        _draw_editor_rect(x0, y0, x1 - x0, y1 - y0, (0.035, 0.045, 0.06, 0.96))
+        _draw_editor_panel(
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            (0.035, 0.045, 0.06, 0.96),
+            border=(0.15, 0.2, 0.29, 0.98),
+            radius=10.0,
+        )
         _draw_editor_text("COLORS", x0 + 12.0, y1 - 18.0, 10.0, (0.62, 0.74, 0.86, 1.0))
         _draw_editor_text(
             f"Color {selected + 1}",
@@ -500,17 +520,25 @@ def _draw_editor_palette(editor, context) -> None:
             sx0, sy0, sx1, sy1 = bounds
             active = index == selected
             if active:
-                _draw_editor_rect(
+                _draw_editor_round_rect(
                     sx0 - 2.0,
                     sy0 - 2.0,
                     sx1 - sx0 + 4.0,
                     sy1 - sy0 + 4.0,
                     (0.98, 0.82, 0.35, 1.0),
+                    radius=7.0,
                 )
             color = tuple(float(value) for value in palette[index])
             if len(color) < 4:
                 color = (*color[:3], 1.0)
-            _draw_editor_rect(sx0, sy0, sx1 - sx0, sy1 - sy0, color[:4])
+            _draw_editor_round_rect(
+                sx0,
+                sy0,
+                sx1 - sx0,
+                sy1 - sy0,
+                color[:4],
+                radius=5.0,
+            )
     finally:
         gpu.state.blend_set("NONE")
 
@@ -542,6 +570,85 @@ def _draw_editor_rect(x: float, y: float, width: float, height: float, color) ->
     shader.uniform_float("color", color)
     batch.draw(shader)
 
+def _editor_rounded_points(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    radius: float,
+    segments: int = 5,
+):
+    radius = max(0.0, min(radius, width / 2.0, height / 2.0))
+    corners = (
+        (x + radius, y + radius, math.pi),
+        (x + width - radius, y + radius, math.pi * 1.5),
+        (x + width - radius, y + height - radius, 0.0),
+        (x + radius, y + height - radius, math.pi * 0.5),
+    )
+    points = []
+    for corner_index, (center_x, center_y, start) in enumerate(corners):
+        first_point = 0 if corner_index == 0 else 1
+        for index in range(first_point, segments + 1):
+            angle = start + math.pi * 0.5 * index / segments
+            points.append(
+                (
+                    center_x + math.cos(angle) * radius,
+                    center_y + math.sin(angle) * radius,
+                )
+            )
+        next_center_x, next_center_y, next_start = corners[(corner_index + 1) % len(corners)]
+        points.append(
+            (
+                next_center_x + math.cos(next_start) * radius,
+                next_center_y + math.sin(next_start) * radius,
+            )
+        )
+    return tuple(points)
+
+
+def _draw_editor_round_rect(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    color,
+    radius: float = 8.0,
+) -> None:
+    if gpu is None or batch_for_shader is None:
+        return
+    boundary = _editor_rounded_points(x, y, width, height, radius)
+    points = ((x + width / 2.0, y + height / 2.0), *boundary)
+    shader = gpu.shader.from_builtin("UNIFORM_COLOR")
+    batch = batch_for_shader(shader, "TRI_FAN", {"pos": points})
+    shader.bind()
+    shader.uniform_float("color", color)
+    batch.draw(shader)
+
+
+def _draw_editor_panel(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    color,
+    *,
+    border=None,
+    radius: float = 8.0,
+) -> None:
+    if border is None:
+        _draw_editor_round_rect(x, y, width, height, color, radius)
+        return
+    inset = min(1.0, width / 4.0, height / 4.0)
+    _draw_editor_round_rect(x, y, width, height, border, radius)
+    _draw_editor_round_rect(
+        x + inset,
+        y + inset,
+        width - inset * 2.0,
+        height - inset * 2.0,
+        color,
+        max(0.0, radius - inset),
+    )
+
 
 def _draw_editor_toolbar(editor, context) -> None:
     if gpu is None or batch_for_shader is None or _scene_workspace(context.scene) != "EDIT":
@@ -552,7 +659,12 @@ def _draw_editor_toolbar(editor, context) -> None:
     panel, entries = _editor_toolbar_layout(region.height, context.scene)
     try:
         gpu.state.blend_set("ALPHA")
-        _draw_editor_rect(*panel, (0.035, 0.045, 0.06, 0.96))
+        _draw_editor_panel(
+            *panel,
+            (0.035, 0.045, 0.06, 0.96),
+            border=(0.15, 0.2, 0.29, 0.98),
+            radius=10.0,
+        )
         for item, bounds in entries:
             x0, y0, x1, y1 = bounds
             width = x1 - x0
@@ -567,7 +679,22 @@ def _draw_editor_toolbar(editor, context) -> None:
                 color = (0.18, 0.21, 0.28, 0.98)
             else:
                 color = (0.09, 0.11, 0.15, 0.96)
-            _draw_editor_rect(x0, y0, width, height, color)
+            border_color = (
+                (0.9, 0.3, 0.24, 0.98)
+                if active and item[0] == "MODE" and item[1] == "ERASE"
+                else (0.35, 0.62, 1.0, 0.98)
+                if active or hovered
+                else (0.15, 0.2, 0.29, 0.98)
+            )
+            _draw_editor_panel(
+                x0,
+                y0,
+                width,
+                height,
+                color,
+                border=border_color,
+                radius=min(7.0, height / 2.0),
+            )
             beginner = visible_editor_toolbar_items(context.scene) is BEGINNER_TOOLBAR_ITEMS
             if beginner:
                 _draw_editor_text(
@@ -618,12 +745,14 @@ def _draw_editor_toolbar(editor, context) -> None:
                     8.0,
                     min(hovered_bounds[1], float(region.height) - tooltip_height - 8.0),
                 )
-                _draw_editor_rect(
+                _draw_editor_panel(
                     tooltip_x,
                     tooltip_y,
                     tooltip_width,
                     tooltip_height,
                     (0.045, 0.055, 0.075, 0.98),
+                    border=(0.2, 0.28, 0.4, 0.98),
+                    radius=8.0,
                 )
                 _draw_editor_text(
                     hovered_item[3],
@@ -828,7 +957,15 @@ def _draw_editor_overlay(editor, context) -> None:
         card_x = 84.0
         card_y = max(100.0, float(region.height) - 164.0)
         card_width = max(300.0, min(760.0, float(region.width) - card_x - 24.0))
-        _draw_editor_rect(card_x, card_y, card_width, 74.0, (0.045, 0.09, 0.14, 0.96))
+        _draw_editor_panel(
+            card_x,
+            card_y,
+            card_width,
+            74.0,
+            (0.045, 0.09, 0.14, 0.96),
+            border=(0.18, 0.35, 0.5, 0.98),
+            radius=12.0,
+        )
         _draw_editor_text(
             "TRY THIS",
             card_x + 14.0,
