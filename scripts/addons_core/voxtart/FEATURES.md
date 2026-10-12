@@ -166,7 +166,7 @@ available while adding a compact voxel workflow:
   Blender's sidebar;
 - advanced brushes and selection categories appear after the first changed edit;
 - the default overlay stays lightweight: the asset, block count, current mode,
-  one short guidance card, palette, and edit status;
+  one short guidance card, palette, and a color-coded status chip;
 - **Details** reveals hit, layer, selection, and shortcut diagnostics on demand;
 - `Esc` returns to the VOXTART project surface rather than exposing a raw
   Blender workspace;
