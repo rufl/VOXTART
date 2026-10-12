@@ -1,5 +1,9 @@
 # generic files to ignore
 .*
+# CI workflow configuration is intentionally tracked despite the dotfile rule.
+!.github/
+!.github/workflows/
+!.github/workflows/voxtart.yml
 
 # python temp paths
 __pycache__/
