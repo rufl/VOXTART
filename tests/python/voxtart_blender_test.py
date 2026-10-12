@@ -1000,7 +1000,29 @@ class BlenderRegistrationTest(unittest.TestCase):
         image = None
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
             image_path = Path(handle.name)
+        with tempfile.NamedTemporaryFile(suffix="_depth.json", delete=False) as handle:
+            depth_path = Path(handle.name)
+        with tempfile.NamedTemporaryFile(suffix="_parts.json", delete=False) as handle:
+            parts_path = Path(handle.name)
         try:
+            depth_path.write_text(
+                json.dumps({
+                    "schema": 1,
+                    "name": "depth",
+                    "front": [[0, None]],
+                    "back": [[1, None]],
+                    "method": "MANUAL",
+                }),
+                encoding="utf-8",
+            )
+            parts_path.write_text(
+                json.dumps({
+                    "schema": 1,
+                    "name": "parts",
+                    "labels": [["body", None]],
+                }),
+                encoding="utf-8",
+            )
             image = bpy.data.images.new("VOXTART Reconstruction Fixture", width=2, height=1, alpha=True)
             image.pixels = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0)
             image.filepath_raw = str(image_path)
@@ -1011,24 +1033,30 @@ class BlenderRegistrationTest(unittest.TestCase):
 
             result = bpy.ops.voxtart.reconstruct_image(
                 filepath=str(image_path),
+                depth_filepath=str(depth_path),
+                part_mask_filepath=str(parts_path),
                 axis="Z",
                 direction="1",
                 origin=(2, 3, 4),
-                depth=1,
+                depth=2,
                 background_mode="ALPHA",
                 max_colors=8,
-                mode="SURFACE",
+                mode="LAYERED",
             )
             self.assertEqual(result, {"FINISHED"})
             obj = bpy.context.active_object
             self.assertIsNotNone(obj)
             asset = operators._load_asset(obj)
-            self.assertEqual(asset.voxels, {(2, 3, 4): 0})
+            self.assertEqual(asset.voxels, {(2, 3, 4): 0, (2, 3, 5): 0})
             self.assertEqual(asset.provenance["image_width"], "2")
             self.assertEqual(asset.provenance["image_height"], "1")
             self.assertEqual(obj[reconstruct_ui.RECONSTRUCTION_SOURCE_PROPERTY], str(image_path))
+            self.assertEqual(
+                json.loads(asset.provenance["part_assignments"]),
+                [[[2, 3, 4], "body"], [[2, 3, 5], "body"]],
+            )
             report = json.loads(obj[reconstruct_ui.RECONSTRUCTION_REPORT_PROPERTY])
-            self.assertEqual(report["occupied_voxels"], 1)
+            self.assertEqual(report["occupied_voxels"], 2)
             self.assertEqual(report["unresolved_voxels"], 0)
             self.assertEqual(report["missing_pixels"], 0)
             self.assertEqual(report["extra_pixels"], 0)
@@ -1036,6 +1064,8 @@ class BlenderRegistrationTest(unittest.TestCase):
                 json.loads(obj[reconstruct_ui.RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY]),
                 [],
             )
+            self.assertTrue(json.loads(obj[reconstruct_ui.RECONSTRUCTION_EVIDENCE_PROPERTY])["cells"])
+            self.assertTrue(json.loads(obj[reconstruct_ui.RECONSTRUCTION_ACCEPTANCE_PROPERTY])["accepted"])
             overlay_name = obj[reconstruct_ui.RECONSTRUCTION_OVERLAY_PROPERTY]
             self.assertIn(overlay_name, bpy.data.objects)
             self.assertTrue(bpy.data.objects[overlay_name].hide_viewport)
@@ -1044,6 +1074,8 @@ class BlenderRegistrationTest(unittest.TestCase):
                 bpy.data.images.remove(image)
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
             image_path.unlink(missing_ok=True)
+            depth_path.unlink(missing_ok=True)
+            parts_path.unlink(missing_ok=True)
 
 
     def test_multiview_reconstruction_operator_resolves_opposing_sources(self):
