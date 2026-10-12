@@ -995,12 +995,57 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_topbar(editor, context)
     _draw_editor_palette(editor, context)
     _draw_editor_toolbar(editor, context)
+    context_label = mode_label if first_run else f"{mode_label}  ·  {shape.title()} brush"
+    context_shortcut = {
+        "ADD": "B",
+        "ATTACH": "T",
+        "ERASE": "E",
+        "PAINT": "P",
+        "SELECT": "S",
+    }.get(mode, "")
+    context_fill, context_accent = {
+        "ADD": ((0.06, 0.15, 0.12, 0.98), (0.34, 0.92, 0.58, 1.0)),
+        "ATTACH": ((0.07, 0.12, 0.19, 0.98), (0.35, 0.62, 1.0, 1.0)),
+        "ERASE": ((0.18, 0.08, 0.08, 0.98), (1.0, 0.42, 0.3, 1.0)),
+        "PAINT": ((0.18, 0.13, 0.05, 0.98), (0.98, 0.72, 0.3, 1.0)),
+        "SELECT": ((0.12, 0.08, 0.2, 0.98), (0.66, 0.5, 1.0, 1.0)),
+    }.get(mode, ((0.07, 0.09, 0.13, 0.98), (0.35, 0.62, 1.0, 1.0)))
+    context_x = 84.0
+    context_y = float(region.height) - 84.0
+    context_width = min(
+        520.0,
+        max(230.0, _editor_text_width(context_label, 12.0) + 66.0),
+    )
+    _draw_editor_panel(
+        context_x,
+        context_y,
+        context_width,
+        28.0,
+        context_fill,
+        border=context_accent,
+        radius=14.0,
+    )
+    _draw_editor_round_rect(
+        context_x + 11.0,
+        context_y + 11.0,
+        6.0,
+        6.0,
+        context_accent,
+        radius=3.0,
+    )
     _draw_editor_text(
-        mode_label if first_run else f"{mode_label}  ·  {shape.title()} brush",
-        18,
-        region.height - 70,
-        13,
-        (0.92, 0.95, 1.0, 1.0),
+        context_label,
+        context_x + 26.0,
+        context_y + 9.0,
+        12.0,
+        (0.92, 0.97, 1.0, 1.0),
+    )
+    _draw_editor_text(
+        context_shortcut,
+        context_x + context_width - 22.0,
+        context_y + 9.0,
+        10.0,
+        (0.7, 0.78, 0.88, 1.0),
     )
     if first_run:
         card_x = 84.0
@@ -1040,14 +1085,14 @@ def _draw_editor_overlay(editor, context) -> None:
         _draw_editor_text(
             "Left click Add  ·  Right click Erase  ·  Drag Paint  ·  Alt+click Pick color  ·  Middle mouse Orbit",
             18,
-            region.height - 84,
+            region.height - 112,
             11,
             (0.62, 0.72, 0.84, 1.0),
         )
         _draw_editor_text(
             "Workspace Tab  ·  Add B  ·  Attach T  ·  Erase E  ·  Color P  ·  Select S  ·  Brushes V/L/O/C/F",
             18,
-            region.height - 102,
+            region.height - 130,
             11,
             (0.62, 0.72, 0.84, 1.0),
         )
