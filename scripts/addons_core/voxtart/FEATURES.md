@@ -510,7 +510,9 @@ Placement variation uses deterministic seeds for position, rotation, and scale.
 ### Scene hierarchy window
 
 The **Scene Hierarchy** panel in the VOXTART 3D View sidebar shows placed
-VOXTART assets as a deterministic collection/object tree.
+VOXTART assets as a deterministic collection/object tree. The project shell
+exposes a direct **Sync scene hierarchy** action; the sidebar provides the
+matching tree, filtering, selection, visibility, and inspector workflows.
 
 - collection nesting is preserved;
 - Blender asset parenting is shown beneath the parent asset;
