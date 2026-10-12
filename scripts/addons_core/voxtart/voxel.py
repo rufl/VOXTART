@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
+from .provenance import sha256_json
 
 
 SCHEMA_VERSION = 1
@@ -149,6 +150,12 @@ class VoxelAsset:
             "sockets": [socket.to_dict() for socket in self.sockets],
             "provenance": dict(sorted(self.provenance.items())),
         }
+
+    @property
+    def content_digest(self) -> str:
+        """Return the canonical digest of the authoritative asset payload."""
+
+        return sha256_json(self.to_dict())
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "VoxelAsset":

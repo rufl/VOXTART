@@ -36,6 +36,7 @@ from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_form
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
 from voxtart import character_editor, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import metrics, provenance  # noqa: E402
 
 
 PALETTE = [
@@ -44,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 93
+EXPECTED_TESTS = 97
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -3906,6 +3907,174 @@ class ReconstructionTest(unittest.TestCase):
         self.assertEqual(result.asset.voxels, {(0, 0, 0): 0})
         self.assertEqual(result.report.material_conflicts, 1)
         self.assertEqual(result.report.color_mismatches, 1)
+
+class SpriteformMigrationTest(unittest.TestCase):
+    def test_source_identity_and_evidence_are_canonical(self):
+        digest = provenance.sha256_json({"b": 2, "a": 1})
+        self.assertEqual(digest, provenance.sha256_json({"a": 1, "b": 2}))
+        source = provenance.SourceIdentity(
+            "frame",
+            digest,
+            frame_id="f1",
+            pose_id="p1",
+            camera_id="c1",
+            revision="r1",
+        )
+        self.assertEqual(provenance.SourceIdentity.from_dict(source.to_dict()), source)
+        self.assertEqual(source.key[0], "frame")
+        with self.assertRaises(ValueError):
+            provenance.SourceIdentity("", digest)
+        with self.assertRaises(ValueError):
+            provenance.SourceIdentity("frame", "not-a-digest")
+        with self.assertRaises(TypeError):
+            provenance.SourceIdentity.from_dict([])
+        evidence = provenance.EvidenceMap.from_mapping(
+            {
+                (1, 0, 0): provenance.EvidenceCell("OCCUPIED", 1, 0.75, 0.25, ("frame",)),
+                (0, 0, 0): provenance.EvidenceCell("FREE", 1, 1.0, sources=("frame",)),
+            },
+            (source,),
+        )
+        self.assertEqual(evidence.get((0, 0, 0)).state, "FREE")
+        self.assertEqual(evidence.to_dict()["cells"][0]["cell"], [0, 0, 0])
+        self.assertEqual(evidence.digest, provenance.sha256_json(evidence.to_dict()))
+        with self.assertRaises(ValueError):
+            provenance.EvidenceCell("INVALID")
+        with self.assertRaises(ValueError):
+            provenance.EvidenceCell("OCCUPIED", confidence=2.0)
+        with self.assertRaises(ValueError):
+            provenance.EvidenceMap.from_mapping({(0, 0): provenance.EvidenceCell("FREE")})
+        with self.assertRaises(ValueError):
+            provenance.sha256_json(float("nan"))
+        with self.assertRaises(ValueError):
+            provenance.SourceIdentity("x" * 257, digest)
+        with self.assertRaises(ValueError):
+            provenance.SourceIdentity("frame", "x" * 65)
+        with self.assertRaises(ValueError):
+            provenance.EvidenceCell("FREE", source_mask=-1)
+        with self.assertRaises(ValueError):
+            provenance.EvidenceCell("FREE", confidence=float("nan"))
+        with self.assertRaises(ValueError):
+            provenance.EvidenceCell("FREE", error=-1.0)
+        with self.assertRaises(ValueError):
+            provenance.EvidenceCell("FREE", sources=("",))
+        with self.assertRaises(ValueError):
+            provenance.EvidenceMap(
+                cells=(
+                    ((0, 0, 0), provenance.EvidenceCell("FREE")),
+                    ((0, 0, 0), provenance.EvidenceCell("FREE")),
+                )
+            )
+        with self.assertRaises(TypeError):
+            provenance.EvidenceMap(cells=(((0, 0, 0), "invalid"),))
+        with self.assertRaises(TypeError):
+            provenance.EvidenceMap(sources=("invalid",))
+        with self.assertRaises(ValueError):
+            provenance.EvidenceMap(sources=(source, source))
+        with self.assertRaises(ValueError):
+            evidence.get(None)
+        self.assertIsNone(evidence.get((9, 9, 9)))
+
+    def test_comparison_metrics_cover_pixel_depth_and_surface_contracts(self):
+        pixels = metrics.compare_indexed_views(
+            ((0, None), (1, 1)),
+            ((0, 2), (None, 1)),
+        )
+        self.assertEqual(pixels.to_dict()["iou"], 0.5)
+        self.assertEqual((pixels.missing_pixels, pixels.extra_pixels, pixels.color_mismatches), (1, 1, 0))
+        self.assertEqual(metrics.compare_depths((), ()).samples, 0)
+        self.assertEqual(metrics.compare_depths((), ()).to_dict()["mae"], None)
+        depth = metrics.compare_depths((0.0, 2.0), (1.0, 1.0))
+        self.assertEqual((depth.mae, depth.rmse, depth.max_error), (1.0, 1.0, 1.0))
+        self.assertEqual(metrics.compare_depths((0.0, 2.0), (1.0, 1.0)).to_dict()["samples"], 2)
+        surface = metrics.compare_cell_surfaces(
+            ((0, 0, 0), (2, 0, 0)),
+            ((1, 0, 0),),
+            cell_scale=(2.0, 1.0, 1.0),
+        )
+        self.assertEqual(surface.reference_to_predicted_max, 2.0)
+        self.assertEqual(surface.to_dict()["predicted_count"], 1)
+        self.assertIsNone(metrics.compare_cell_surfaces((), ((0, 0, 0),)).reference_to_predicted_mean)
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views((), ())
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views(((0,), (0, 1)), ((0,), (0, 1)))
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views(((0,),), ())
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views(((0,),), ((),))
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views(((0,), (0, 1)), ((0,), (0, 1)))
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views(((0,), (0,)), ((0,), (0, 1)))
+        with self.assertRaises(ValueError):
+            metrics.compare_indexed_views(((0,),), ((0, 1),))
+        with self.assertRaises(ValueError):
+            metrics.compare_depths((0.0,), ())
+        with self.assertRaises(ValueError):
+            metrics.compare_depths((float("inf"),), (0.0,))
+        with self.assertRaises(ValueError):
+            metrics.compare_cell_surfaces(((0, 0),), ())
+        with self.assertRaises(ValueError):
+            metrics.compare_cell_surfaces((), (), cell_scale=(0.0, 1.0, 1.0))
+
+    def test_finite_segment_traversal_is_corner_safe_and_endpoint_bounded(self):
+        clipped = pick.finite_segment((-1.0, -1.0, -1.0), (3.0, 3.0, 3.0), (0.0, 0.0, 0.0), (3.0, 3.0, 3.0))
+        self.assertEqual(clipped, ((0.0, 0.0, 0.0), (3.0, 3.0, 3.0)))
+        records = pick.traverse_segment(
+            (-1.0, -1.0, -1.0),
+            (3.0, 3.0, 3.0),
+            (0.0, 0.0, 0.0),
+            (3.0, 3.0, 3.0),
+        )
+        self.assertEqual(tuple(record.cell for record in records), ((0, 0, 0), (1, 1, 1), (2, 2, 2)))
+        self.assertEqual(records[1].normal, (-1, -1, -1))
+        endpoint_records = pick.traverse_segment(
+            (0.1, 0.1, 0.1),
+            (1.0, 0.1, 0.1),
+            (0.0, 0.0, 0.0),
+            (2.0, 1.0, 1.0),
+        )
+        self.assertEqual(tuple(record.cell for record in endpoint_records), ((0, 0, 0),))
+        self.assertEqual(pick.traverse_segment((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0, 0, 0), (1, 1, 1)), ())
+        self.assertEqual(len(pick.traverse_segment((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), (0, 0, 0), (1, 1, 1), include_endpoint=True)), 1)
+        self.assertIsNone(pick.finite_segment((-2, 0, 0), (-1, 0, 0), (0, 0, 0), (1, 1, 1)))
+        with self.assertRaises(ValueError):
+            pick.finite_segment((0, 0, 0), (1.0e10, 0, 0), (0, 0, 0), (1, 1, 1))
+        with self.assertRaises(ValueError):
+            pick.finite_segment((0, 0, 0), (1, 0, 0), (0, 0, 0), (0, 1, 1))
+        self.assertEqual(
+            pick.traverse_segment((-2, 0, 0), (-1, 0, 0), (0, 0, 0), (1, 1, 1)),
+            (),
+        )
+        with self.assertRaises(ValueError):
+            pick.finite_segment((-1.0e9, 0, 0), (1.0e9, 0, 0), (0, 0, 0), (1, 1, 1))
+        self.assertEqual(
+            pick.traverse_segment(
+                (1.0e9, 0.5, 0.5),
+                (1.0e9 - 1.0, 0.5, 0.5),
+                (0, 0, 0),
+                (2.0e9, 1, 1),
+            ),
+            (),
+        )
+
+    def test_reconstruction_evidence_and_acceptance_gate_require_sources(self):
+        frame = image_intake.ImageFrame.from_rows("review", [[(1.0, 0.0, 0.0, 1.0)]])
+        self.assertEqual(frame.source_identity().digest, frame.source_digest)
+        indexed = image_intake.index_image(frame, image_intake.PaletteIntakeSettings(background_mode="NONE"))
+        source = indexed.source_identity(camera_id="cam")
+        view = indexed.to_view(source_identity=source, depth=1)
+        result = reconstruct.reconstruct_views((view,), indexed.palette, source_identities=(source,))
+        self.assertEqual(result.evidence.get((0, 0, 0)).state, "OCCUPIED")
+        self.assertEqual(result.report.silhouette_iou, 1.0)
+        self.assertTrue(result.assess().accepted)
+        self.assertEqual(result.asset.content_digest, result.assess().asset_digest)
+        without_source = reconstruct.reconstruct_views((indexed.to_view(),), indexed.palette)
+        self.assertFalse(without_source.assess().accepted)
+        self.assertIn("source identities are required", without_source.assess().reasons)
+        with self.assertRaises(ValueError):
+            reconstruct.AcceptancePolicy(minimum_silhouette_iou=2.0)
 
 if __name__ == "__main__":
     program = unittest.main(exit=False)

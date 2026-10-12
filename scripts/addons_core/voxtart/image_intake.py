@@ -11,8 +11,8 @@ from hashlib import sha256
 from math import isfinite
 from typing import Iterable, Literal, Sequence
 
+from .provenance import SourceIdentity
 from .reconstruct import OrthographicView, Pixel
-from .voxel import Cell, Color
 
 
 BackgroundMode = Literal["ALPHA", "NONE", "CORNER", "EXPLICIT"]
@@ -79,6 +79,24 @@ class ImageFrame:
             for pixel in row:
                 digest.update(bytes(_rgba8(pixel)))
         return digest.hexdigest()
+
+    def source_identity(
+        self,
+        *,
+        source_id: str | None = None,
+        frame_id: str = "",
+        pose_id: str = "",
+        camera_id: str = "",
+        revision: str = "",
+    ) -> SourceIdentity:
+        return SourceIdentity(
+            source_id or self.name,
+            self.source_digest,
+            frame_id=frame_id,
+            pose_id=pose_id,
+            camera_id=camera_id,
+            revision=revision,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +173,24 @@ class IndexedImage:
     def height(self) -> int:
         return len(self.pixels)
 
+    def source_identity(
+        self,
+        *,
+        source_id: str | None = None,
+        frame_id: str = "",
+        pose_id: str = "",
+        camera_id: str = "",
+        revision: str = "",
+    ) -> SourceIdentity:
+        return SourceIdentity(
+            source_id or self.name,
+            self.source_digest,
+            frame_id=frame_id,
+            pose_id=pose_id,
+            camera_id=camera_id,
+            revision=revision,
+        )
+
     def to_view(
         self,
         *,
@@ -164,6 +200,7 @@ class IndexedImage:
         depth: int = 1,
         priority: int = 0,
         name: str | None = None,
+        source_identity: SourceIdentity | None = None,
     ) -> OrthographicView:
         """Apply explicit calibration without resampling the source image."""
 
@@ -175,6 +212,7 @@ class IndexedImage:
             origin=origin,
             depth=depth,
             priority=priority,
+            source_identity=source_identity,
         )
 
     def provenance(self) -> dict[str, str]:
