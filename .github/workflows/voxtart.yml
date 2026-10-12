@@ -56,7 +56,7 @@ jobs:
         with:
           name: voxtart-core-coverage
           path: voxtart-coverage/core.json
-          if-no-files-found: ignore
+          if-no-files-found: error
   blender:
     name: Blender ${{ env.BLENDER_VERSION }} native
     runs-on: ubuntu-latest
@@ -90,7 +90,7 @@ jobs:
         with:
           name: voxtart-blender-evidence
           path: voxtart-blender-artifacts
-          if-no-files-found: ignore
+          if-no-files-found: error
 
   windows:
     name: VOXTART Windows P0
@@ -156,4 +156,4 @@ jobs:
         with:
           name: voxtart-windows-e2e
           path: voxtart-e2e-artifacts
-          if-no-files-found: ignore
+          if-no-files-found: error
