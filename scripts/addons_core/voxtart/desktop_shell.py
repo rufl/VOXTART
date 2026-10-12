@@ -420,7 +420,17 @@ def _draw_button(
         _draw_icon(icon, x + 18, y + height / 2.0, min(16.0, height - 8.0), _TEXT)
         text_x = x + 34
     _draw_text(label, text_x, y + (height - 14) / 2.0, 13, _TEXT)
-    _register_tooltip(state, key, label, _SHORTCUT_FOR_KEY.get(key, ""))
+    shortcut = _SHORTCUT_FOR_KEY.get(key, "")
+    if shortcut:
+        shortcut_width = _text_width(shortcut, 10)
+        _draw_text(
+            shortcut,
+            x + width - shortcut_width - 10,
+            y + (height - 11) / 2.0,
+            10,
+            _MUTED,
+        )
+    _register_tooltip(state, key, label, shortcut)
     state.targets.append((key, (x, y, x + width, y + height)))
 
 
