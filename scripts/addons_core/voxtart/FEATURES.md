@@ -408,6 +408,17 @@ are `CHECKER`, `BAYER2`, `BAYER4`, `ORDERED`, `CIRCUIT`, and `NOISE`, with
 `XY`, `XZ`, and `YZ` axes, Bayer sizes, density, and deterministic noise.
 Dither is represented as a non-destructive layer when used through Blender.
 
+### Advanced authoring handoff
+
+The Blender-native release gate exercises the advanced authoring operators
+end-to-end: Lasso Blob conversion, active-layer Bloformer edits, generated
+Pixel Tiler conversion and stamping, whole-voxel shading, non-destructive
+dithering cleanup, and animated spritesheet export. The spritesheet exporter
+restores frame, camera, render, visibility, and shading state after each
+temporary render, including runtimes that expose an empty in-memory render
+result in background mode.
+
+
 ## Interchange and export
 
 ### Native voxel formats
@@ -642,7 +653,7 @@ python tests/python/voxtart_e2e.py
 tools\run_voxtart_e2e.cmd
 ```
 
-`voxtart_e2e.py` runs the core suite, the Blender-native suite, the four-test
+`voxtart_e2e.py` runs the core suite, the Blender-native suite, the seven-test
 headless editor matrix, a save/reopen persistence probe, a background launcher
 probe, and a visible `VoxTart.exe` GUI probe. The persistence probe saves a
 `.blend` in one Blender process and recovers the interrupted stroke and
@@ -651,8 +662,8 @@ clipboard in a second process. The GUI probe invokes the real operator in a
 containing the editor overlay and brush preview. Use `--skip-launcher` only
 when the compiled Windows launcher is unavailable.
 
-The current local regression baseline is 86 deterministic core tests, 24
-Blender-native tests, and 4 additional end-to-end Blender tests. The E2E
+The current local regression baseline is 93 deterministic core tests, 29
+Blender-native tests, and 7 additional end-to-end Blender tests. The E2E
 performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
 

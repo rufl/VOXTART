@@ -6,7 +6,7 @@
 
 
 import json
-import math
+import tempfile
 from pathlib import Path
 
 import bpy
@@ -208,6 +208,7 @@ def _render_frames(
         "resolution_percentage": render.resolution_percentage,
         "film_transparent": render.film_transparent,
         "file_format": render.image_settings.file_format,
+        "filepath": render.filepath,
     }
     shading = getattr(getattr(scene, "display", None), "shading", None)
     shading_state = {}
@@ -266,9 +267,24 @@ def _render_frames(
             )
             bpy.ops.render.render(write_still=False)
             render_result = bpy.data.images.get("Render Result")
-            if render_result is None:
-                raise RuntimeError("Blender did not produce a render result")
-            frames.append(_render_result_texture(render_result))
+            if render_result is None or tuple(render_result.size) == (0, 0):
+                temporary_path = None
+                temporary_image = None
+                try:
+                    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+                        temporary_path = Path(handle.name)
+                    render.filepath = str(temporary_path)
+                    bpy.ops.render.render(write_still=True)
+                    temporary_image = bpy.data.images.load(str(temporary_path), check_existing=False)
+                    frame_texture = _render_result_texture(temporary_image)
+                finally:
+                    if temporary_image is not None:
+                        bpy.data.images.remove(temporary_image)
+                    if temporary_path is not None:
+                        temporary_path.unlink(missing_ok=True)
+            else:
+                frame_texture = _render_result_texture(render_result)
+            frames.append(frame_texture)
     finally:
         scene.camera = selected_camera
         scene.frame_set(frame_before, subframe=subframe_before)
@@ -278,6 +294,7 @@ def _render_frames(
         render.resolution_percentage = render_state["resolution_percentage"]
         render.film_transparent = render_state["film_transparent"]
         render.image_settings.file_format = render_state["file_format"]
+        render.filepath = render_state["filepath"]
         for name, value in shading_state.items():
             setattr(shading, name, value)
         for obj, hidden in hide_states.items():

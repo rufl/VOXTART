@@ -29,7 +29,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import voxtart as addon  # noqa: E402
-from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
+from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, lasso_blob, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
@@ -1080,6 +1080,212 @@ class BlenderRegistrationTest(unittest.TestCase):
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
             for path in paths:
                 path.unlink(missing_ok=True)
+
+    def test_lasso_conversion_and_bloformer_active_layer_edit(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        try:
+            lasso_asset = VoxelAsset.box(1)
+            lasso_obj = operators._create_asset_object(
+                bpy.context,
+                "Advanced Lasso Blob",
+                lasso_asset,
+                backend="marching",
+            )
+            lasso_obj[lasso_blob.BLOB_PROPERTY] = True
+            lasso_obj[lasso_blob.BLOB_SURFACE_PROPERTY] = "marching"
+            lasso_obj[lasso_blob.BLOB_SYMMETRY_PROPERTY] = True
+            lasso_obj[lasso_blob.BLOB_AXIS_PROPERTY] = "X"
+            lasso_obj["voxtart_lasso_blob_depth"] = 2
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            lasso_obj.select_set(True)
+            bpy.context.view_layer.objects.active = lasso_obj
+            self.assertEqual(bpy.ops.voxtart.convert_lasso_blob(), {"FINISHED"})
+            self.assertEqual(lasso_obj[lasso_blob.BLOB_SURFACE_PROPERTY], "greedy")
+            self.assertTrue(lasso_obj["voxtart_lasso_blob_converted"])
+            self.assertEqual(lasso_obj[operators.MESH_BACKEND_PROPERTY], "greedy")
+
+            edit_asset = VoxelAsset(
+                palette=[(1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)],
+                voxels={(0, 0, 0): 0},
+            )
+            edit_obj = operators._create_asset_object(
+                bpy.context,
+                "Advanced Bloformer Blob",
+                edit_asset,
+            )
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            edit_obj.select_set(True)
+            bpy.context.view_layer.objects.active = edit_obj
+            report = bloformer_ui._apply_to_active(
+                bpy.context,
+                {
+                    "mode": "ADD",
+                    "shape": "BOX",
+                    "center": (2, 0, 0),
+                    "radius": 1,
+                    "axis": "Z",
+                    "thickness": 1.0,
+                    "palette_index": 1,
+                    "overwrite": False,
+                    "allow_protected": False,
+                },
+            )
+            loaded = operators._load_asset(edit_obj)
+            self.assertGreater(report.added, 0)
+            self.assertEqual(len(loaded.voxels), len(edit_asset.voxels) + report.added)
+            self.assertEqual(
+                json.loads(edit_obj["voxtart_bloformer_report"])["added"],
+                report.added,
+            )
+            self.assertEqual(
+                len(operators._load_layer_stack(edit_obj, loaded).active.voxels),
+                len(loaded.voxels),
+            )
+        finally:
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+
+    def test_generated_tiler_and_nondestructive_shading_round_trip(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        scene = bpy.context.scene
+        tiler_fields = (
+            "voxtart_tiler_source",
+            "voxtart_tiler_generated_pattern",
+            "voxtart_tiler_generated_width",
+            "voxtart_tiler_generated_height",
+            "voxtart_tiler_generated_repeat_x",
+            "voxtart_tiler_generated_repeat_y",
+            "voxtart_tiler_generated_seed",
+            "voxtart_tiler_axis",
+            "voxtart_tiler_side",
+            "voxtart_tiler_depth",
+            "voxtart_tiler_rotation",
+            "voxtart_tiler_flip_x",
+            "voxtart_tiler_flip_y",
+            "voxtart_tiler_mode",
+            "voxtart_tiler_alpha_threshold",
+            "voxtart_tiler_anchor",
+        )
+        previous_tiler = {name: getattr(scene, name) for name in tiler_fields}
+        try:
+            scene.voxtart_tiler_source = "GENERATED"
+            scene.voxtart_tiler_generated_pattern = "CHECKER"
+            scene.voxtart_tiler_generated_width = 2
+            scene.voxtart_tiler_generated_height = 2
+            scene.voxtart_tiler_generated_repeat_x = 1
+            scene.voxtart_tiler_generated_repeat_y = 1
+            scene.voxtart_tiler_generated_seed = 7
+            scene.voxtart_tiler_axis = "Z"
+            scene.voxtart_tiler_side = "1"
+            scene.voxtart_tiler_depth = 1
+            scene.voxtart_tiler_rotation = "0"
+            scene.voxtart_tiler_flip_x = False
+            scene.voxtart_tiler_flip_y = False
+            scene.voxtart_tiler_mode = "STAMP"
+            scene.voxtart_tiler_alpha_threshold = 0.05
+            scene.voxtart_tiler_anchor = (3, 0, 0)
+
+            base_obj = operators._create_asset_object(
+                bpy.context,
+                "Advanced Tiler Blob",
+                VoxelAsset.box(1),
+            )
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            base_obj.select_set(True)
+            bpy.context.view_layer.objects.active = base_obj
+            converted_obj, convert_report = tiler_ui._convert_tile_to_asset(bpy.context)
+            converted_asset = operators._load_asset(converted_obj)
+            self.assertEqual(convert_report.projected, 4)
+            self.assertEqual(len(converted_asset.voxels), 4)
+            self.assertEqual(converted_asset.provenance["workflow"], "pixel_tiler")
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            base_obj.select_set(True)
+            bpy.context.view_layer.objects.active = base_obj
+
+            before_stamp = operators._load_asset(base_obj)
+            self.assertEqual(bpy.ops.voxtart.tiler_stamp(), {"FINISHED"})
+            stamped = operators._load_asset(base_obj)
+            self.assertGreater(len(stamped.voxels), len(before_stamp.voxels))
+            self.assertEqual(
+                json.loads(base_obj["voxtart_tiler_report"])["projected"],
+                4,
+            )
+
+            occupancy = set(stamped.voxels)
+            self.assertEqual(bpy.ops.voxtart.shade_blobs(), {"FINISHED"})
+            shaded = operators._load_asset(base_obj)
+            self.assertEqual(set(shaded.voxels), occupancy)
+            self.assertEqual(json.loads(base_obj["voxtart_last_shading_report"])["whole_voxels"], True)
+
+            self.assertEqual(
+                bpy.ops.voxtart.dither_blobs(
+                    low_index=0,
+                    high_index=1,
+                    pattern="CHECKER",
+                    density=0.5,
+                    surface_only=False,
+                ),
+                {"FINISHED"},
+            )
+            dithered_stack = operators._load_layer_stack(base_obj, operators._load_asset(base_obj))
+            self.assertTrue(any(layer.name == "VOXTART Dither" for layer in dithered_stack.layers))
+            self.assertEqual(bpy.ops.voxtart.clear_dither(), {"FINISHED"})
+            cleared_stack = operators._load_layer_stack(base_obj, operators._load_asset(base_obj))
+            self.assertFalse(any(layer.name == "VOXTART Dither" for layer in cleared_stack.layers))
+            self.assertEqual(set(operators._load_asset(base_obj).voxels), occupancy)
+        finally:
+            for name, value in previous_tiler.items():
+                setattr(scene, name, value)
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+
+    def test_spritesheet_export_writes_atlas_and_restores_scene_state(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        scene = bpy.context.scene
+        previous_frame = scene.frame_current
+        previous_camera = scene.camera
+        try:
+            source = operators._create_asset_object(
+                bpy.context,
+                "Advanced Spritesheet Blob",
+                VoxelAsset.box(1),
+            )
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            source.select_set(True)
+            bpy.context.view_layer.objects.active = source
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "advanced.png"
+                self.assertEqual(
+                    bpy.ops.voxtart.export_spritesheet(
+                        filepath=str(output),
+                        start_frame=1,
+                        end_frame=2,
+                        frame_step=1,
+                        frame_width=16,
+                        frame_height=16,
+                        columns=2,
+                        spacing=1,
+                        padding=1,
+                        view="FRONT",
+                        write_metadata=True,
+                        keep_image=False,
+                    ),
+                    {"FINISHED"},
+                )
+                self.assertTrue(output.is_file())
+                self.assertGreater(output.stat().st_size, 0)
+                metadata = json.loads(output.with_suffix(".json").read_text(encoding="utf-8"))
+                self.assertEqual([frame["scene_frame"] for frame in metadata["frames"]], [1, 2])
+                self.assertEqual(metadata["layout"]["columns"], 2)
+                self.assertEqual(metadata["layout"]["frame_width"], 16)
+                self.assertEqual(json.loads(source["voxtart_spritesheet_report"])["view"], "FRONT")
+            self.assertEqual(scene.frame_current, previous_frame)
+            self.assertIs(scene.camera, previous_camera)
+        finally:
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
 
     def test_desktop_workspace_contract(self):
         desktop_ui.configure_workspace()
