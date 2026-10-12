@@ -1,7 +1,16 @@
 echo No explicit msvc version requested, autodetecting version.
 
+call "%~dp0\detect_msvc2022.cmd"
+if %ERRORLEVEL% EQU 0 goto DetectionComplete
+
+call "%~dp0\detect_msvc2026.cmd"
+if %ERRORLEVEL% EQU 0 goto DetectionComplete
+
 call "%~dp0\detect_msvc2019.cmd"
 if %ERRORLEVEL% EQU 0 goto DetectionComplete
+
+echo Standard Visual Studio detection failed; retrying installed Build Tools.
+set VSWHERE_ARGS=-products Microsoft.VisualStudio.Product.BuildTools
 
 call "%~dp0\detect_msvc2022.cmd"
 if %ERRORLEVEL% EQU 0 goto DetectionComplete
@@ -9,7 +18,10 @@ if %ERRORLEVEL% EQU 0 goto DetectionComplete
 call "%~dp0\detect_msvc2026.cmd"
 if %ERRORLEVEL% EQU 0 goto DetectionComplete
 
-echo Compiler Detection failed. Use verbose switch for more information. 
+call "%~dp0\detect_msvc2019.cmd"
+if %ERRORLEVEL% EQU 0 goto DetectionComplete
+
+echo Compiler Detection failed. Use verbose switch for more information.
 exit /b 1
 
 :DetectionComplete
