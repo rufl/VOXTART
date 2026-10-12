@@ -54,6 +54,26 @@ TRACKED_MODULES = {
 }
 
 
+def _minimum_percent() -> float | None:
+    value = None
+    for index, argument in enumerate(sys.argv):
+        if argument == "--minimum-percent":
+            if index + 1 >= len(sys.argv):
+                raise ValueError("--minimum-percent requires a value")
+            value = sys.argv[index + 1]
+        elif argument.startswith("--minimum-percent="):
+            value = argument.split("=", 1)[1]
+    if value is None:
+        return None
+    try:
+        minimum = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("--minimum-percent must be a number in [0, 100]") from error
+    if not 0.0 <= minimum <= 100.0:
+        raise ValueError("--minimum-percent must be a number in [0, 100]")
+    return minimum
+
+
 def _source_lines(path: Path) -> set[int]:
     physical = {
         number
@@ -72,6 +92,11 @@ def _source_lines(path: Path) -> set[int]:
 
 def main() -> int:
     all_missing = "--all-missing" in sys.argv
+    try:
+        minimum_percent = _minimum_percent()
+    except ValueError as error:
+        print(f"VOXTART_COVERAGE_ARGUMENT_ERROR {error}", file=sys.stderr)
+        return 2
     executed: dict[str, set[int]] = {name: set() for name in TRACKED_MODULES}
     source_by_name = {name: SOURCE_ROOT / name for name in TRACKED_MODULES}
     source_paths = {str(path.resolve()): name for name, path in source_by_name.items()}
@@ -131,6 +156,12 @@ def main() -> int:
             ),
             encoding="utf-8",
         )
+    if minimum_percent is not None and overall < minimum_percent:
+        print(
+            f"VOXTART_COVERAGE_THRESHOLD_FAILED {overall:.2f}% < {minimum_percent:.2f}%",
+            file=sys.stderr,
+        )
+        exit_code = max(exit_code, 1)
     return exit_code
 
 
