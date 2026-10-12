@@ -20,6 +20,9 @@ on:
       - "run_voxtart.cmd"
       - ".github/workflows/voxtart.yml"
   workflow_dispatch:
+concurrency:
+  group: voxtart-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BLENDER_VERSION: "5.2.2"
@@ -33,6 +36,7 @@ jobs:
   core:
     name: VOXTART core
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -66,6 +70,7 @@ jobs:
   blender:
     name: Blender ${{ env.BLENDER_VERSION }} native
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - name: Check out source
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

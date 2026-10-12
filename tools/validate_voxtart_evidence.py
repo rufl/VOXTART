@@ -48,6 +48,24 @@ def _positive_number(value: Any, message: str) -> None:
     )
 
 
+def _validate_png(path: Path) -> None:
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        raise EvidenceError(f"cannot read PNG artifact: {path}: {error}") from error
+    _require(
+        len(data) >= 32 and data[:8] == b"\x89PNG\r\n\x1a\n",
+        f"GUI evidence is not a valid PNG: {path}",
+    )
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    _require(
+        width >= 100 and height >= 100 and len(data) >= 1024,
+        f"GUI evidence screenshot is unexpectedly small: {width}x{height}, {len(data)} bytes",
+    )
+    _require(b"IDAT" in data, "GUI evidence screenshot has no pixel payload")
+
+
 def _validate_core(path: Path) -> None:
     payload = _read_json(path)
     _require(payload.get("schema") == 1, "core coverage schema must be 1")
@@ -121,6 +139,7 @@ def _validate_windows(directory: Path) -> None:
     _positive_number(performance.get("rebuild_ms"), "Windows rebuild timing must be positive")
     _positive_number(performance.get("selection_ms"), "Windows selection timing must be positive")
 
+    _validate_png(directory / "voxtart_gui.png")
     gui = _read_json(directory / "voxtart_gui.json")
     _require(gui.get("ok") is True, "Windows GUI evidence is not successful")
     log = (directory / "e2e.log").read_text(encoding="utf-8", errors="replace")
