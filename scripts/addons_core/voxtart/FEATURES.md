@@ -615,6 +615,11 @@ layer exposes:
 Transport errors are returned as JSON-RPC errors and expected tool failures as
 `isError` tool results.
 
+The bridge is opt-in and localhost-only. The MCP panel owns start/stop and
+the bearer-token handoff; scene mutations stay disabled until the user enables
+**Allow LLM scene edits**. The release probe verifies that boundary, a bounded
+tool round-trip, and temporary server cleanup.
+
 ## Verification and coverage
 
 The repository includes standard-library tests for deterministic core behavior,

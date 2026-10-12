@@ -175,9 +175,14 @@ def _scene_state(context: bpy.types.Context) -> dict[str, Any]:
 
 def _refresh_asset(obj: bpy.types.Object, asset: VoxelAsset, backend: str | None = None) -> None:
     from . import operators
+    from .layers import LayerStack
 
-    operators._replace_asset_mesh(obj, asset, backend=backend)
-
+    operators._replace_asset_mesh(
+        obj,
+        asset,
+        backend=backend,
+        layer_stack=LayerStack.from_asset(asset),
+    )
 
 def _create_asset(context: bpy.types.Context, name: str, asset: VoxelAsset):
     from . import operators
