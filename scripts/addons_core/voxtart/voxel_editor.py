@@ -1097,19 +1097,37 @@ def _draw_editor_overlay(editor, context) -> None:
             (0.62, 0.72, 0.84, 1.0),
         )
     if bool(scene.get(EDITOR_DETAILS_PROPERTY)):
-        _draw_editor_text(
-            f"Cell: {hit}  Normal: {normal}  Preview: {len(editor.preview_cells)}  Selection: {len(editor.selection)}",
-            18,
-            50,
-            11,
-            (0.65, 0.86, 0.72, 1.0),
+        detail_summary = (
+            f"Cell {hit}  ·  Normal {normal}  ·  Preview {len(editor.preview_cells)}"
+            f"  ·  Selection {len(editor.selection)}"
+        )
+        detail_layer = f"Layer {layer_name}{layer_lock}"
+        detail_width = min(
+            760.0,
+            max(300.0, _editor_text_width(detail_summary, 11.0) + 32.0),
+        )
+        _draw_editor_panel(
+            14.0,
+            36.0,
+            detail_width,
+            40.0,
+            (0.045, 0.09, 0.1, 0.98),
+            border=(0.2, 0.5, 0.45, 0.98),
+            radius=10.0,
         )
         _draw_editor_text(
-            f"Layer: {layer_name}{layer_lock}",
-            18,
-            34,
-            11,
-            (0.82, 0.76, 0.55, 1.0),
+            detail_summary,
+            28.0,
+            57.0,
+            11.0,
+            (0.7, 0.94, 0.84, 1.0),
+        )
+        _draw_editor_text(
+            detail_layer,
+            28.0,
+            41.0,
+            11.0,
+            (0.88, 0.8, 0.58, 1.0),
         )
     status = str(getattr(editor, "status", "Ready") or "Ready")
     status_display = status if len(status) <= 72 else f"{status[:69]}..."

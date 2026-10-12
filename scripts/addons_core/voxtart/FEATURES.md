@@ -169,7 +169,8 @@ available while adding a compact voxel workflow:
 - advanced brushes and selection categories appear after the first changed edit;
 - the default overlay stays lightweight: the asset, block count, active tool
   context, one short guidance card, palette, and a color-coded status chip;
-- **Details** reveals hit, layer, selection, and shortcut diagnostics on demand;
+- **Details** reveals hit, layer, selection, and shortcut diagnostics in a
+  compact inspector card on demand;
 - `Esc` returns to the VOXTART project surface rather than exposing a raw
   Blender workspace;
 - the compact VOXTART toolbar keeps project tools one click away; Blender's
