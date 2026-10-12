@@ -668,11 +668,14 @@ performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
 The latest local coverage probes report 6,466/6,466 core lines (100.00%) and
 6,137/13,784 Blender-facing lines (44.52%). The latest headless performance
-probe reported 32³ rebuild in 550.71 ms and selection in 63.61 ms on this
+probe reported 32³ rebuild in 507.95 ms and selection in 61.05 ms on this
 workstation.
 The CI core-coverage step enforces the 100.0% deterministic-line threshold;
 coverage regressions fail the Linux core job instead of becoming upload-only
 evidence.
+The workflow pins the official Blender 5.2.2 Linux and Windows archive
+SHA-256 digests before extracting either runtime, and grants the jobs only
+read access to repository contents.
 The three direct suite entrypoints also enforce their collected-test contracts:
 93 core tests, 29 Blender-native tests, and 7 headless editor tests. A suite
 that silently loses coverage now fails its own process before CI can publish a
@@ -680,7 +683,8 @@ false-positive pass.
 
 `voxtart_coverage.py` and `voxtart_blender_coverage.py` use `sys.settrace`;
 neither requires pytest or a third-party coverage package. The GitHub Actions
-workflow runs the deterministic, Blender-native, and headless E2E suites on
-Linux, then builds the Windows runtime and launcher, runs the complete Windows
-P0 matrix with an isolated `VOXTART_CONFIG`, and uploads the GUI screenshot
+workflow checksum-verifies its pinned Blender runtime downloads, runs the
+deterministic, Blender-native, and headless E2E suites on Linux, then builds
+the Windows runtime and launcher, runs the complete Windows P0 matrix with an
+isolated `VOXTART_CONFIG`, and uploads the GUI screenshot
 and marker as workflow artifacts.
