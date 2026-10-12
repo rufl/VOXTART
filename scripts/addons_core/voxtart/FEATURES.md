@@ -31,6 +31,8 @@ top bar with **Project**, **Save**, **Details**, and **More tools** controls.
 **More tools** is the explicit escape hatch for Blender's native controls;
 **Details** reveals technical hit, layer, selection, and shortcut diagnostics
 only when needed.
+The top bar also identifies the active **EDIT** or **SCENE** workspace with a
+color-coded pill and the `Tab` shortcut.
 Each new unsaved project opens with an editable light-yellow stepped pyramid:
 6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
 framed with breathing room in the viewport so the user can immediately place,
