@@ -864,6 +864,19 @@ class PaletteTest(unittest.TestCase):
         self.assertEqual(compact_map, {0: 0, 1: 0, 3: 1})
         with self.assertRaises(ValueError):
             palette.reorder_palette(["#f00", "#0f0"], [0, 0])
+        with self.assertRaises(ValueError):
+            palette.palette_gradient("#000", "#fff", 0)
+        self.assertEqual(
+            palette.palette_gradient("#000", "#fff", 1),
+            [(0.0, 0.0, 0.0, 1.0)],
+        )
+        with self.assertRaises(ValueError):
+            palette.reorder_palette([], [])
+        with self.assertRaises(ValueError):
+            palette.compact_palette([], [])
+        fallback, fallback_map = palette.compact_palette(PALETTE, [99])
+        self.assertEqual(fallback, [PALETTE[0]])
+        self.assertEqual(fallback_map, {0: 0})
 
     def test_ase_and_palette_dispatch(self):
         name = struct.pack(">H", 1) + "R".encode("utf-16-be")
@@ -1687,6 +1700,8 @@ class BoundaryAndFailureTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             layers.Layer(blend_mode="unknown")
         with self.assertRaises(ValueError):
+            layers.Layer(surface_backend="unknown")
+        with self.assertRaises(ValueError):
             layers.Layer(voxels={(0, 0, 0): -1})
         with self.assertRaises(ValueError):
             layers.Layer.from_dict({"voxels": [[0, 0, 0]]})
@@ -2056,6 +2071,11 @@ class BoundaryAndFailureTest(unittest.TestCase):
             stack.merge_down([])
         stack.active.locked = True
         self.assertEqual(stack.active.copy().locked, True)
+        stack.active.voxels = {(0, 0, 0): 0}
+        with self.assertRaises(ValueError):
+            stack.remap_palette_indices({})
+        with self.assertRaises(ValueError):
+            stack.remap_palette_indices({0: -1})
         interior_asset = make_asset(solid_cells(3))
         report = shading.shade_voxels(interior_asset, surface_only=False, light_direction=(0, 0, 0))
         self.assertEqual(report.considered, 27)
@@ -2164,9 +2184,15 @@ class BoundaryAndFailureTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             layers.LayerStack(layers=[layers.Layer() for _ in range(layers.MAX_LAYERS + 1)])
         lower = layers.Layer(name="Lower", voxels={(0, 0, 0): 0})
-        upper = layers.Layer(name="Upper", voxels={(1, 0, 0): 0}, locked=True)
+        upper = layers.Layer(
+            name="Upper",
+            voxels={(1, 0, 0): 0},
+            locked=True,
+            surface_backend="MARCHING",
+        )
         merge_stack = layers.LayerStack(layers=[lower, upper], active_index=1)
         merge_stack.merge_down(PALETTE)
+        self.assertEqual(merge_stack.layers[0].surface_backend, "MARCHING")
         self.assertEqual(len(merge_stack.layers), 1)
         merge_stack.layers[0].voxels[(2, 0, 0)] = 99
         with self.assertRaises(ValueError):

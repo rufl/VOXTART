@@ -666,6 +666,10 @@ The current local regression baseline is 93 deterministic core tests, 29
 Blender-native tests, and 7 additional end-to-end Blender tests. The E2E
 performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
+The latest local coverage probes report 6,466/6,466 core lines (100.00%) and
+6,137/13,784 Blender-facing lines (44.52%). The latest headless performance
+probe reported 32³ rebuild in 547.01 ms and selection in 67.34 ms on this
+workstation.
 
 `voxtart_coverage.py` and `voxtart_blender_coverage.py` use `sys.settrace`;
 neither requires pytest or a third-party coverage package. The GitHub Actions
