@@ -104,6 +104,8 @@ directory, then displays the custom **VoxStart 0.0.1-dogfood-(build)** splash
 with the transparent-background icon before opening the voxel editor.
 The splash card uses rounded visual hierarchy, a clear product eyebrow, a
 focused making tagline, and an explicit editor-preparation status strip.
+The handoff invalidates the splash draw state and forces a redraw so the editor
+does not inherit a stale startup frame.
 The packaged `VoxTart.exe` launcher embeds the same transparent icon and keeps
 the Blender host window hidden until its native title is already **VoxTart**,
 so the Blender version title is never exposed during startup.
