@@ -50,6 +50,9 @@ jobs:
         env:
           VOXTART_COVERAGE_OUTPUT: ${{ github.workspace }}/voxtart-coverage/core.json
         run: python tests/python/voxtart_coverage.py --all-missing --minimum-percent 100.0
+      - name: Verify core coverage evidence
+        if: always()
+        run: test -s voxtart-coverage/core.json
       - name: Upload core coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -84,6 +87,11 @@ jobs:
         env:
           VOXTART_COVERAGE_OUTPUT: ${{ github.workspace }}/voxtart-blender-artifacts/coverage.json
         run: "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --factory-startup --python tests/python/voxtart_blender_coverage.py
+      - name: Verify Blender evidence
+        if: always()
+        run: |
+          test -s voxtart-blender-artifacts/performance.json
+          test -s voxtart-blender-artifacts/coverage.json
       - name: Upload Blender evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -150,6 +158,23 @@ jobs:
           VOXTART_E2E_ARTIFACT_DIR: ${{ github.workspace }}\voxtart-e2e-artifacts
           VOXTART_PERF_OUTPUT: ${{ github.workspace }}\voxtart-e2e-artifacts\performance.json
         run: call tools\run_voxtart_e2e.cmd > "voxtart-e2e-artifacts\e2e.log" 2>&1
+      - name: Verify Windows E2E evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $required = @(
+            "e2e.log",
+            "performance.json",
+            "regression-baseline.json",
+            "voxtart_gui.json",
+            "voxtart_gui.png"
+          )
+          foreach ($name in $required) {
+            $path = Join-Path $env:GITHUB_WORKSPACE "voxtart-e2e-artifacts\$name"
+            if (!(Test-Path -Path $path -PathType Leaf) -or (Get-Item $path).Length -eq 0) {
+              throw "Missing Windows E2E evidence: $path"
+            }
+          }
       - name: Upload Windows E2E artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
