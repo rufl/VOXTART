@@ -53,6 +53,20 @@ jobs:
       - name: Verify core coverage evidence
         if: always()
         run: test -s voxtart-coverage/core.json
+      - name: Validate core coverage evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("voxtart-coverage/core.json").read_text())
+          assert payload["schema"] == 1
+          assert payload["scope"] == "core"
+          assert payload["hits"] == payload["source"] > 0
+          assert payload["percent"] == 100.0
+          print("VOXTART_CORE_COVERAGE_ARTIFACT_OK")
+          PY
       - name: Upload core coverage
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -92,6 +106,26 @@ jobs:
         run: |
           test -s voxtart-blender-artifacts/performance.json
           test -s voxtart-blender-artifacts/coverage.json
+      - name: Validate Blender evidence
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          coverage = json.loads(Path("voxtart-blender-artifacts/coverage.json").read_text())
+          assert coverage["schema"] == 1
+          assert coverage["scope"] == "blender"
+          assert 0 < coverage["hits"] <= coverage["source"]
+          assert 0.0 < coverage["percent"] <= 100.0
+
+          performance = json.loads(Path("voxtart-blender-artifacts/performance.json").read_text())
+          assert performance["schema"] == 1
+          assert performance["voxels"] > 0
+          assert performance["rebuild_ms"] > 0.0
+          assert performance["selection_ms"] > 0.0
+          print("VOXTART_BLENDER_EVIDENCE_OK")
+          PY
       - name: Upload Blender evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -175,6 +209,29 @@ jobs:
               throw "Missing Windows E2E evidence: $path"
             }
           }
+      - name: Validate Windows E2E evidence
+        if: always()
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE "voxtart-e2e-artifacts"
+          $baseline = Get-Content (Join-Path $root "regression-baseline.json") | ConvertFrom-Json
+          if ($baseline.schema -ne 1 -or $baseline.core_tests -ne 93 -or
+              $baseline.blender_tests -ne 29 -or $baseline.e2e_tests -ne 7) {
+            throw "Invalid regression baseline artifact"
+          }
+          $performance = Get-Content (Join-Path $root "performance.json") | ConvertFrom-Json
+          if ($performance.schema -ne 1 -or $performance.voxels -le 0 -or
+              $performance.rebuild_ms -le 0 -or $performance.selection_ms -le 0) {
+            throw "Invalid Windows performance artifact"
+          }
+          $gui = Get-Content (Join-Path $root "voxtart_gui.json") | ConvertFrom-Json
+          if ($gui.ok -ne $true) {
+            throw "Invalid GUI probe artifact"
+          }
+          if (!(Select-String -Path (Join-Path $root "e2e.log") -Pattern "VOXTART_E2E_OK" -Quiet)) {
+            throw "Windows E2E log is missing its success marker"
+          }
+          Write-Output "VOXTART_WINDOWS_E2E_EVIDENCE_OK"
       - name: Upload Windows E2E artifacts
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

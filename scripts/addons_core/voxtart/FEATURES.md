@@ -668,7 +668,7 @@ performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
 The latest local coverage probes report 6,466/6,466 core lines (100.00%) and
 6,137/13,784 Blender-facing lines (44.52%). The latest headless performance
-probe reported 32³ rebuild in 509.79 ms and selection in 59.69 ms on this
+probe reported 32³ rebuild in 523.73 ms and selection in 67.04 ms on this
 workstation.
 The CI core-coverage step enforces the 100.0% deterministic-line threshold;
 coverage regressions fail the Linux core job instead of becoming upload-only
@@ -690,6 +690,7 @@ deterministic, Blender-native, and headless E2E suites on Linux, then builds
 the Windows runtime and launcher, runs the complete Windows P0 matrix with an
 isolated `VOXTART_CONFIG`, and uploads the GUI screenshot
 and marker as workflow artifacts.
-Artifact uploads use `if-no-files-found: error`, and each CI job verifies its
-expected artifact files before upload, so a passing test job cannot silently
-discard missing coverage, performance, or Windows E2E evidence.
+Artifact uploads use `if-no-files-found: error`, each CI job verifies its
+expected artifact files before upload, and schema checks validate coverage,
+performance, regression-baseline, GUI, and success-marker payloads so a
+passing test job cannot silently discard invalid evidence.
