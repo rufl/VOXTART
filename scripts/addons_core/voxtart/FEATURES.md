@@ -41,6 +41,9 @@ mouse instructions, a visible **Colors** strip, and only the beginner actions:
 **Add block**, **Erase block**, **Color block**, and **Select blocks**. The card
 disappears after the first changed edit, which also reports the action and its
 block count with an undo reminder.
+The editor top bar, color strip, toolbar, and first-run card share rounded
+panels and accent borders so the editing surface reads as one focused product
+workspace.
 The desktop shell remains available as a secondary project surface through the
 editor's **Project** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,
