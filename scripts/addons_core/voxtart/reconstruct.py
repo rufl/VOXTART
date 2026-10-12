@@ -11,9 +11,11 @@ unresolved are returned separately from the authoritative voxel asset.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Iterable, Literal, Mapping, Sequence
 
+from .metrics import compare_indexed_views
+from .provenance import EvidenceCell, EvidenceMap, SourceIdentity, sha256_json
 from .voxel import Cell, Color, VoxelAsset
 
 
@@ -64,6 +66,7 @@ class OrthographicView:
     origin: Cell = (0, 0, 0)
     depth: int = 1
     priority: int = 0
+    source_identity: SourceIdentity | None = None
 
     def __post_init__(self) -> None:
         name = str(self.name).strip()
@@ -75,6 +78,8 @@ class OrthographicView:
             raise ValueError("view direction must be -1 or 1")
         if isinstance(self.depth, bool) or not isinstance(self.depth, int) or self.depth <= 0:
             raise ValueError("view depth must be a positive integer")
+        if self.source_identity is not None and not isinstance(self.source_identity, SourceIdentity):
+            raise TypeError("view source_identity must be a SourceIdentity")
         if isinstance(self.priority, bool) or not isinstance(self.priority, int):
             raise ValueError("view priority must be an integer")
         origin = _cell(self.origin)
@@ -104,6 +109,7 @@ class OrthographicView:
         origin: Cell = (0, 0, 0),
         depth: int = 1,
         priority: int = 0,
+        source_identity: SourceIdentity | None = None,
     ) -> "OrthographicView":
         """Build a view from top-to-bottom image rows."""
 
@@ -115,6 +121,7 @@ class OrthographicView:
             origin=origin,
             depth=depth,
             priority=priority,
+            source_identity=source_identity,
         )
 
     @property
@@ -184,11 +191,69 @@ class ReconstructionReport:
     extra_pixels: int
     color_mismatches: int
     conflict_pixels: tuple[tuple[str, int, int], ...]
+    silhouette_intersection: int = 0
+    silhouette_union: int = 0
+    silhouette_iou: float = 1.0
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
         value["conflict_pixels"] = [list(item) for item in self.conflict_pixels]
         return value
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptancePolicy:
+    """Explicit quality gate for publishing a reconstructed asset."""
+
+    max_unresolved: int = 0
+    max_conflicting_rays: int = 0
+    max_material_conflicts: int = 0
+    max_missing_pixels: int = 0
+    max_extra_pixels: int = 0
+    max_color_mismatches: int = 0
+    minimum_silhouette_iou: float = 1.0
+    require_source_identities: bool = True
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "max_unresolved",
+            "max_conflicting_rays",
+            "max_material_conflicts",
+            "max_missing_pixels",
+            "max_extra_pixels",
+            "max_color_mismatches",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if (
+            isinstance(self.minimum_silhouette_iou, bool)
+            or not isinstance(self.minimum_silhouette_iou, (int, float))
+            or not 0.0 <= float(self.minimum_silhouette_iou) <= 1.0
+        ):
+            raise ValueError("minimum_silhouette_iou must be in [0, 1]")
+        if not isinstance(self.require_source_identities, bool):
+            raise TypeError("require_source_identities must be boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptanceDecision:
+    """Immutable review result; accepted assets have no failed reasons."""
+
+    accepted: bool
+    reasons: tuple[str, ...]
+    asset_digest: str
+    evidence_digest: str
+    report: ReconstructionReport
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "accepted": self.accepted,
+            "reasons": list(self.reasons),
+            "asset_digest": self.asset_digest,
+            "evidence_digest": self.evidence_digest,
+            "report": self.report.to_dict(),
+        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,9 +263,36 @@ class ReconstructionResult:
     asset: VoxelAsset
     unresolved: tuple[Cell, ...]
     report: ReconstructionReport
+    evidence: EvidenceMap = field(default_factory=EvidenceMap)
+    source_identities: tuple[SourceIdentity, ...] = ()
 
     def render_back(self, view: OrthographicView) -> tuple[tuple[Pixel, ...], ...]:
         return render_view(self.asset, view)
+
+    def assess(self, policy: AcceptancePolicy = AcceptancePolicy()) -> AcceptanceDecision:
+        """Evaluate the reconstruction against an explicit publication gate."""
+
+        checks = (
+            (len(self.unresolved) > policy.max_unresolved, "unresolved candidate cells exceed policy"),
+            (self.report.conflicting_rays > policy.max_conflicting_rays, "conflicting rays exceed policy"),
+            (self.report.material_conflicts > policy.max_material_conflicts, "material conflicts exceed policy"),
+            (self.report.missing_pixels > policy.max_missing_pixels, "missing pixels exceed policy"),
+            (self.report.extra_pixels > policy.max_extra_pixels, "extra pixels exceed policy"),
+            (self.report.color_mismatches > policy.max_color_mismatches, "color mismatches exceed policy"),
+            (self.report.silhouette_iou < policy.minimum_silhouette_iou, "silhouette IoU is below policy"),
+        )
+        reasons = [reason for failed, reason in checks if failed]
+        if policy.require_source_identities and not self.source_identities:
+            reasons.append("source identities are required")
+        return AcceptanceDecision(
+            accepted=not reasons,
+            reasons=tuple(reasons),
+            asset_digest=self.asset.content_digest,
+            evidence_digest=self.evidence.digest,
+            report=self.report,
+        )
+
+
 
 
 @dataclass(frozen=True, slots=True)
@@ -241,6 +333,7 @@ def reconstruct_views(
     settings: ReconstructionSettings = ReconstructionSettings(),
     *,
     source_provenance: Mapping[str, str] | None = None,
+    source_identities: Sequence[SourceIdentity] = (),
 ) -> ReconstructionResult:
     """Reconstruct a bounded voxel asset from one to six orthographic views.
 
@@ -262,14 +355,33 @@ def reconstruct_views(
         raise ValueError("view names must be unique")
     normalized_palette = _palette(palette)
 
+    source_by_id: dict[str, SourceIdentity] = {}
+    for source in tuple(source_identities) + tuple(
+        view.source_identity for view in normalized_views if view.source_identity is not None
+    ):
+        if not isinstance(source, SourceIdentity):
+            raise TypeError("source_identities must contain SourceIdentity values")
+        previous = source_by_id.get(source.source_id)
+        if previous is not None and previous != source:
+            raise ValueError(f"source identity changed for source ID: {source.source_id!r}")
+        source_by_id[source.source_id] = source
+    normalized_sources = tuple(sorted(source_by_id.values(), key=lambda source: source.key))
+
     forbidden: set[Cell] = set()
+    forbidden_masks: dict[Cell, int] = {}
     source_pixels = 0
-    for view in normalized_views:
+    source_names_by_bit: dict[int, str] = {}
+    for view_index, view in enumerate(normalized_views):
+        source_bit = 1 << view_index
+        source_names_by_bit[source_bit] = view.name
         for row in range(view.height):
             for column in range(view.width):
                 pixel = view.pixel(column, row)
                 if pixel is None:
-                    forbidden.update(view.cell_at(column, row, depth) for depth in range(view.depth))
+                    for depth in range(view.depth):
+                        cell = view.cell_at(column, row, depth)
+                        forbidden.add(cell)
+                        forbidden_masks[cell] = forbidden_masks.get(cell, 0) | source_bit
                     continue
                 if pixel >= len(normalized_palette):
                     raise ValueError(f"view pixel palette index out of range: {pixel}")
@@ -277,7 +389,9 @@ def reconstruct_views(
 
     rays: list[_Ray] = []
     possible: set[Cell] = set()
-    for view in normalized_views:
+    possible_masks: dict[Cell, int] = {}
+    for view_index, view in enumerate(normalized_views):
+        source_bit = 1 << view_index
         for row in range(view.height):
             for column in range(view.width):
                 pixel = view.pixel(column, row)
@@ -288,11 +402,12 @@ def reconstruct_views(
                     cell = view.cell_at(column, row, depth)
                     if cell not in forbidden:
                         candidate_cells.append(cell)
+                        possible_masks[cell] = possible_masks.get(cell, 0) | source_bit
                 candidates = tuple(candidate_cells)
                 rays.append(_Ray(view, column, row, pixel, candidates))
                 possible.update(candidates)
 
-    votes: dict[Cell, list[tuple[int, int]]] = {}
+    votes: dict[Cell, list[tuple[int, int, str]]] = {}
     conflicts: list[tuple[str, int, int]] = []
     for ray in sorted(rays, key=lambda item: (item.view.priority, item.view.name, item.row, item.column)):
         if not ray.candidates:
@@ -300,17 +415,19 @@ def reconstruct_views(
             continue
         selected = ray.candidates if settings.mode == "VOLUME" else ray.candidates[:1]
         for cell in selected:
-            votes.setdefault(cell, []).append((ray.view.priority, ray.color))
+            votes.setdefault(cell, []).append((ray.view.priority, ray.color, ray.view.name))
 
     occupied: dict[Cell, int] = {}
+    conflict_cells: set[Cell] = set()
     material_conflicts = 0
     for cell in sorted(votes):
         entries = votes[cell]
-        colors = {color for _priority, color in entries}
+        colors = {color for _priority, color, _source in entries}
         if len(colors) > 1:
             material_conflicts += 1
+            conflict_cells.add(cell)
         counts: dict[int, int] = {}
-        for _priority, color in entries:
+        for _priority, color, _source in entries:
             counts[color] = counts.get(color, 0) + 1
         occupied[cell] = min(counts, key=lambda color: (-counts[color], color))
     provenance = {
@@ -319,6 +436,10 @@ def reconstruct_views(
         "view_names": ",".join(view.name for view in normalized_views),
         "mode": settings.mode,
     }
+    if normalized_sources:
+        provenance["source_identity_digest"] = sha256_json(
+            [source.to_dict() for source in normalized_sources]
+        )
     if source_provenance is not None:
         if not isinstance(source_provenance, Mapping):
             raise TypeError("source_provenance must be a mapping")
@@ -332,22 +453,56 @@ def reconstruct_views(
         voxels=occupied,
         provenance=provenance,
     )
+
+    def source_names(mask: int) -> tuple[str, ...]:
+        return tuple(
+            source_names_by_bit[bit]
+            for bit in sorted(source_names_by_bit)
+            if mask & bit
+        )
+
+    evidence_cells: dict[Cell, EvidenceCell] = {}
+    for cell, mask in forbidden_masks.items():
+        evidence_cells[cell] = EvidenceCell(
+            state="FREE",
+            source_mask=mask,
+            confidence=1.0,
+            sources=source_names(mask),
+        )
+    for cell, mask in possible_masks.items():
+        if cell in forbidden_masks:
+            continue
+        entries = votes.get(cell, [])
+        if cell in conflict_cells:
+            state = "CONFLICT"
+        elif cell in occupied:
+            state = "OCCUPIED"
+        else:
+            state = "UNKNOWN"
+        confidence = min(1.0, len(entries) / len(normalized_views)) if entries else None
+        evidence_cells[cell] = EvidenceCell(
+            state=state,
+            source_mask=mask,
+            confidence=confidence,
+            sources=tuple(sorted({source for _priority, _color, source in entries})),
+        )
+    evidence = EvidenceMap.from_mapping(evidence_cells, normalized_sources)
+
     missing_pixels = 0
     extra_pixels = 0
     color_mismatches = 0
+    silhouette_intersection = 0
+    silhouette_union = 0
     for view in normalized_views:
-        rendered = render_view(asset, view)
-        for row in range(view.height):
-            for column in range(view.width):
-                source = view.pixel(column, row)
-                result = rendered[row][column]
-                if source is None:
-                    if result is not None:
-                        extra_pixels += 1
-                elif result is None:
-                    missing_pixels += 1
-                elif source != result:
-                    color_mismatches += 1
+        metrics = compare_indexed_views(view.pixels, render_view(asset, view))
+        missing_pixels += metrics.missing_pixels
+        extra_pixels += metrics.extra_pixels
+        color_mismatches += metrics.color_mismatches
+        silhouette_intersection += metrics.intersection_pixels
+        silhouette_union += metrics.union_pixels
+    silhouette_iou = (
+        silhouette_intersection / silhouette_union if silhouette_union else 1.0
+    )
 
     unresolved = tuple(sorted(possible.difference(occupied)))
     report = ReconstructionReport(
@@ -361,12 +516,22 @@ def reconstruct_views(
         extra_pixels=extra_pixels,
         color_mismatches=color_mismatches,
         conflict_pixels=tuple(conflicts),
+        silhouette_intersection=silhouette_intersection,
+        silhouette_union=silhouette_union,
+        silhouette_iou=silhouette_iou,
     )
-    return ReconstructionResult(asset=asset, unresolved=unresolved, report=report)
-
+    return ReconstructionResult(
+        asset=asset,
+        unresolved=unresolved,
+        report=report,
+        evidence=evidence,
+        source_identities=normalized_sources,
+    )
 
 __all__ = [
     "AXES",
+    "AcceptanceDecision",
+    "AcceptancePolicy",
     "DIRECTIONS",
     "OrthographicView",
     "Pixel",
