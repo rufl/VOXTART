@@ -53,6 +53,8 @@ def _load_icon() -> bool:
 
 
 def _draw_splash(_state, context) -> None:
+    if _ACTIVE_AREA is None or _DRAW_HANDLE is None:
+        return
     width = context.region.width
     height = context.region.height
     card_width = min(620.0, width - 80.0)
@@ -113,6 +115,10 @@ def _finish() -> None:
 
     if not desktop_ui.open_default_editor():
         desktop_shell.open_shell()
+    try:
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
+    except (AttributeError, RuntimeError):
+        pass
 
 
 def show() -> bool:
