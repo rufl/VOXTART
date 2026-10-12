@@ -102,6 +102,8 @@ icon at `assets/voxtart.ico`.
 The launcher suppresses Blender's native splash through an isolated preferences
 directory, then displays the custom **VoxStart 0.0.1-dogfood-(build)** splash
 with the transparent-background icon before opening the voxel editor.
+The splash card uses rounded visual hierarchy, a clear product eyebrow, a
+focused making tagline, and an explicit editor-preparation status strip.
 The packaged `VoxTart.exe` launcher embeds the same transparent icon and keeps
 the Blender host window hidden until its native title is already **VoxTart**,
 so the Blender version title is never exposed during startup.
@@ -668,7 +670,7 @@ performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
 The latest local coverage probes report 6,466/6,466 core lines (100.00%) and
 6,137/13,784 Blender-facing lines (44.52%). The latest headless performance
-probe reported 32³ rebuild in 523.73 ms and selection in 67.04 ms on this
+probe reported 32³ rebuild in 541.13 ms and selection in 61.89 ms on this
 workstation.
 The CI core-coverage step enforces the 100.0% deterministic-line threshold;
 coverage regressions fail the Linux core job instead of becoming upload-only
