@@ -641,7 +641,7 @@ probes:
 python tests/python/voxtart_core_test.py
 blender --background --factory-startup --python tests/python/voxtart_blender_test.py
 blender --background --factory-startup --python tests/python/voxtart_e2e_blender.py
-python tests/python/voxtart_coverage.py --all-missing
+python tests/python/voxtart_coverage.py --all-missing --minimum-percent 100.0
 blender --background --python tests/python/voxtart_blender_coverage.py
 python -m compileall -q scripts/addons_core/voxtart tests/python tools
 ```
@@ -668,8 +668,11 @@ performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
 The latest local coverage probes report 6,466/6,466 core lines (100.00%) and
 6,137/13,784 Blender-facing lines (44.52%). The latest headless performance
-probe reported 32³ rebuild in 547.01 ms and selection in 67.34 ms on this
+probe reported 32³ rebuild in 516.11 ms and selection in 67.37 ms on this
 workstation.
+The CI core-coverage step enforces the 100.0% deterministic-line threshold;
+coverage regressions fail the Linux core job instead of becoming upload-only
+evidence.
 
 `voxtart_coverage.py` and `voxtart_blender_coverage.py` use `sys.settrace`;
 neither requires pytest or a third-party coverage package. The GitHub Actions
