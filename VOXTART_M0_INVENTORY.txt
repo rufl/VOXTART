@@ -53,7 +53,7 @@ First reduction review set (not deleted in M0)
 
 M0 risks
   - Automatic MSVC detection now retries the installed `Microsoft.VisualStudio.Product.BuildTools` product when standard Visual Studio discovery fails. ``make.bat verbose nobuild`` reaches CMake configuration successfully with the installed VS 2022 Build Tools.
-  - ``lib/windows_x64`` is populated at v5.2.0; ``make.bat`` completed the full Release source build and install with VS 2022 Build Tools, and the resulting Blender 5.2.2 executable passed the 29-test native regression suite.
+  - ``lib/windows_x64`` is populated at v5.2.0; ``make.bat`` completed the full Release source build and install with VS 2022 Build Tools, and the resulting Blender 5.2.2 executable passed the 29-test native regression suite plus the 7-test headless editor matrix.
   - SPRITEFORM at Chopper remains an external prerequisite; remote Paseo project operations returned HTTP 403 and SSH key authentication was rejected.
 
 VOXTART release validation
