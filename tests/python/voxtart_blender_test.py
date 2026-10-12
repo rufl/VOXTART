@@ -886,6 +886,7 @@ class BlenderRegistrationTest(unittest.TestCase):
 
     def test_generated_rig_and_game_rig_pipeline(self):
         before_names = {obj.name for obj in bpy.data.objects}
+        before_actions = {action.name for action in bpy.data.actions}
         try:
             bpy.ops.mesh.primitive_cube_add(size=2.0)
             mesh = bpy.context.active_object
@@ -920,8 +921,41 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertEqual(extracted["bone_count"], 20)
             self.assertEqual(len(game_rig.data.bones), 20)
             self.assertEqual(game_rig.get("voxtart_game_rig_source"), armature.name)
+
+            source_action = bpy.data.actions.new("VOXTART Native Bake Test")
+            armature.animation_data_create()
+            armature.animation_data.action = source_action
+            source_root = armature.pose.bones["root"]
+            for frame, rotation in ((1, 0.0), (5, 0.25)):
+                bpy.context.scene.frame_set(frame)
+                source_root.rotation_mode = "XYZ"
+                source_root.rotation_euler[2] = rotation
+                source_root.keyframe_insert(
+                    data_path="rotation_euler",
+                    frame=frame,
+                    group=source_root.name,
+                )
+            baked = animation.bake_game_rig_actions(
+                bpy.context,
+                source_name=armature.name,
+                target_name=game_rig.name,
+                requested_actions=source_action.name,
+                prefix="Game_",
+            )
+            self.assertEqual(baked["action_count"], 1)
+            baked_action = game_rig.animation_data.action
+            self.assertIsNotNone(baked_action)
+            self.assertTrue(baked_action.get("voxtart_game_rig_baked"))
+            self.assertGreaterEqual(baked_action.frame_range[1], 5.0)
+            self.assertEqual(
+                json.loads(game_rig["voxtart_game_rig_baked_actions"])[0]["source_action"],
+                source_action.name,
+            )
         finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+            for action in tuple(bpy.data.actions):
+                if action.name not in before_actions:
+                    bpy.data.actions.remove(action)
     def test_large_asset_and_overlapping_layers_round_trip(self):
         before_names = {obj.name for obj in bpy.data.objects}
         try:

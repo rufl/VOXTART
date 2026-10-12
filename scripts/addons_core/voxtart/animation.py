@@ -668,19 +668,55 @@ def _retarget_natively(
             raise RuntimeError("No compatible source/target bone mappings were found")
         if bake:
             start, end = action.frame_range
+            frame_start = int(start)
+            frame_end = int(end)
+            bpy.context.scene.frame_set(frame_start)
             bpy.ops.object.mode_set(mode="POSE")
-            bpy.ops.nla.bake(
-                frame_start=int(start),
-                frame_end=int(end),
+            target.animation_data_create()
+            target.animation_data.action = None
+            bake_result = bpy.ops.nla.bake(
+                frame_start=frame_start,
+                frame_end=frame_end,
                 step=1,
                 only_selected=False,
                 visual_keying=True,
-                clear_constraints=True,
+                clear_constraints=False,
                 use_current_action=False,
                 bake_types={"POSE"},
             )
-            if target.animation_data and target.animation_data.action:
-                target.animation_data.action.name = f"{target.name}|{action.name}|VOXTART"
+            baked_action = target.animation_data.action
+            if (
+                "FINISHED" not in bake_result
+                or baked_action is None
+                or baked_action.frame_range[1] < frame_end
+            ):
+                failed_action = baked_action
+                retry_action = bpy.data.actions.new(
+                    f"{target.name}|{action.name}|VOXTART Retry"
+                )
+                target.animation_data.action = retry_action
+                if failed_action is not None and failed_action.users == 0:
+                    bpy.data.actions.remove(failed_action)
+                retry_result = bpy.ops.nla.bake(
+                    frame_start=frame_start,
+                    frame_end=frame_end,
+                    step=1,
+                    only_selected=False,
+                    visual_keying=True,
+                    clear_constraints=False,
+                    use_current_action=True,
+                    bake_types={"POSE"},
+                )
+                baked_action = target.animation_data.action
+                if (
+                    "FINISHED" not in retry_result
+                    or baked_action is None
+                    or baked_action.frame_range[1] < frame_end
+                ):
+                    raise RuntimeError(
+                        "Native action baking did not produce a complete action"
+                    )
+            baked_action.name = f"{target.name}|{action.name}|VOXTART"
         else:
             preserve_constraints = True
         target["voxtart_animation_retarget_backend"] = "native"
