@@ -52,6 +52,7 @@ modes at the top, project items on the left, palette and assets on the right,
 and a compact status bar at the bottom. When opened before the first edit, it
 defaults to **Build**, keeps only the starter-focused project category, and
 uses the same beginner tool labels.
+Its bottom status bar uses color-coded status and active-asset summary pills.
 
 ### Core project loop
 

@@ -715,17 +715,52 @@ def _draw_bottom_bar(context, width: float, height: float) -> None:
     _draw_rect(0, 0, width, _BOTTOMBAR_HEIGHT, _BG)
     scene = context.scene
     status = str(scene.get(SHELL_STATUS_PROPERTY, "Ready"))[:64]
+    status_lower = status.lower()
+    if any(
+        fragment in status_lower
+        for fragment in ("error", "failed", "invalid", "cancel")
+    ):
+        status_fill = (0.18, 0.08, 0.08, 0.98)
+        status_border = (0.78, 0.28, 0.22, 0.98)
+        status_accent = (1.0, 0.42, 0.3, 1.0)
+        status_text = (1.0, 0.88, 0.84, 1.0)
+    elif any(
+        fragment in status_lower
+        for fragment in ("ready", "saved", "created", "exported", "complete", "refreshed", "reduced", "painted", "voxelized", "baked")
+    ):
+        status_fill = (0.06, 0.15, 0.12, 0.98)
+        status_border = (0.2, 0.66, 0.45, 0.98)
+        status_accent = (0.34, 0.92, 0.58, 1.0)
+        status_text = (0.86, 1.0, 0.9, 1.0)
+    else:
+        status_fill = (0.07, 0.09, 0.13, 0.98)
+        status_border = (0.2, 0.35, 0.52, 0.98)
+        status_accent = (0.35, 0.62, 1.0, 1.0)
+        status_text = (0.86, 0.92, 1.0, 1.0)
+    status_width = min(420.0, max(180.0, _text_width(status, 11) + 40.0))
+    _draw_round_rect(16.0, 4.0, status_width, 24.0, status_fill, 12.0)
+    _draw_line(
+        _rounded_points(16.0, 4.0, status_width, 24.0, 12.0),
+        status_border,
+    )
+    _draw_circle(29.0, 16.0, 3.0, status_accent, segments=12)
+    _draw_text(status, 40.0, 10.0, 11, status_text)
+
     assets = _asset_objects()
     active = _active_asset(context)
     active_name = active.name[:22] if active is not None else "No active asset"
-    _draw_text(status, 16, 10, 11, _MUTED)
-    _draw_text(
-        f"{len(assets)} asset(s) | {active_name}",
-        max(_LEFT_WIDTH + 24, width - _RIGHT_WIDTH - 220),
-        10,
-        11,
-        _TEXT,
+    asset_summary = f"{len(assets)} asset(s)  ·  {active_name}"
+    summary_width = min(320.0, max(180.0, _text_width(asset_summary, 11) + 28.0))
+    summary_x = max(
+        _LEFT_WIDTH + 24.0,
+        width - _RIGHT_WIDTH - summary_width - 16.0,
     )
+    _draw_round_rect(summary_x, 4.0, summary_width, 24.0, _PANEL, 12.0)
+    _draw_line(
+        _rounded_points(summary_x, 4.0, summary_width, 24.0, 12.0),
+        _BORDER,
+    )
+    _draw_text(asset_summary, summary_x + 14.0, 10.0, 11, _TEXT)
 
 
 def _draw_home(state, context, width: float, height: float) -> None:
