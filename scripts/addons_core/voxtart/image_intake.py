@@ -12,6 +12,7 @@ from math import isfinite
 from typing import Iterable, Literal, Sequence
 
 from .provenance import SourceIdentity
+from .depth_observations import DepthObservation, PartMask
 from .reconstruct import OrthographicView, Pixel
 
 
@@ -201,6 +202,8 @@ class IndexedImage:
         priority: int = 0,
         name: str | None = None,
         source_identity: SourceIdentity | None = None,
+        depth_observation: DepthObservation | None = None,
+        part_mask: PartMask | None = None,
     ) -> OrthographicView:
         """Apply explicit calibration without resampling the source image."""
 
@@ -213,6 +216,8 @@ class IndexedImage:
             depth=depth,
             priority=priority,
             source_identity=source_identity,
+            depth_observation=depth_observation,
+            part_mask=part_mask,
         )
 
     def provenance(self) -> dict[str, str]:

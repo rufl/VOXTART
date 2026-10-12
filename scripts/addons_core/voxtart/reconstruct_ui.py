@@ -13,12 +13,15 @@ import bpy
 from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, IntVectorProperty, StringProperty
 
 from . import operators
+from .depth_observations import DepthObservation, PartMask, load_observation, load_part_mask
 from .image_intake import ImageFrame, PaletteIntakeSettings, extract_palette_frames, index_image
-from .reconstruct import ReconstructionSettings, reconstruct_views
+from .reconstruct import AcceptancePolicy, ReconstructionSettings, reconstruct_views
 
 
 RECONSTRUCTION_REPORT_PROPERTY = "voxtart_reconstruction_report"
 RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY = "voxtart_reconstruction_unresolved_cells"
+RECONSTRUCTION_EVIDENCE_PROPERTY = "voxtart_reconstruction_evidence"
+RECONSTRUCTION_ACCEPTANCE_PROPERTY = "voxtart_reconstruction_acceptance"
 RECONSTRUCTION_OVERLAY_PROPERTY = "voxtart_reconstruction_overlay"
 RECONSTRUCTION_SOURCE_PROPERTY = "voxtart_reconstruction_source"
 RECONSTRUCTION_SOURCES_PROPERTY = "voxtart_reconstruction_sources"
@@ -51,7 +54,13 @@ _BACKGROUND_ITEMS = (
 )
 _MODE_ITEMS = (
     ("SURFACE", "Surface", "Select the nearest viable voxel per source pixel"),
+    ("LAYERED", "Layered", "Use the per-pixel front/back depth observation"),
+    ("SHELL", "Shell", "Keep the configured number of front layers"),
     ("VOLUME", "Volume", "Keep every viable voxel in the calibrated depth slab"),
+)
+_MATERIAL_ITEMS = (
+    ("VISIBLE_ONLY", "Visible only", "Project visible source colors onto the frontmost voxels"),
+    ("EVIDENCE", "All evidence", "Keep all ray evidence colors without visible-only projection"),
 )
 
 
@@ -89,8 +98,53 @@ def _load_image_frame(filepath: str) -> tuple[ImageFrame, Path]:
                 pass
 
 
+def _load_optional_observation(
+    filepath: str,
+    loader,
+    *,
+    width: int,
+    height: int,
+    label: str,
+):
+    path = Path(bpy.path.abspath(str(filepath or ""))).expanduser()
+    if not str(filepath or "").strip():
+        return None
+    if not path.is_file():
+        raise ValueError(f"{label} file does not exist: {path}")
+    try:
+        observation = loader(path)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"could not load {label}: {error}") from error
+    if (observation.width, observation.height) != (width, height):
+        raise ValueError(
+            f"{label} dimensions {observation.width}x{observation.height} "
+            f"do not match image {width}x{height}"
+        )
+    return observation
+
+
+def _load_depth_observation(filepath: str, *, width: int, height: int) -> DepthObservation | None:
+    return _load_optional_observation(
+        filepath,
+        load_observation,
+        width=width,
+        height=height,
+        label="depth observation",
+    )
+
+
+def _load_part_mask(filepath: str, *, width: int, height: int) -> PartMask | None:
+    return _load_optional_observation(
+        filepath,
+        load_part_mask,
+        width=width,
+        height=height,
+        label="part mask",
+    )
+
+
 def _view_dict(view) -> dict[str, object]:
-    return {
+    value = {
         "name": view.name,
         "axis": view.axis,
         "direction": view.direction,
@@ -98,6 +152,19 @@ def _view_dict(view) -> dict[str, object]:
         "depth": view.depth,
         "priority": view.priority,
     }
+    if view.depth_observation is not None:
+        value["depth_observation"] = {
+            "name": view.depth_observation.name,
+            "digest": view.depth_observation.digest,
+            "method": view.depth_observation.method,
+        }
+    if view.part_mask is not None:
+        value["part_mask"] = {
+            "name": view.part_mask.name,
+            "digest": view.part_mask.digest,
+            "parts": list(view.part_mask.parts),
+        }
+    return value
 
 
 def _store_common_result(obj: bpy.types.Object, result) -> None:
@@ -105,6 +172,16 @@ def _store_common_result(obj: bpy.types.Object, result) -> None:
     obj[RECONSTRUCTION_REPORT_PROPERTY] = json.dumps(report, sort_keys=True, separators=(",", ":"))
     obj[RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY] = json.dumps(
         [list(cell) for cell in result.unresolved],
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    obj[RECONSTRUCTION_EVIDENCE_PROPERTY] = json.dumps(
+        result.evidence.to_dict(),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    obj[RECONSTRUCTION_ACCEPTANCE_PROPERTY] = json.dumps(
+        result.assess(AcceptancePolicy(require_source_identities=True)).to_dict(),
         sort_keys=True,
         separators=(",", ":"),
     )
@@ -142,6 +219,7 @@ def _store_multiview_result(obj: bpy.types.Object, sources, views, result) -> No
     )
 
 
+
 def _report_from_object(obj):
     if obj is None:
         return None
@@ -162,6 +240,8 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     filepath: StringProperty(name="Image", subtype="FILE_PATH")
+    depth_filepath: StringProperty(name="Depth Observation", subtype="FILE_PATH")
+    part_mask_filepath: StringProperty(name="Part Mask", subtype="FILE_PATH")
     axis: EnumProperty(name="Depth Axis", items=_AXIS_ITEMS, default="Z")
     direction: EnumProperty(name="Facing", items=_DIRECTION_ITEMS, default="1")
     origin: IntVectorProperty(name="Origin", size=3, default=(0, 0, 0))
@@ -180,6 +260,8 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
     background_tolerance: FloatProperty(name="Background Tolerance", min=0.0, max=1.0, default=0.0)
     max_colors: IntProperty(name="Maximum Colors", min=1, max=256, default=256)
     mode: EnumProperty(name="Depth Mode", items=_MODE_ITEMS, default="SURFACE")
+    shell_thickness: IntProperty(name="Shell Thickness", min=1, max=MAX_RECONSTRUCTION_CELLS, default=1)
+    material_policy: EnumProperty(name="Material Policy", items=_MATERIAL_ITEMS, default="VISIBLE_ONLY")
 
     def invoke(self, context, _event):
         if self.filepath:
@@ -192,6 +274,16 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
             frame, source = _load_image_frame(self.filepath)
             if frame.width * frame.height * int(self.depth) > MAX_RECONSTRUCTION_CELLS:
                 raise ValueError(f"calibrated image exceeds the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget")
+            depth_observation = _load_depth_observation(
+                self.depth_filepath,
+                width=frame.width,
+                height=frame.height,
+            )
+            part_mask = _load_part_mask(
+                self.part_mask_filepath,
+                width=frame.width,
+                height=frame.height,
+            )
             intake_settings = PaletteIntakeSettings(
                 background_mode=self.background_mode,
                 alpha_threshold=float(self.alpha_threshold),
@@ -206,11 +298,18 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
                 origin=tuple(self.origin),
                 depth=int(self.depth),
                 priority=int(self.priority),
+                source_identity=indexed.source_identity(source_id=str(source)),
+                depth_observation=depth_observation,
+                part_mask=part_mask,
             )
             result = reconstruct_views(
                 (view,),
                 indexed.palette,
-                ReconstructionSettings(mode=self.mode),
+                ReconstructionSettings(
+                    mode=self.mode,
+                    shell_thickness=int(self.shell_thickness),
+                    material_policy=self.material_policy,
+                ),
                 source_provenance=indexed.provenance(),
             )
             obj = operators._create_asset_object(
@@ -262,20 +361,30 @@ class VOXTART_OT_reconstruct_views(bpy.types.Operator):
                     raise ValueError(
                         f"view {slot} exceeds the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget"
                     )
-                entries.append((slot, frame, source, depth))
+                depth_observation = _load_depth_observation(
+                    getattr(scene, _slot_property(slot, "depth_filepath")),
+                    width=frame.width,
+                    height=frame.height,
+                )
+                part_mask = _load_part_mask(
+                    getattr(scene, _slot_property(slot, "part_mask_filepath")),
+                    width=frame.width,
+                    height=frame.height,
+                )
+                entries.append((slot, frame, source, depth, depth_observation, part_mask))
             if not entries:
                 raise ValueError("choose at least one calibrated reconstruction view")
 
             intake_settings = _scene_intake_settings(scene)
             palette = extract_palette_frames(
-                tuple(frame for _slot, frame, _source, _depth in entries),
+                tuple(frame for _slot, frame, _source, _depth, _depth_observation, _part_mask in entries),
                 intake_settings,
             )
             views = []
             sources = []
             source_provenance = {}
             total_cells = 0
-            for slot, frame, source, depth in entries:
+            for slot, frame, source, depth, depth_observation, part_mask in entries:
                 indexed = index_image(frame, intake_settings, palette=palette)
                 views.append(
                     indexed.to_view(
@@ -285,12 +394,19 @@ class VOXTART_OT_reconstruct_views(bpy.types.Operator):
                         origin=tuple(getattr(scene, _slot_property(slot, "origin"))),
                         depth=depth,
                         priority=int(getattr(scene, _slot_property(slot, "priority"))),
+                        source_identity=indexed.source_identity(source_id=str(source)),
+                        depth_observation=depth_observation,
+                        part_mask=part_mask,
                     )
                 )
                 sources.append(source)
                 total_cells += frame.width * frame.height * depth
                 for key, value in indexed.provenance().items():
                     source_provenance[f"view_{slot}_{key}"] = value
+                if depth_observation is not None:
+                    source_provenance[f"view_{slot}_depth_digest"] = depth_observation.digest
+                if part_mask is not None:
+                    source_provenance[f"view_{slot}_part_mask_digest"] = part_mask.digest
             if total_cells > MAX_RECONSTRUCTION_CELLS:
                 raise ValueError(
                     f"calibrated views exceed the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget"
@@ -298,7 +414,11 @@ class VOXTART_OT_reconstruct_views(bpy.types.Operator):
             result = reconstruct_views(
                 tuple(views),
                 palette,
-                ReconstructionSettings(mode=scene.voxtart_reconstruction_mode),
+                ReconstructionSettings(
+                    mode=scene.voxtart_reconstruction_mode,
+                    shell_thickness=int(scene.voxtart_reconstruction_shell_thickness),
+                    material_policy=scene.voxtart_reconstruction_material_policy,
+                ),
                 source_provenance=source_provenance,
             )
             obj = operators._create_asset_object(
@@ -331,6 +451,8 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
         layout = self.layout
         scene = context.scene
         layout.prop(scene, "voxtart_reconstruction_filepath", text="Image")
+        layout.prop(scene, "voxtart_reconstruction_depth_filepath", text="Depth JSON")
+        layout.prop(scene, "voxtart_reconstruction_part_mask_filepath", text="Parts JSON")
         layout.prop(scene, "voxtart_reconstruction_axis", text="Depth Axis")
         layout.prop(scene, "voxtart_reconstruction_direction", text="Facing")
         layout.prop(scene, "voxtart_reconstruction_origin", text="Origin")
@@ -343,9 +465,13 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
             layout.prop(scene, "voxtart_reconstruction_background_tolerance")
         layout.prop(scene, "voxtart_reconstruction_max_colors")
         layout.prop(scene, "voxtart_reconstruction_mode", text="Depth Mode")
+        layout.prop(scene, "voxtart_reconstruction_shell_thickness")
+        layout.prop(scene, "voxtart_reconstruction_material_policy")
 
         operator = layout.operator(VOXTART_OT_reconstruct_image.bl_idname, icon="IMAGE_DATA")
         operator.filepath = scene.voxtart_reconstruction_filepath
+        operator.depth_filepath = scene.voxtart_reconstruction_depth_filepath
+        operator.part_mask_filepath = scene.voxtart_reconstruction_part_mask_filepath
         operator.axis = scene.voxtart_reconstruction_axis
         operator.direction = scene.voxtart_reconstruction_direction
         operator.origin = tuple(scene.voxtart_reconstruction_origin)
@@ -357,6 +483,8 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
         operator.background_tolerance = scene.voxtart_reconstruction_background_tolerance
         operator.max_colors = scene.voxtart_reconstruction_max_colors
         operator.mode = scene.voxtart_reconstruction_mode
+        operator.shell_thickness = scene.voxtart_reconstruction_shell_thickness
+        operator.material_policy = scene.voxtart_reconstruction_material_policy
 
         report = _report_from_object(context.active_object)
         if report is None:
@@ -370,7 +498,6 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
         report_box.label(text=f"Missing pixels: {report.get('missing_pixels', 0)}")
         report_box.label(text=f"Extra pixels: {report.get('extra_pixels', 0)}")
         report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
-
 
 
 class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
@@ -388,6 +515,8 @@ class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
             box = layout.box()
             box.label(text=f"View {slot}", icon="IMAGE_DATA")
             box.prop(scene, _slot_property(slot, "filepath"), text="Image")
+            box.prop(scene, _slot_property(slot, "depth_filepath"), text="Depth JSON")
+            box.prop(scene, _slot_property(slot, "part_mask_filepath"), text="Parts JSON")
             row = box.row(align=True)
             row.prop(scene, _slot_property(slot, "axis"), text="Axis")
             row.prop(scene, _slot_property(slot, "direction"), text="Facing")
@@ -402,6 +531,8 @@ class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
             layout.prop(scene, "voxtart_reconstruction_background_tolerance")
         layout.prop(scene, "voxtart_reconstruction_max_colors")
         layout.prop(scene, "voxtart_reconstruction_mode", text="Depth Mode")
+        layout.prop(scene, "voxtart_reconstruction_shell_thickness")
+        layout.prop(scene, "voxtart_reconstruction_material_policy")
         layout.operator(VOXTART_OT_reconstruct_views.bl_idname, icon="IMAGE_DATA")
 
         report = _report_from_object(context.active_object)
@@ -419,6 +550,8 @@ class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
         report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
 
 
+
+
 _CLASSES = (
     VOXTART_OT_reconstruct_image,
     VOXTART_OT_reconstruct_views,
@@ -432,6 +565,16 @@ def register() -> None:
         bpy.utils.register_class(cls)
     bpy.types.Scene.voxtart_reconstruction_filepath = StringProperty(
         name="Reconstruction Image",
+        subtype="FILE_PATH",
+        default="",
+    )
+    bpy.types.Scene.voxtart_reconstruction_depth_filepath = StringProperty(
+        name="Reconstruction Depth Observation",
+        subtype="FILE_PATH",
+        default="",
+    )
+    bpy.types.Scene.voxtart_reconstruction_part_mask_filepath = StringProperty(
+        name="Reconstruction Part Mask",
         subtype="FILE_PATH",
         default="",
     )
@@ -496,11 +639,32 @@ def register() -> None:
         items=_MODE_ITEMS,
         default="SURFACE",
     )
+    bpy.types.Scene.voxtart_reconstruction_shell_thickness = IntProperty(
+        name="Reconstruction Shell Thickness",
+        min=1,
+        max=MAX_RECONSTRUCTION_CELLS,
+        default=1,
+    )
+    bpy.types.Scene.voxtart_reconstruction_material_policy = EnumProperty(
+        name="Reconstruction Material Policy",
+        items=_MATERIAL_ITEMS,
+        default="VISIBLE_ONLY",
+    )
     for slot in VIEW_SLOTS:
         setattr(
             bpy.types.Scene,
             _slot_property(slot, "filepath"),
             StringProperty(name=f"View {slot} Image", subtype="FILE_PATH", default=""),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "depth_filepath"),
+            StringProperty(name=f"View {slot} Depth Observation", subtype="FILE_PATH", default=""),
+        )
+        setattr(
+            bpy.types.Scene,
+            _slot_property(slot, "part_mask_filepath"),
+            StringProperty(name=f"View {slot} Part Mask", subtype="FILE_PATH", default=""),
         )
         setattr(
             bpy.types.Scene,
@@ -536,6 +700,8 @@ def register() -> None:
 
 def unregister() -> None:
     for name in (
+        "voxtart_reconstruction_material_policy",
+        "voxtart_reconstruction_shell_thickness",
         "voxtart_reconstruction_mode",
         "voxtart_reconstruction_max_colors",
         "voxtart_reconstruction_background_tolerance",
@@ -547,12 +713,23 @@ def unregister() -> None:
         "voxtart_reconstruction_origin",
         "voxtart_reconstruction_direction",
         "voxtart_reconstruction_axis",
+        "voxtart_reconstruction_part_mask_filepath",
+        "voxtart_reconstruction_depth_filepath",
         "voxtart_reconstruction_filepath",
     ):
         if hasattr(bpy.types.Scene, name):
             delattr(bpy.types.Scene, name)
     for slot in reversed(VIEW_SLOTS):
-        for field in ("priority", "depth", "origin", "direction", "axis", "filepath"):
+        for field in (
+            "part_mask_filepath",
+            "depth_filepath",
+            "priority",
+            "depth",
+            "origin",
+            "direction",
+            "axis",
+            "filepath",
+        ):
             name = _slot_property(slot, field)
             if hasattr(bpy.types.Scene, name):
                 delattr(bpy.types.Scene, name)
@@ -561,6 +738,8 @@ def unregister() -> None:
 
 
 __all__ = [
+    "RECONSTRUCTION_ACCEPTANCE_PROPERTY",
+    "RECONSTRUCTION_EVIDENCE_PROPERTY",
     "RECONSTRUCTION_REPORT_PROPERTY",
     "RECONSTRUCTION_SOURCE_PROPERTY",
     "RECONSTRUCTION_SOURCES_PROPERTY",

@@ -12,8 +12,10 @@ unresolved are returned separately from the authoritative voxel asset.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
+import json
 from typing import Iterable, Literal, Mapping, Sequence
 
+from .depth_observations import DepthObservation, PartMask
 from .metrics import compare_indexed_views
 from .provenance import EvidenceCell, EvidenceMap, SourceIdentity, sha256_json
 from .voxel import Cell, Color, VoxelAsset
@@ -22,7 +24,7 @@ from .voxel import Cell, Color, VoxelAsset
 AXES = ("X", "Y", "Z")
 DIRECTIONS = (-1, 1)
 Pixel = int | None
-ReconstructionMode = Literal["SURFACE", "VOLUME"]
+ReconstructionMode = Literal["SURFACE", "VOLUME", "LAYERED", "SHELL"]
 
 
 def _cell(value: Iterable[int]) -> Cell:
@@ -67,6 +69,8 @@ class OrthographicView:
     depth: int = 1
     priority: int = 0
     source_identity: SourceIdentity | None = None
+    depth_observation: DepthObservation | None = None
+    part_mask: PartMask | None = None
 
     def __post_init__(self) -> None:
         name = str(self.name).strip()
@@ -80,6 +84,10 @@ class OrthographicView:
             raise ValueError("view depth must be a positive integer")
         if self.source_identity is not None and not isinstance(self.source_identity, SourceIdentity):
             raise TypeError("view source_identity must be a SourceIdentity")
+        if self.depth_observation is not None and not isinstance(self.depth_observation, DepthObservation):
+            raise TypeError("view depth_observation must be a DepthObservation")
+        if self.part_mask is not None and not isinstance(self.part_mask, PartMask):
+            raise TypeError("view part_mask must be a PartMask")
         if isinstance(self.priority, bool) or not isinstance(self.priority, int):
             raise ValueError("view priority must be an integer")
         origin = _cell(self.origin)
@@ -93,6 +101,16 @@ class OrthographicView:
             for pixel in row:
                 if pixel is not None and (isinstance(pixel, bool) or not isinstance(pixel, int) or pixel < 0):
                     raise ValueError(f"view pixels must be non-negative palette indices or None: {pixel!r}")
+        if self.depth_observation is not None:
+            if (self.depth_observation.width, self.depth_observation.height) != (width, len(rows)):
+                raise ValueError("depth observation dimensions must match view pixels")
+            for row_index in range(len(rows)):
+                for column_index in range(width):
+                    interval = self.depth_observation.interval(column_index, row_index, self.depth)
+                    if interval is not None and interval[1] >= self.depth:
+                        raise ValueError("depth observation exceeds the calibrated view depth")
+        if self.part_mask is not None and (self.part_mask.width, self.part_mask.height) != (width, len(rows)):
+            raise ValueError("part mask dimensions must match view pixels")
         object.__setattr__(self, "name", name)
         object.__setattr__(self, "axis", axis)
         object.__setattr__(self, "origin", origin)
@@ -110,6 +128,8 @@ class OrthographicView:
         depth: int = 1,
         priority: int = 0,
         source_identity: SourceIdentity | None = None,
+        depth_observation: DepthObservation | None = None,
+        part_mask: PartMask | None = None,
     ) -> "OrthographicView":
         """Build a view from top-to-bottom image rows."""
 
@@ -122,8 +142,9 @@ class OrthographicView:
             depth=depth,
             priority=priority,
             source_identity=source_identity,
+            depth_observation=depth_observation,
+            part_mask=part_mask,
         )
-
     @property
     def width(self) -> int:
         return len(self.pixels[0])
@@ -134,6 +155,25 @@ class OrthographicView:
 
     def pixel(self, column: int, row: int) -> Pixel:
         return self.pixels[row][column]
+
+    def depth_interval(self, column: int, row: int) -> tuple[int, int]:
+        if not 0 <= column < self.width or not 0 <= row < self.height:
+            raise IndexError("view pixel is outside the image")
+        if self.depth_observation is not None:
+            interval = self.depth_observation.interval(column, row, self.depth)
+            if interval is not None:
+                return interval
+        return 0, self.depth - 1
+
+    def depth_indices(self, column: int, row: int) -> range:
+        front, back = self.depth_interval(column, row)
+        return range(front, back + 1)
+
+    def part_at(self, column: int, row: int) -> str | None:
+        if self.part_mask is None:
+            return None
+        return self.part_mask.part_at(column, row)
+
 
     def cell_at(self, column: int, row: int, depth: int = 0) -> Cell:
         """Map an image pixel and slab depth to an integer voxel cell."""
@@ -161,20 +201,31 @@ class OrthographicView:
         row = self.origin[vertical_axis] - normalized[vertical_axis]
         if not (0 <= column < self.width and 0 <= row < self.height and 0 <= depth < self.depth):
             return None
+        front, back = self.depth_interval(column, row)
+        if not front <= depth <= back:
+            return None
         return column, row, depth
 
 
 @dataclass(frozen=True, slots=True)
 class ReconstructionSettings:
-    """Deterministic depth policy for one reconstruction pass."""
+    """Deterministic depth, shell, and material policy for one pass."""
 
     mode: ReconstructionMode = "SURFACE"
+    shell_thickness: int = 1
+    material_policy: Literal["EVIDENCE", "VISIBLE_ONLY"] = "VISIBLE_ONLY"
 
     def __post_init__(self) -> None:
         mode = str(self.mode).upper()
-        if mode not in ("SURFACE", "VOLUME"):
-            raise ValueError("reconstruction mode must be SURFACE or VOLUME")
+        if mode not in ("SURFACE", "VOLUME", "LAYERED", "SHELL"):
+            raise ValueError("reconstruction mode must be SURFACE, VOLUME, LAYERED, or SHELL")
+        if isinstance(self.shell_thickness, bool) or not isinstance(self.shell_thickness, int) or self.shell_thickness <= 0:
+            raise ValueError("shell_thickness must be a positive integer")
+        material_policy = str(self.material_policy).upper()
+        if material_policy not in ("EVIDENCE", "VISIBLE_ONLY"):
+            raise ValueError("material_policy must be EVIDENCE or VISIBLE_ONLY")
         object.__setattr__(self, "mode", mode)
+        object.__setattr__(self, "material_policy", material_policy)
 
 
 @dataclass(frozen=True, slots=True)
@@ -194,6 +245,7 @@ class ReconstructionReport:
     silhouette_intersection: int = 0
     silhouette_union: int = 0
     silhouette_iou: float = 1.0
+    visible_material_conflicts: int = 0
 
     def to_dict(self) -> dict[str, object]:
         value = asdict(self)
@@ -274,8 +326,12 @@ class ReconstructionResult:
 
         checks = (
             (len(self.unresolved) > policy.max_unresolved, "unresolved candidate cells exceed policy"),
+            (
+                (self.report.material_conflicts + self.report.visible_material_conflicts)
+                > policy.max_material_conflicts,
+                "material conflicts exceed policy",
+            ),
             (self.report.conflicting_rays > policy.max_conflicting_rays, "conflicting rays exceed policy"),
-            (self.report.material_conflicts > policy.max_material_conflicts, "material conflicts exceed policy"),
             (self.report.missing_pixels > policy.max_missing_pixels, "missing pixels exceed policy"),
             (self.report.extra_pixels > policy.max_extra_pixels, "extra pixels exceed policy"),
             (self.report.color_mismatches > policy.max_color_mismatches, "color mismatches exceed policy"),
@@ -310,12 +366,18 @@ def _palette(value: Sequence[Color]) -> tuple[Color, ...]:
     return tuple(VoxelAsset(palette=list(value)).palette)
 
 
-def render_view(asset: VoxelAsset, view: OrthographicView) -> tuple[tuple[Pixel, ...], ...]:
-    """Render the nearest voxel per calibrated image ray as palette indices."""
+def render_cells(asset: VoxelAsset, view: OrthographicView) -> tuple[tuple[Cell | None, ...], ...]:
+    """Render the nearest occupied cell per calibrated image ray."""
 
-    rows = [[None for _column in range(view.width)] for _row in range(view.height)]
-    depths: list[list[int | None]] = [[None for _column in range(view.width)] for _row in range(view.height)]
-    for cell, material in asset.iter_voxels():
+    rows: list[list[Cell | None]] = [
+        [None for _column in range(view.width)]
+        for _row in range(view.height)
+    ]
+    depths: list[list[int | None]] = [
+        [None for _column in range(view.width)]
+        for _row in range(view.height)
+    ]
+    for cell, _material in asset.iter_voxels():
         projection = view.project_cell(cell)
         if projection is None:
             continue
@@ -323,8 +385,17 @@ def render_view(asset: VoxelAsset, view: OrthographicView) -> tuple[tuple[Pixel,
         previous_depth = depths[row][column]
         if previous_depth is None or depth < previous_depth:
             depths[row][column] = depth
-            rows[row][column] = material
+            rows[row][column] = cell
     return tuple(tuple(row) for row in rows)
+
+
+def render_view(asset: VoxelAsset, view: OrthographicView) -> tuple[tuple[Pixel, ...], ...]:
+    """Render the nearest voxel per calibrated image ray as palette indices."""
+
+    return tuple(
+        tuple(None if cell is None else asset.voxels[cell] for cell in row)
+        for row in render_cells(asset, view)
+    )
 
 
 def reconstruct_views(
@@ -337,9 +408,10 @@ def reconstruct_views(
 ) -> ReconstructionResult:
     """Reconstruct a bounded voxel asset from one to six orthographic views.
 
-    Colored pixels create occupied-ray constraints.  Transparent pixels create
-    empty-ray constraints.  ``SURFACE`` chooses the nearest viable cell for
-    each colored ray; ``VOLUME`` retains every viable cell.  Viable but
+    Colored pixels create occupied-ray constraints. Transparent pixels create
+    empty-ray constraints. ``SURFACE`` chooses the nearest viable cell,
+    ``LAYERED`` follows each per-pixel depth interval, ``SHELL`` keeps a
+    bounded front shell, and ``VOLUME`` retains every viable cell. Viable but
     unselected cells are returned as ``unresolved`` rather than guessed away.
     """
 
@@ -356,9 +428,17 @@ def reconstruct_views(
     normalized_palette = _palette(palette)
 
     source_by_id: dict[str, SourceIdentity] = {}
-    for source in tuple(source_identities) + tuple(
-        view.source_identity for view in normalized_views if view.source_identity is not None
-    ):
+    view_sources = tuple(
+        source
+        for view in normalized_views
+        for source in (
+            view.source_identity,
+            None if view.depth_observation is None else view.depth_observation.source_identity,
+            None if view.part_mask is None else view.part_mask.source_identity,
+        )
+        if source is not None
+    )
+    for source in tuple(source_identities) + view_sources:
         if not isinstance(source, SourceIdentity):
             raise TypeError("source_identities must contain SourceIdentity values")
         previous = source_by_id.get(source.source_id)
@@ -378,7 +458,7 @@ def reconstruct_views(
             for column in range(view.width):
                 pixel = view.pixel(column, row)
                 if pixel is None:
-                    for depth in range(view.depth):
+                    for depth in view.depth_indices(column, row):
                         cell = view.cell_at(column, row, depth)
                         forbidden.add(cell)
                         forbidden_masks[cell] = forbidden_masks.get(cell, 0) | source_bit
@@ -398,7 +478,7 @@ def reconstruct_views(
                 if pixel is None:
                     continue
                 candidate_cells = []
-                for depth in range(view.depth):
+                for depth in view.depth_indices(column, row):
                     cell = view.cell_at(column, row, depth)
                     if cell not in forbidden:
                         candidate_cells.append(cell)
@@ -408,14 +488,23 @@ def reconstruct_views(
                 possible.update(candidates)
 
     votes: dict[Cell, list[tuple[int, int, str]]] = {}
+    part_votes: dict[Cell, set[str]] = {}
     conflicts: list[tuple[str, int, int]] = []
     for ray in sorted(rays, key=lambda item: (item.view.priority, item.view.name, item.row, item.column)):
         if not ray.candidates:
             conflicts.append((ray.view.name, ray.column, ray.row))
             continue
-        selected = ray.candidates if settings.mode == "VOLUME" else ray.candidates[:1]
+        if settings.mode in ("VOLUME", "LAYERED"):
+            selected = ray.candidates
+        elif settings.mode == "SHELL":
+            selected = ray.candidates[: settings.shell_thickness]
+        else:
+            selected = ray.candidates[:1]
+        part = ray.view.part_at(ray.column, ray.row)
         for cell in selected:
             votes.setdefault(cell, []).append((ray.view.priority, ray.color, ray.view.name))
+            if part is not None:
+                part_votes.setdefault(cell, set()).add(part)
 
     occupied: dict[Cell, int] = {}
     conflict_cells: set[Cell] = set()
@@ -430,12 +519,42 @@ def reconstruct_views(
         for _priority, color, _source in entries:
             counts[color] = counts.get(color, 0) + 1
         occupied[cell] = min(counts, key=lambda color: (-counts[color], color))
+    part_assignments = {
+        cell: min(parts)
+        for cell, parts in sorted(part_votes.items())
+        if cell in occupied
+    }
+    depth_digests = tuple(
+        sorted(
+            view.depth_observation.digest
+            for view in normalized_views
+            if view.depth_observation is not None
+        )
+    )
+    part_digests = tuple(
+        sorted(
+            view.part_mask.digest
+            for view in normalized_views
+            if view.part_mask is not None
+        )
+    )
     provenance = {
         "reconstruction": "orthographic",
         "view_count": str(len(normalized_views)),
         "view_names": ",".join(view.name for view in normalized_views),
         "mode": settings.mode,
+        "material_policy": settings.material_policy,
     }
+    if depth_digests:
+        provenance["depth_observation_digests"] = ",".join(depth_digests)
+    if part_digests:
+        provenance["part_mask_digests"] = ",".join(part_digests)
+    if part_assignments:
+        provenance["part_assignments"] = json.dumps(
+            [[list(cell), part] for cell, part in sorted(part_assignments.items())],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
     if normalized_sources:
         provenance["source_identity_digest"] = sha256_json(
             [source.to_dict() for source in normalized_sources]
@@ -453,6 +572,27 @@ def reconstruct_views(
         voxels=occupied,
         provenance=provenance,
     )
+    visible_material_conflicts = 0
+    if settings.material_policy == "VISIBLE_ONLY":
+        visible_votes: dict[Cell, list[tuple[int, int, str]]] = {}
+        for view in normalized_views:
+            rendered_cells = render_cells(asset, view)
+            for row in range(view.height):
+                for column in range(view.width):
+                    source_pixel = view.pixel(column, row)
+                    cell = rendered_cells[row][column]
+                    if source_pixel is not None and cell is not None:
+                        visible_votes.setdefault(cell, []).append(
+                            (view.priority, source_pixel, view.name)
+                        )
+        for cell in sorted(visible_votes):
+            entries = visible_votes[cell]
+            if len({color for _priority, color, _source in entries}) > 1:
+                visible_material_conflicts += 1
+            counts: dict[int, int] = {}
+            for _priority, color, _source in entries:
+                counts[color] = counts.get(color, 0) + 1
+            asset.voxels[cell] = min(counts, key=lambda color: (-counts[color], color))
 
     def source_names(mask: int) -> tuple[str, ...]:
         return tuple(
@@ -519,6 +659,7 @@ def reconstruct_views(
         silhouette_intersection=silhouette_intersection,
         silhouette_union=silhouette_union,
         silhouette_iou=silhouette_iou,
+        visible_material_conflicts=visible_material_conflicts,
     )
     return ReconstructionResult(
         asset=asset,
@@ -539,5 +680,6 @@ __all__ = [
     "ReconstructionResult",
     "ReconstructionSettings",
     "render_view",
+    "render_cells",
     "reconstruct_views",
 ]

@@ -35,7 +35,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_formats  # noqa: E402
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
-from voxtart import character_editor, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import character_editor, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
 from voxtart import metrics, provenance  # noqa: E402
 
 
@@ -45,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 97
+EXPECTED_TESTS = 105
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -3907,6 +3907,7 @@ class ReconstructionTest(unittest.TestCase):
         self.assertEqual(result.asset.voxels, {(0, 0, 0): 0})
         self.assertEqual(result.report.material_conflicts, 1)
         self.assertEqual(result.report.color_mismatches, 1)
+        self.assertEqual(result.report.visible_material_conflicts, 1)
 
 class SpriteformMigrationTest(unittest.TestCase):
     def test_source_identity_and_evidence_are_canonical(self):
@@ -4075,6 +4076,196 @@ class SpriteformMigrationTest(unittest.TestCase):
         self.assertIn("source identities are required", without_source.assess().reasons)
         with self.assertRaises(ValueError):
             reconstruct.AcceptancePolicy(minimum_silhouette_iou=2.0)
+
+class Sprite2DEndToEndTest(unittest.TestCase):
+    def test_depth_and_part_observations_round_trip_as_json(self):
+        source = provenance.SourceIdentity("depth-json", provenance.sha256_json({"depth": 1}))
+        depth = depth_observations.DepthObservation.from_rows(
+            "depth",
+            [[1, None]],
+            back=[[2, None]],
+            confidence=[[0.75, None]],
+            source_identity=source,
+            method="USER",
+        )
+        parts = depth_observations.PartMask.from_rows(
+            "parts",
+            [["body", None]],
+            source_identity=source,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            depth_path = Path(temporary) / "depth.json"
+            parts_path = Path(temporary) / "parts.json"
+            depth_path.write_text(json.dumps(depth.to_dict()), encoding="utf-8")
+            parts_path.write_text(json.dumps(parts.to_dict()), encoding="utf-8")
+            self.assertEqual(depth_observations.load_observation(depth_path), depth)
+            self.assertEqual(depth_observations.load_part_mask(parts_path), parts)
+        self.assertEqual(depth.interval(0, 0, 4), (1, 2))
+        self.assertIsNone(depth.interval(1, 0, 4))
+        self.assertEqual(parts.parts, ("body",))
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("bad", [[2]], back=[[1]])
+        with self.assertRaises(ValueError):
+            depth_observations.PartMask.from_rows("bad", [[""]])
+
+    def test_layered_shell_and_projection_honor_per_pixel_depth(self):
+        observation = depth_observations.DepthObservation.from_rows(
+            "layers",
+            [[1]],
+            back=[[2]],
+        )
+        view = reconstruct.OrthographicView.from_rows(
+            "layered",
+            [[0]],
+            axis="Z",
+            depth=3,
+            depth_observation=observation,
+        )
+        self.assertEqual(tuple(view.depth_indices(0, 0)), (1, 2))
+        self.assertIsNone(view.project_cell((0, 0, 0)))
+        layered = reconstruct.reconstruct_views(
+            (view,),
+            PALETTE[:1],
+            reconstruct.ReconstructionSettings(mode="LAYERED"),
+        )
+        shell = reconstruct.reconstruct_views(
+            (view,),
+            PALETTE[:1],
+            reconstruct.ReconstructionSettings(mode="SHELL", shell_thickness=1),
+        )
+        self.assertEqual(set(layered.asset.voxels), {(0, 0, 1), (0, 0, 2)})
+        self.assertEqual(set(shell.asset.voxels), {(0, 0, 1)})
+        self.assertEqual(layered.render_back(view), ((0,),))
+        self.assertEqual(layered.asset.provenance["depth_observation_digests"], observation.digest)
+
+    def test_part_labels_are_persisted_in_voxel_provenance(self):
+        source = provenance.SourceIdentity("parts", provenance.sha256_json({"parts": 1}))
+        part_mask = depth_observations.PartMask.from_rows("parts", [["arm"]], source_identity=source)
+        view = reconstruct.OrthographicView.from_rows(
+            "parts-view",
+            [[0]],
+            source_identity=source,
+            part_mask=part_mask,
+        )
+        result = reconstruct.reconstruct_views((view,), PALETTE[:1])
+        self.assertEqual(
+            json.loads(result.asset.provenance["part_assignments"]),
+            [[[0, 0, 0], "arm"]],
+        )
+        self.assertEqual(result.source_identities, (source,))
+        self.assertEqual(result.asset.provenance["part_mask_digests"], part_mask.digest)
+
+    def test_symmetry_is_missing_only_and_guide_respects_free_evidence(self):
+        symmetric = symmetry.apply_missing_only(make_asset({(1, 0, 0): 0}), "X")
+        self.assertEqual(symmetric.asset.voxels, {(1, 0, 0): 0, (-1, 0, 0): 0})
+        blocked = symmetry.apply_missing_only(
+            make_asset({(1, 0, 0): 0}),
+            "X",
+            forbidden={(-1, 0, 0)},
+        )
+        self.assertEqual(blocked.added_cells, ())
+        self.assertEqual(blocked.skipped_free_cells, ((-1, 0, 0),))
+        conflict = symmetry.apply_missing_only(
+            make_asset({(1, 0, 0): 0, (-1, 0, 0): 1}),
+            "X",
+        )
+        self.assertEqual(conflict.asset.voxels[(-1, 0, 0)], 1)
+        self.assertEqual(conflict.conflicts, ((-1, 0, 0), (1, 0, 0)))
+
+        view = reconstruct.OrthographicView.from_rows("guide-view", [[None, 0]])
+        result = reconstruct.reconstruct_views((view,), PALETTE[:1])
+        guide = make_asset({(0, 0, 0): 0, (2, 0, 0): 0})
+        guided = guide_prior.apply_guide_prior(result, guide)
+        self.assertEqual(guided.rejected_free_cells, ((0, 0, 0),))
+        self.assertEqual(guided.added_cells, ((2, 0, 0),))
+
+    def test_candidate_review_and_skeleton_are_deterministic(self):
+        observation = depth_observations.DepthObservation.from_rows("layers", [[0]], back=[[1]])
+        view = reconstruct.OrthographicView.from_rows(
+            "candidate-view",
+            [[0]],
+            depth=2,
+            depth_observation=observation,
+        )
+        candidates = sprite_pipeline.generate_candidates((view,), PALETTE[:1])
+        self.assertEqual(
+            tuple(candidate.name for candidate in candidates),
+            ("SURFACE", "LAYERED", "SHELL", "VOLUME"),
+        )
+        self.assertEqual(sprite_pipeline.select_candidate(candidates).name, "LAYERED")
+        asset = make_asset({(x, 0, 0): 0 for x in range(5)})
+        first = geometry_skeleton.derive_skeleton(asset)
+        second = geometry_skeleton.derive_skeleton(asset)
+        self.assertEqual(first.to_dict(), second.to_dict())
+        self.assertGreaterEqual(len(first.nodes), 2)
+        self.assertIsNone(first.nodes[0].parent)
+
+    def test_sprite_sequence_reports_added_removed_and_recolored_cells(self):
+        red = (1.0, 0.0, 0.0, 1.0)
+        first_frame = image_intake.ImageFrame.from_rows("first", [[red, (0.0, 0.0, 0.0, 0.0)]])
+        second_frame = image_intake.ImageFrame.from_rows("second", [[red, red]])
+        intake = image_intake.PaletteIntakeSettings(background_mode="ALPHA")
+        shared_palette = image_intake.extract_palette_frames((first_frame, second_frame), intake)
+        first = image_intake.index_image(first_frame, intake, palette=shared_palette)
+        second = image_intake.index_image(second_frame, intake, palette=shared_palette)
+        sequence = sprite_sequence.SpriteSequence(
+            (
+                sprite_sequence.SequenceFrame("first", first),
+                sprite_sequence.SequenceFrame("second", second),
+            ),
+            name="walk",
+        )
+        result = sprite_sequence.reconstruct_sequence(sequence, shared_palette)
+        self.assertEqual(result.deltas[0].added, ((1, 0, 0),))
+        self.assertEqual(result.deltas[0].removed, ())
+        self.assertEqual(result.deltas[0].recolored, ())
+
+    def test_sprite_pipeline_wires_depth_parts_guide_and_skeleton(self):
+        frame = image_intake.ImageFrame.from_rows(
+            "pipeline",
+            [[(1.0, 0.0, 0.0, 1.0)]],
+        )
+        intake = image_intake.PaletteIntakeSettings(background_mode="NONE")
+        indexed = image_intake.index_image(frame, intake)
+        observation = depth_observations.DepthObservation.from_rows("depth", [[0]], back=[[1]])
+        parts = depth_observations.PartMask.from_rows("parts", [["body"]])
+        guide = make_asset({(0, 0, 2): 0})
+        conversion = sprite_pipeline.convert_sprite(
+            indexed,
+            settings=sprite_pipeline.SpriteConversionSettings(
+                depth=2,
+                mode="LAYERED",
+                max_skeleton_nodes=16,
+            ),
+            depth_observation=observation,
+            part_mask=parts,
+            guide=guide,
+        )
+        self.assertEqual(set(conversion.reconstruction.asset.voxels), {(0, 0, 0), (0, 0, 1)})
+        self.assertEqual(conversion.guide.added_cells, ((0, 0, 2),))
+        self.assertTrue(conversion.skeleton.nodes)
+        self.assertEqual(len(conversion.candidates), 4)
+
+    def test_sprite_contracts_reject_invalid_sequence_and_limits(self):
+        indexed = image_intake.IndexedImage(
+            "one",
+            ((0,),),
+            (PALETTE[0],),
+            "0" * 64,
+            None,
+            image_intake.PaletteIntakeSettings(background_mode="NONE"),
+        )
+        with self.assertRaises(ValueError):
+            sprite_sequence.SpriteSequence(
+                (
+                    sprite_sequence.SequenceFrame("same", indexed),
+                    sprite_sequence.SequenceFrame("same", indexed),
+                )
+            )
+        with self.assertRaises(ValueError):
+            geometry_skeleton.derive_skeleton(make_asset(), max_nodes=0)
+        with self.assertRaises(ValueError):
+            sprite_pipeline.SpriteConversionSettings(mode="INVALID").reconstruction()
 
 if __name__ == "__main__":
     program = unittest.main(exit=False)

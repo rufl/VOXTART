@@ -334,15 +334,25 @@ orthographic views through `voxtart.reconstruct`:
 
 - `OrthographicView` records axis, direction, top-left origin, pixel rows, and
   bounded integer depth;
+- `DepthObservation` adds an optional per-pixel front/back interval and
+  confidence layer. `LAYERED` consumes the interval; `SHELL` retains the
+  configured front layers;
+- `PartMask` attaches semantic pixel labels without turning labels into
+  hidden geometry. Occupied voxel part assignments are serialized in
+  provenance together with source identities and observation digests;
 - transparent pixels become empty-ray constraints and indexed pixels become
   occupied-ray constraints;
-- `SURFACE` selects the nearest viable cell, while `VOLUME` retains every
-  viable cell;
+- `SURFACE` selects the nearest viable cell, `LAYERED` retains each observed
+  interval, `SHELL` retains a bounded front shell, while `VOLUME` retains
+  every viable cell;
+- visible-only material projection colors only the frontmost rendered cells;
+  `EVIDENCE` keeps the deterministic ray-vote colors for all selected cells;
 - cells that remain possible but unselected are returned as an explicit
   unresolved set rather than being silently guessed;
 - deterministic render-back metrics report missing, extra, conflicting, and
   color-mismatched pixels;
-- source view names, count, and depth mode are preserved in asset provenance.
+- source view names, count, depth mode, part assignments, and source
+  identities are preserved in asset provenance.
 
 The converter is intentionally indexed and orthographic; arbitrary perspective
 inference is not part of this path. The Blender adapter exposes the same
@@ -365,14 +375,22 @@ without resampling:
 - `IndexedImage.to_view` applies axis, facing, origin, integer depth, and
   priority calibration before calling `voxtart.reconstruct`.
 
+The deterministic `voxtart.sprite_pipeline` composes intake, calibrated
+reconstruction, candidate review, optional missing-only symmetry, an optional
+pre-voxelized guide volume, and a geometric skeleton suggestion. The
+`voxtart.sprite_sequence` API reconstructs independent frames and reports
+added, removed, and recolored voxel cells relative to the base frame. Guide
+volumes are the portable boundary for the existing mesh voxelizer: a mesh is
+voxelized first, then reconciled without overriding explicit free evidence.
+
 
 `voxtart.reconstruct_ui` loads Blender-supported image files, creates a new
-non-destructive voxel asset, stores the source/calibration/report metadata, and
-draws unresolved candidate cells as a purple wire overlay. The single-view
-panel handles one source directly; the multi-view panel accepts up to six
-independently calibrated images and applies one shared palette before solving
-the constraints. Both panels report unresolved, conflicting, missing, extra,
-and color-mismatched pixels.
+non-destructive voxel asset, and stores source/calibration/report metadata,
+evidence, acceptance, depth-observation digest, and part-mask digest.
+The single-view and multi-view panels accept optional strict JSON files for
+per-pixel front/back depths and semantic part labels. They draw unresolved
+candidate cells as a purple wire overlay and report unresolved, conflicting,
+missing, extra, and color-mismatched pixels.
 
 The core remains offline-capable and testable with deterministic RGBA fixtures;
 file-format decoding is delegated to Blender's image loader at the adapter
