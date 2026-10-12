@@ -23,6 +23,11 @@ on:
 
 env:
   BLENDER_VERSION: "5.2.2"
+  BLENDER_LINUX_SHA256: "84098912789dc450e95697c4184fb8a90acbe5111c2ba4aede3fecb57806a168"
+  BLENDER_WINDOWS_SHA256: "3849d17a682cba006075aaa3f3597ecb5c9c30ec31035b2e092c53e40679b535"
+
+permissions:
+  contents: read
 
 jobs:
   core:
@@ -61,7 +66,10 @@ jobs:
           curl --fail --location --retry 3 \
             "https://download.blender.org/release/Blender5.2/blender-${BLENDER_VERSION}-linux-x64.tar.xz" \
             --output "${RUNNER_TEMP}/blender.tar.xz"
-          tar -xJf "${RUNNER_TEMP}/blender.tar.xz" -C "${RUNNER_TEMP}"
+      - name: Verify Blender Linux checksum
+        run: echo "${BLENDER_LINUX_SHA256}  ${RUNNER_TEMP}/blender.tar.xz" | sha256sum --check --status
+      - name: Extract Blender
+        run: tar -xJf "${RUNNER_TEMP}/blender.tar.xz" -C "${RUNNER_TEMP}"
       - name: Run Blender native suite
         run: "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --python tests/python/voxtart_blender_test.py
       - name: Run headless editor end-to-end matrix
@@ -98,6 +106,11 @@ jobs:
           $extract = Join-Path $env:RUNNER_TEMP "blender-extract"
           $uri = "https://download.blender.org/release/Blender5.2/blender-$env:BLENDER_VERSION-windows-x64.zip"
           Invoke-WebRequest -Uri $uri -OutFile $archive
+          $expected = $env:BLENDER_WINDOWS_SHA256.ToLowerInvariant()
+          $actual = (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) {
+            throw "Blender Windows checksum mismatch: expected $expected, got $actual"
+          }
           Expand-Archive -Path $archive -DestinationPath $extract -Force
           $source = Get-ChildItem -Path $extract -Directory | Select-Object -First 1
           $runtime = Join-Path $env:GITHUB_WORKSPACE "build\blender-5.2.2\blender-5.2.2-windows-x64"
