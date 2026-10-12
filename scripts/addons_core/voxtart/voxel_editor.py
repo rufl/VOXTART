@@ -262,6 +262,10 @@ def _draw_editor_text(text: str, x: float, y: float, size: float, color) -> None
     blf.color(0, *color)
     blf.draw(0, text)
 
+def _editor_text_width(text: str, size: float) -> float:
+    blf.size(0, size)
+    return blf.dimensions(0, text)[0]
+
 
 def _request_redraw(editor, context, *, force: bool = False) -> None:
     redraw = getattr(editor, "_tag_redraw", None)
@@ -1017,13 +1021,46 @@ def _draw_editor_overlay(editor, context) -> None:
             11,
             (0.82, 0.76, 0.55, 1.0),
         )
-    _draw_editor_text(
-        editor.status,
-        18,
-        18,
-        11,
-        (0.82, 0.76, 0.55, 1.0),
+    status = str(getattr(editor, "status", "Ready") or "Ready")
+    status_display = status if len(status) <= 72 else f"{status[:69]}..."
+    status_lower = status_display.lower()
+    if any(
+        fragment in status_lower
+        for fragment in ("locked", "invalid", "nothing", "empty", "aim at", "cancelled", "discarded", "no block")
+    ):
+        status_fill = (0.18, 0.08, 0.08, 0.98)
+        status_border = (0.78, 0.28, 0.22, 0.98)
+        status_accent = (1.0, 0.42, 0.3, 1.0)
+        status_text = (1.0, 0.88, 0.84, 1.0)
+    elif any(
+        fragment in status_lower
+        for fragment in ("added ", "painted ", "removed ", "selected ", "saved", "recovered", "pasted", "committed")
+    ):
+        status_fill = (0.06, 0.15, 0.12, 0.98)
+        status_border = (0.2, 0.66, 0.45, 0.98)
+        status_accent = (0.34, 0.92, 0.58, 1.0)
+        status_text = (0.86, 1.0, 0.9, 1.0)
+    else:
+        status_fill = (0.07, 0.09, 0.13, 0.98)
+        status_border = (0.2, 0.35, 0.52, 0.98)
+        status_accent = (0.35, 0.62, 1.0, 1.0)
+        status_text = (0.86, 0.92, 1.0, 1.0)
+    status_width = min(
+        620.0,
+        max(176.0, float(region.width) - 28.0),
+        max(176.0, _editor_text_width(status_display, 11.0) + 42.0),
     )
+    _draw_editor_panel(
+        14.0,
+        8.0,
+        status_width,
+        24.0,
+        status_fill,
+        border=status_border,
+        radius=12.0,
+    )
+    _draw_editor_round_rect(23.0, 17.0, 6.0, 6.0, status_accent, radius=3.0)
+    _draw_editor_text(status_display, 38.0, 15.0, 11.0, status_text)
 
 
 class VOXTART_OT_voxel_editor(bpy.types.Operator):
