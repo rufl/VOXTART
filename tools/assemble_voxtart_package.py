@@ -19,6 +19,11 @@ import shutil
 from pathlib import Path
 
 RUNTIME_RELATIVE = Path("build") / "blender-5.2.2" / "blender-5.2.2-windows-x64"
+RUNTIME_REQUIRED_FILES = (
+    Path("blender.exe"),
+    Path("blender-core.exe"),
+    Path("5.2") / "python" / "bin" / "python.exe",
+)
 TOOL_FILES = (
     "brand_voxtart_runtime.py",
     "voxtart_desktop_start.py",
@@ -32,6 +37,15 @@ ASSET_FILES = (
 )
 
 
+def _validate_runtime(source: Path) -> None:
+    if not source.is_dir():
+        raise FileNotFoundError(f"Blender runtime directory not found: {source}")
+    missing = [str(path) for path in RUNTIME_REQUIRED_FILES if not (source / path).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            f"Blender runtime is missing required files: {', '.join(missing)}"
+        )
+
 def _copy_file(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
@@ -43,8 +57,7 @@ def _stage_runtime(
     *,
     link_runtime: bool,
 ) -> dict[str, int | str | bool]:
-    if not source.is_dir():
-        raise FileNotFoundError(f"Blender runtime directory not found: {source}")
+    _validate_runtime(source)
     linked = 0
     copied = 0
     target.mkdir(parents=True, exist_ok=True)
