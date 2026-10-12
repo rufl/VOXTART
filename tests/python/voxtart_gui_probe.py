@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 from pathlib import Path
+import urllib.error
+import urllib.request
 from types import SimpleNamespace
 import bpy
 
@@ -25,6 +28,7 @@ from voxtart import (
     character_editor_ui,
     desktop_shell,
     desktop_ui,
+    mcp,
     minecraft_formats,
     operators,
     optimizer_ui,
@@ -388,6 +392,7 @@ def _finish_mouse_clicks():
                 "hierarchy_roundtrip": STATE.get("hierarchy_roundtrip", False),
                 "kitbash_roundtrip": STATE.get("kitbash_roundtrip", False),
                 "character_editor_roundtrip": STATE.get("character_editor_roundtrip", False),
+                "mcp_roundtrip": STATE.get("mcp_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "stack_roundtrip": STATE.get("stack_roundtrip", False),
                 "gallery_roundtrip": STATE.get("gallery_roundtrip", False),
@@ -1276,6 +1281,170 @@ def _probe():
                         f"Character editor clear failed: {reassign_result!r}, {clear_result!r}"
                     )
                 STATE["character_editor_roundtrip"] = True
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
+                preferences = mcp._preferences()
+                if preferences is None:
+                    return _fail("VOXTART MCP preferences were not available")
+                previous_allow_mcp_edits = bool(preferences.allow_mcp_edits)
+                previous_mcp_port = int(preferences.mcp_port)
+                preferences.allow_mcp_edits = False
+                blocked_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "voxtart_create_box",
+                            "arguments": {"size": 1, "name": "GUI MCP Blocked"},
+                        },
+                    }
+                )
+                port_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                port_socket.bind(("127.0.0.1", 0))
+                mcp_port = int(port_socket.getsockname()[1])
+                port_socket.close()
+                preferences.mcp_port = mcp_port
+                preferences.allow_mcp_edits = True
+                start_result = bpy.ops.voxtart.mcp_start()
+                unauthorized_status = None
+                try:
+                    request = urllib.request.Request(
+                        mcp._BRIDGE.endpoint,
+                        data=b"{}",
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(request, timeout=2.0) as response:
+                        unauthorized_status = int(response.status)
+                except urllib.error.HTTPError as error:
+                    unauthorized_status = int(error.code)
+                initialize_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 2,
+                        "method": "initialize",
+                        "params": {},
+                    }
+                )
+                tools_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 3,
+                        "method": "tools/list",
+                        "params": {},
+                    }
+                )
+                create_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 4,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "voxtart_create_box",
+                            "arguments": {
+                                "name": "GUI MCP Asset",
+                                "size": 2,
+                            },
+                        },
+                    }
+                )
+                create_structured = create_response.get("result", {}).get(
+                    "structuredContent", {}
+                )
+                mcp_object_name = str(create_structured.get("object_name", ""))
+                edit_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 5,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "voxtart_edit_asset",
+                            "arguments": {
+                                "object_name": mcp_object_name,
+                                "operation": "add",
+                                "cell": [2, 0, 0],
+                                "palette_index": 0,
+                            },
+                        },
+                    }
+                )
+                edit_structured = edit_response.get("result", {}).get(
+                    "structuredContent", {}
+                )
+                asset_state_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 6,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "voxtart_asset_state",
+                            "arguments": {
+                                "object_name": mcp_object_name,
+                                "include_voxels": True,
+                            },
+                        },
+                    }
+                )
+                asset_state_structured = asset_state_response.get("result", {}).get(
+                    "structuredContent", {}
+                )
+                rebuild_response = mcp._BRIDGE.dispatch_local(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 7,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "voxtart_rebuild_asset",
+                            "arguments": {
+                                "object_name": mcp_object_name,
+                                "backend": "marching",
+                            },
+                        },
+                    }
+                )
+                rebuild_structured = rebuild_response.get("result", {}).get(
+                    "structuredContent", {}
+                )
+                if mcp_object_name in bpy.data.objects:
+                    bpy.data.objects.remove(
+                        bpy.data.objects[mcp_object_name],
+                        do_unlink=True,
+                    )
+                stop_result = bpy.ops.voxtart.mcp_stop()
+                preferences.allow_mcp_edits = previous_allow_mcp_edits
+                preferences.mcp_port = previous_mcp_port
+                blocked_result = blocked_response.get("result", {})
+                initialize_result = initialize_response.get("result", {})
+                tools_result = tools_response.get("result", {})
+                if (
+                    "FINISHED" not in start_result
+                    or "FINISHED" not in stop_result
+                    or unauthorized_status != 401
+                    or not mcp._BRIDGE.token
+                    or not blocked_result.get("isError")
+                    or initialize_result.get("serverInfo", {}).get("name") != "voxtart"
+                    or "voxtart_create_box"
+                    not in {
+                        tool.get("name")
+                        for tool in tools_result.get("tools", [])
+                        if isinstance(tool, dict)
+                    }
+                    or create_structured.get("voxel_count") != 8
+                    or edit_structured.get("asset", {}).get("voxel_count") != 9
+                    or asset_state_structured.get("voxel_count") != 9
+                    or len(asset_state_structured.get("voxels", [])) != 9
+                    or rebuild_structured.get("backend") != "marching"
+                    or mcp_object_name in bpy.data.objects
+                    or mcp._BRIDGE.running
+                ):
+                    return _fail(
+                        f"MCP bridge/tool flow failed: "
+                        f"{start_result!r}, {stop_result!r}, {unauthorized_status!r}"
+                    )
+                STATE["mcp_roundtrip"] = True
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)
