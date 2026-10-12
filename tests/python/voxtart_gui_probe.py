@@ -28,6 +28,9 @@ from voxtart import (
     operators,
     optimizer_ui,
     palette_ui,
+    scene_assembly,
+    scene_hierarchy,
+    scene_hierarchy_ui,
     stacking,
     voxel_editor,
 )
@@ -381,6 +384,7 @@ def _finish_mouse_clicks():
                 "palette_import": STATE.get("palette_import", False),
                 "palette_reduce": STATE.get("palette_reduce", False),
                 "blockbench_roundtrip": STATE.get("blockbench_roundtrip", False),
+                "hierarchy_roundtrip": STATE.get("hierarchy_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "stack_roundtrip": STATE.get("stack_roundtrip", False),
                 "gallery_roundtrip": STATE.get("gallery_roundtrip", False),
@@ -1218,6 +1222,85 @@ def _probe():
                     )
                 STATE["gallery_roundtrip"] = True
                 bpy.data.objects.remove(inserted_gallery_object, do_unlink=True)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
+                before_hierarchy_assets = set(desktop_shell._asset_objects())
+                place_result = bpy.ops.voxtart.zoo_place_asset(
+                    blob_id=gallery_entry.blob_id,
+                    location=(3.0, 0.0, 0.0),
+                    rotation=(0.0, 0.0, 0.0),
+                    scale=(1.0, 1.0, 1.0),
+                )
+                placed_assets = set(desktop_shell._asset_objects()).difference(
+                    before_hierarchy_assets
+                )
+                placed_object = next(iter(placed_assets)) if len(placed_assets) == 1 else None
+                assembly = (
+                    scene_assembly.SceneAssembly.decode(scene[scene_assembly.ASSEMBLY_PROPERTY])
+                    if isinstance(scene.get(scene_assembly.ASSEMBLY_PROPERTY), str)
+                    else None
+                )
+                hierarchy_records = scene_hierarchy_ui._scene_hierarchy_records(bpy.context)
+                hierarchy_root = scene_hierarchy.build_scene_hierarchy(
+                    hierarchy_records,
+                    include_unplaced=False,
+                )
+                hierarchy_rows = tuple(scene_hierarchy.flatten_hierarchy(hierarchy_root))
+                placed_row = next(
+                    (
+                        node
+                        for node, _depth in hierarchy_rows
+                        if node.is_asset
+                        and placed_object is not None
+                        and node.object_name == placed_object.name
+                    ),
+                    None,
+                )
+                if (
+                    "FINISHED" not in place_result
+                    or placed_object is None
+                    or assembly is None
+                    or len(assembly.placements) != 1
+                    or placed_row is None
+                    or placed_row.category != "GUI Tests"
+                ):
+                    return _fail(
+                        f"Scene hierarchy placement was not recorded: "
+                        f"{place_result!r}, {assembly!r}"
+                    )
+                placed_object_name = placed_object.name
+                placed_object.location.x = 7.0
+                desktop_shell._set_mode(scene, "BUILD")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "scene:sync" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Sync scene hierarchy")
+                shell_operator._activate(bpy.context, "scene:sync")
+                synced_assembly = scene_assembly.SceneAssembly.decode(
+                    scene[scene_assembly.ASSEMBLY_PROPERTY]
+                )
+                synced_placement = synced_assembly.placements[0]
+                select_result = bpy.ops.voxtart.scene_hierarchy_select(
+                    object_name=placed_object_name
+                )
+                selected_hierarchy_object = bpy.context.view_layer.objects.active == placed_object
+                clear_result = bpy.ops.voxtart.zoo_clear_placements()
+                if (
+                    scene.get(desktop_shell.SHELL_STATUS_PROPERTY)
+                    != "Scene hierarchy synchronized"
+                    or abs(synced_placement.location[0] - 7.0) > 1.0e-6
+                    or "FINISHED" not in select_result
+                    or not selected_hierarchy_object
+                    or "FINISHED" not in clear_result
+                    or placed_object_name in bpy.data.objects
+                    or scene_assembly.ASSEMBLY_PROPERTY in scene
+                ):
+                    return _fail(
+                        f"Scene hierarchy sync/select/clear failed: "
+                        f"{select_result!r}, {clear_result!r}"
+                    )
+                STATE["hierarchy_roundtrip"] = True
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)
