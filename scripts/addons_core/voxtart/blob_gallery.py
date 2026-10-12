@@ -104,7 +104,7 @@ class BlobJoint:
                 position=data["position"],
                 normal=data["normal"],
                 tag=str(data.get("tag", "default")),
-                rotation=int(data.get("rotation", 0)),
+                rotation=data.get("rotation", 0),
             ),
         )
 
@@ -229,8 +229,8 @@ class BlobGalleryEntry:
             raise ValueError("blob document must contain a JSON object")
         if data.get("format") != BLOB_FORMAT:
             raise ValueError(f"unsupported blob format: {data.get('format')!r}")
-        format_version = int(data.get("format_version", -1))
-        if format_version not in _SUPPORTED_BLOB_FORMAT_VERSIONS:
+        format_version = data.get("format_version", -1)
+        if isinstance(format_version, bool) or not isinstance(format_version, int) or format_version not in _SUPPORTED_BLOB_FORMAT_VERSIONS:
             raise ValueError("unsupported blob format version")
         asset_data = data.get("asset")
         if not isinstance(asset_data, Mapping):

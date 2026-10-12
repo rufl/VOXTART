@@ -29,7 +29,7 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import voxtart as addon  # noqa: E402
-from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, lasso_blob, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
+from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, lasso_blob, mcp, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
@@ -127,6 +127,12 @@ class BlenderRegistrationTest(unittest.TestCase):
             viewport_workflow_ui.VOXTART_OT_view_perspective.bl_idname,
             "voxtart.view_perspective",
         )
+        with self.assertRaises(mcp.MCPToolError):
+            mcp._coerce_color((float("nan"), 0.0, 0.0, 1.0))
+        with self.assertRaises(mcp.MCPToolError):
+            mcp._coerce_int(1.5, "palette_index")
+        with self.assertRaises(mcp.MCPToolError):
+            mcp._coerce_float(float("inf"), "grid_size")
 
     def test_voxel_editor_registration_and_defaults(self):
         self.assertIs(

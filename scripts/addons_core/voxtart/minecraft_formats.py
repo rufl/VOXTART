@@ -185,9 +185,32 @@ def _is_air(state: str) -> bool:
     return _state_name(state) in MINECRAFT_AIR_BLOCKS
 
 
+def _integer(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"Minecraft {field_name} must be an integer")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value.strip(), 10)
+        except ValueError as error:
+            raise ValueError(f"Minecraft {field_name} must be an integer") from error
+    raise ValueError(f"Minecraft {field_name} must be an integer")
+
+
+def _coordinates(value: Iterable[int], field_name: str) -> tuple[int, int, int]:
+    try:
+        result = tuple(_integer(axis, field_name) for axis in value)
+    except TypeError as error:
+        raise ValueError(f"Minecraft {field_name} must contain three integers") from error
+    if len(result) != 3:
+        raise ValueError(f"Minecraft {field_name} must contain three integers")
+    return result  # type: ignore[return-value]
+
+
 def _dimension(value: Any, field_name: str) -> int:
-    result = int(value)
-    if isinstance(value, bool) or result <= 0 or result > 4096:
+    result = _integer(value, field_name)
+    if result <= 0 or result > 4096:
         raise ValueError(f"Minecraft {field_name} must be between 1 and 4096")
     return result
 
@@ -208,13 +231,11 @@ class MinecraftVolume:
         self.width = _dimension(self.width, "width")
         self.height = _dimension(self.height, "height")
         self.length = _dimension(self.length, "length")
-        self.origin = tuple(int(axis) for axis in self.origin)
-        if len(self.origin) != 3:
-            raise ValueError("Minecraft volume origin must contain three integers")
+        self.origin = _coordinates(self.origin, "volume origin")
         normalized: dict[tuple[int, int, int], str] = {}
         for cell, state in self.blocks.items():
-            position = tuple(int(axis) for axis in cell)
-            if len(position) != 3 or not all(0 <= position[index] < (self.width, self.height, self.length)[index] for index in range(3)):
+            position = _coordinates(cell, "block position")
+            if not all(0 <= position[index] < (self.width, self.height, self.length)[index] for index in range(3)):
                 raise ValueError(f"Minecraft block lies outside volume: {cell!r}")
             state = _state_name(state)
             if not _is_air(state):
@@ -231,7 +252,12 @@ class MinecraftVolume:
         data_version: int = 0,
         metadata: Mapping[str, Any] | None = None,
     ) -> "MinecraftVolume":
-        values = {tuple(int(axis) for axis in position): _state_name(state) for position, state in blocks.items() if not _is_air(state)}
+        values: dict[tuple[int, int, int], str] = {}
+        for position, state in blocks.items():
+            normalized_position = _coordinates(position, "world position")
+            normalized_state = _state_name(state)
+            if not _is_air(normalized_state):
+                values[normalized_position] = normalized_state
         if not values:
             return cls(1, 1, 1, data_version=data_version, metadata=dict(metadata or {}))
         minimum = tuple(min(position[index] for position in values) for index in range(3))
@@ -254,7 +280,7 @@ class MinecraftVolume:
         return self.blocks.get(tuple(position), "minecraft:air")
 
     def set(self, position: tuple[int, int, int], state: str) -> None:
-        position = tuple(int(axis) for axis in position)
+        position = _coordinates(position, "block position")
         if not all(0 <= position[index] < (self.width, self.height, self.length)[index] for index in range(3)):
             raise ValueError(f"Minecraft block lies outside volume: {position!r}")
         state = _state_name(state)

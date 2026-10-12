@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -30,8 +31,14 @@ def _cell(value: Iterable[int]) -> Cell:
 
 
 def _color(value: Iterable[float]) -> Color:
-    result = tuple(float(item) for item in value)
-    if len(result) != 4:
+    try:
+        result = tuple(float(item) for item in value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"invalid layer color: {value!r}") from error
+    if len(result) != 4 or any(
+        not math.isfinite(item) or item < 0.0 or item > 1.0
+        for item in result
+    ):
         raise ValueError(f"invalid layer color: {value!r}")
     return result  # type: ignore[return-value]
 
@@ -50,7 +57,13 @@ class Layer:
         self.name = str(self.name).strip()[:128] or "Layer"
         self.visible = bool(self.visible)
         self.locked = bool(self.locked)
-        self.opacity = max(0.0, min(1.0, float(self.opacity)))
+        try:
+            opacity = float(self.opacity)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError("layer opacity must be finite") from error
+        if not math.isfinite(opacity):
+            raise ValueError("layer opacity must be finite")
+        self.opacity = max(0.0, min(1.0, opacity))
         self.blend_mode = str(self.blend_mode).upper()
         if self.blend_mode not in BLEND_MODES:
             raise ValueError(f"unsupported layer blend mode: {self.blend_mode!r}")
@@ -112,13 +125,15 @@ class LayerStack:
     schema_version: int = LAYER_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != LAYER_SCHEMA_VERSION:
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version != LAYER_SCHEMA_VERSION:
             raise ValueError(f"unsupported layer schema: {self.schema_version}")
+        if not isinstance(self.active_index, int) or isinstance(self.active_index, bool):
+            raise ValueError("layer active index must be an integer")
         if not self.layers:
             self.layers = [Layer(name="Base")]
         if len(self.layers) > MAX_LAYERS:
             raise ValueError(f"layer stacks may contain at most {MAX_LAYERS} layers")
-        self.active_index = max(0, min(len(self.layers) - 1, int(self.active_index)))
+        self.active_index = max(0, min(len(self.layers) - 1, self.active_index))
 
     @classmethod
     def from_asset(cls, asset: VoxelAsset) -> "LayerStack":
@@ -129,9 +144,11 @@ class LayerStack:
         return self.layers[self.active_index]
 
     def set_active(self, index: int) -> Layer:
-        if not 0 <= int(index) < len(self.layers):
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("layer index must be an integer")
+        if not 0 <= index < len(self.layers):
             raise IndexError("layer index out of range")
-        self.active_index = int(index)
+        self.active_index = index
         return self.active
 
     def add(self, name: str = "Layer") -> Layer:
@@ -157,7 +174,9 @@ class LayerStack:
         self.active_index = min(self.active_index, len(self.layers) - 1)
 
     def move_active(self, delta: int) -> None:
-        target = self.active_index + int(delta)
+        if isinstance(delta, bool) or not isinstance(delta, int):
+            raise ValueError("layer move delta must be an integer")
+        target = self.active_index + delta
         if not 0 <= target < len(self.layers):
             return
         layer = self.layers.pop(self.active_index)
@@ -195,7 +214,16 @@ class LayerStack:
 
     def remap_palette_indices(self, index_map: Mapping[int, int]) -> None:
         """Remap palette indices exactly, preserving duplicate color slots."""
-        mapping = {int(source): int(target) for source, target in index_map.items()}
+        mapping: dict[int, int] = {}
+        for source, target in index_map.items():
+            if (
+                isinstance(source, bool)
+                or not isinstance(source, int)
+                or isinstance(target, bool)
+                or not isinstance(target, int)
+            ):
+                raise ValueError("palette remap indices must be integers")
+            mapping[source] = target
         for layer in self.layers:
             remapped: dict[Cell, int] = {}
             for cell, palette_index in layer.voxels.items():

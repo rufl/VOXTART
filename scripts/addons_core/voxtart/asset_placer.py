@@ -127,7 +127,8 @@ def disc_samples(
 
     center = _vector(center, "brush center")
     radius = float(radius)
-    count = int(count)
+    if isinstance(count, bool) or not isinstance(count, int):
+        raise ValueError("brush sample count must be an integer")
     if not math.isfinite(radius) or radius < 0.0:
         raise ValueError("brush radius must be a finite non-negative value")
     if count < 1:
@@ -186,8 +187,13 @@ def randomized_transform(
 def thumbnail_pixels(asset: object, width: int = 96, height: int = 96) -> tuple[float, ...]:
     """Render a small deterministic isometric preview from sparse voxel data."""
 
-    width = int(width)
-    height = int(height)
+    if (
+        isinstance(width, bool)
+        or not isinstance(width, int)
+        or isinstance(height, bool)
+        or not isinstance(height, int)
+    ):
+        raise ValueError("thumbnail dimensions must be integers")
     if width < 8 or height < 8:
         raise ValueError("thumbnail dimensions must be at least 8 pixels")
     pixels = [0.0] * (width * height * 4)

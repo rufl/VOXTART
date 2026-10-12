@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
@@ -23,9 +24,15 @@ def _cell(value: Iterable[int]) -> Cell:
 
 
 def _color(value: Iterable[float]) -> Color:
-    result = tuple(float(item) for item in value)
-    if len(result) != 4 or any(item < 0.0 or item > 1.0 for item in result):
-        raise ValueError(f"palette colors must be four values in [0, 1]: {value!r}")
+    try:
+        result = tuple(float(item) for item in value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"palette colors must be four finite values in [0, 1]: {value!r}") from error
+    if len(result) != 4 or any(
+        not math.isfinite(item) or item < 0.0 or item > 1.0
+        for item in result
+    ):
+        raise ValueError(f"palette colors must be four finite values in [0, 1]: {value!r}")
     return result  # type: ignore[return-value]
 
 
@@ -43,12 +50,13 @@ class VoxelSocket:
         normal = _cell(self.normal)
         if sum(abs(axis) for axis in normal) != 1:
             raise ValueError("socket normal must be one of the six axis directions")
-        if self.rotation not in (0, 90, 180, 270):
+        if isinstance(self.rotation, bool) or not isinstance(self.rotation, int) or self.rotation not in (0, 90, 180, 270):
             raise ValueError("socket rotation must be a right-angle quarter turn")
-        if not self.tag:
-            raise ValueError("socket tag must not be empty")
+        if not isinstance(self.tag, str) or not self.tag.strip():
+            raise ValueError("socket tag must be a non-empty string")
         object.__setattr__(self, "position", position)
         object.__setattr__(self, "normal", normal)
+        object.__setattr__(self, "tag", self.tag.strip())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -71,10 +79,15 @@ class VoxelAsset:
     schema_version: int = SCHEMA_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != SCHEMA_VERSION:
+        if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version != SCHEMA_VERSION:
             raise ValueError(f"unsupported voxel schema: {self.schema_version}")
-        if self.grid_size <= 0.0:
-            raise ValueError("grid_size must be positive")
+        try:
+            grid_size = float(self.grid_size)
+        except (TypeError, ValueError, OverflowError) as error:
+            raise ValueError("grid_size must be a finite positive number") from error
+        if not math.isfinite(grid_size) or grid_size <= 0.0:
+            raise ValueError("grid_size must be a finite positive number")
+        self.grid_size = grid_size
         self.palette = [_color(color) for color in self.palette]
         if not self.palette:
             raise ValueError("voxel assets require at least one palette entry")
@@ -139,23 +152,27 @@ class VoxelAsset:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "VoxelAsset":
-        if int(data.get("schema_version", -1)) != SCHEMA_VERSION:
+        schema_version = data.get("schema_version", -1)
+        if isinstance(schema_version, bool) or not isinstance(schema_version, int) or schema_version != SCHEMA_VERSION:
             raise ValueError("unsupported or missing voxel schema version")
         voxels: dict[Cell, int] = {}
         for item in data.get("voxels", []):
             if not isinstance(item, (list, tuple)) or len(item) != 4:
                 raise ValueError(f"invalid voxel entry: {item!r}")
-            voxels[_cell(item[:3])] = int(item[3])
+            palette_index = item[3]
+            if isinstance(palette_index, bool) or not isinstance(palette_index, int):
+                raise ValueError(f"voxel palette index must be an integer: {palette_index!r}")
+            voxels[_cell(item[:3])] = palette_index
         sockets = []
         for item in data.get("sockets", []):
             sockets.append(VoxelSocket(
                 position=item["position"],
                 normal=item["normal"],
                 tag=str(item.get("tag", "default")),
-                rotation=int(item.get("rotation", 0)),
+                rotation=item.get("rotation", 0),
             ))
         return cls(
-            grid_size=float(data["grid_size"]),
+            grid_size=data["grid_size"],
             palette=data["palette"],
             voxels=voxels,
             sockets=sockets,

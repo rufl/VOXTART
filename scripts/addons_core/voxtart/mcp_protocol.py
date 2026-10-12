@@ -300,7 +300,11 @@ class MCPDispatcher:
     def _dispatch_method(self, method: str, params: Mapping[str, Any]) -> Any:
         if method == "initialize":
             requested = params.get("protocolVersion", MCP_PROTOCOL_VERSION)
-            version = requested if requested in SUPPORTED_PROTOCOL_VERSIONS else MCP_PROTOCOL_VERSION
+            version = (
+                requested
+                if isinstance(requested, str) and requested in SUPPORTED_PROTOCOL_VERSIONS
+                else MCP_PROTOCOL_VERSION
+            )
             return {
                 "protocolVersion": version,
                 "capabilities": {

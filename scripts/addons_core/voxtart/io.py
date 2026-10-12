@@ -40,7 +40,7 @@ def decode_asset(document: str) -> VoxelAsset:
     if payload.get("format") != FORMAT_NAME:
         raise ValueError(f"unsupported VOXTART asset format: {payload.get('format')!r}")
     version = payload.get("format_version")
-    if isinstance(version, bool) or int(version) != FORMAT_VERSION:
+    if isinstance(version, bool) or not isinstance(version, int) or version != FORMAT_VERSION:
         raise ValueError(f"unsupported VOXTART asset format version: {version!r}")
     return VoxelAsset.from_dict(payload)
 
