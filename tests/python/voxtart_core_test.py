@@ -44,6 +44,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
+EXPECTED_TESTS = 93
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -3824,4 +3825,9 @@ class ReconstructionTest(unittest.TestCase):
         self.assertEqual(result.report.color_mismatches, 1)
 
 if __name__ == "__main__":
-    unittest.main()
+    program = unittest.main(exit=False)
+    if program.result.testsRun != EXPECTED_TESTS:
+        raise SystemExit(
+            f"VOXTART_CORE_TEST_COUNT {program.result.testsRun} != {EXPECTED_TESTS}"
+        )
+    raise SystemExit(not program.result.wasSuccessful())
