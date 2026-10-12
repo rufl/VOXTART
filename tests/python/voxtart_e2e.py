@@ -357,6 +357,7 @@ def _run_gui_probe() -> None:
             or payload.get("minecraft_roundtrip") is not True
             or payload.get("gallery_roundtrip") is not True
             or payload.get("hierarchy_roundtrip") is not True
+            or payload.get("kitbash_roundtrip") is not True
             or payload.get("stack_roundtrip") is not True
             or payload.get("native_vox_roundtrip") is not True
             or payload.get("character_prepare") is not True

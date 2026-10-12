@@ -385,6 +385,7 @@ def _finish_mouse_clicks():
                 "palette_reduce": STATE.get("palette_reduce", False),
                 "blockbench_roundtrip": STATE.get("blockbench_roundtrip", False),
                 "hierarchy_roundtrip": STATE.get("hierarchy_roundtrip", False),
+                "kitbash_roundtrip": STATE.get("kitbash_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "stack_roundtrip": STATE.get("stack_roundtrip", False),
                 "gallery_roundtrip": STATE.get("gallery_roundtrip", False),
@@ -1301,6 +1302,87 @@ def _probe():
                         f"{select_result!r}, {clear_result!r}"
                     )
                 STATE["hierarchy_roundtrip"] = True
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
+                before_kitbash_assets = set(desktop_shell._asset_objects())
+                target_kitbash_object = operators._create_asset_object(
+                    bpy.context,
+                    "GUI Kitbash Target",
+                    VoxelAsset.box(1),
+                    backend="greedy",
+                )
+                target_kitbash_object.location = (5.0, 0.0, 0.0)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                target_kitbash_object.select_set(True)
+                bpy.context.view_layer.objects.active = target_kitbash_object
+                target_socket_result = bpy.ops.voxtart.add_socket(
+                    position=(0, 0, 0),
+                    normal="NEG_X",
+                    tag="mount",
+                )
+                source_kitbash_object = operators._create_asset_object(
+                    bpy.context,
+                    "GUI Kitbash Source",
+                    VoxelAsset.box(1),
+                    backend="greedy",
+                )
+                source_kitbash_object.location = (0.0, 0.0, 0.0)
+                source_socket_result = bpy.ops.voxtart.add_socket(
+                    position=(0, 0, 0),
+                    normal="POS_X",
+                    tag="mount",
+                )
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                target_kitbash_object.select_set(True)
+                source_kitbash_object.select_set(True)
+                bpy.context.view_layer.objects.active = source_kitbash_object
+                desktop_shell._set_mode(scene, "BUILD")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "kitbash:snap" for key, _bounds in shell_state.targets):
+                    return _fail("Project surface did not expose Snap active to target")
+                shell_operator._activate(bpy.context, "kitbash:snap")
+                source_kitbash_asset = operators._load_asset(source_kitbash_object)
+                target_kitbash_asset = operators._load_asset(target_kitbash_object)
+                snap_record = json.loads(
+                    source_kitbash_object.get("voxtart_last_snap", "{}")
+                )
+                kitbash_source_name = source_kitbash_object.name
+                kitbash_target_name = target_kitbash_object.name
+                kitbash_assets = set(desktop_shell._asset_objects()).difference(
+                    before_kitbash_assets
+                )
+                if (
+                    len(kitbash_assets) != 2
+                    or "FINISHED" not in target_socket_result
+                    or "FINISHED" not in source_socket_result
+                    or len(source_kitbash_asset.sockets) != 1
+                    or len(target_kitbash_asset.sockets) != 1
+                    or source_kitbash_asset.sockets[0].normal != (1, 0, 0)
+                    or target_kitbash_asset.sockets[0].normal != (-1, 0, 0)
+                    or scene.get(desktop_shell.SHELL_STATUS_PROPERTY)
+                    != "Selected assets snapped"
+                    or abs(source_kitbash_object.location.x - target_kitbash_object.location.x)
+                    > 1.0e-6
+                    or snap_record.get("target") != kitbash_target_name
+                    or snap_record.get("source_socket") != 0
+                    or snap_record.get("target_socket") != 0
+                ):
+                    return _fail(
+                        f"Kitbash joint authoring/snap failed: "
+                        f"{target_socket_result!r}, {source_socket_result!r}, {snap_record!r}"
+                    )
+                bpy.data.objects.remove(source_kitbash_object, do_unlink=True)
+                bpy.data.objects.remove(target_kitbash_object, do_unlink=True)
+                if (
+                    kitbash_source_name in bpy.data.objects
+                    or kitbash_target_name in bpy.data.objects
+                ):
+                    return _fail("Kitbash probe did not clean up its temporary assets")
+                STATE["kitbash_roundtrip"] = True
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)
