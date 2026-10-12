@@ -277,6 +277,7 @@ _ICON_FOR_KEY = {
     "format:minecraft": "cube",
     "gallery:save": "layers",
     "scene:sync": "refresh",
+    "kitbash:snap": "place",
     "build:optimize": "optimize",
     "build:editor": "toolbox",
     "build:toolbox": "toolbox",
@@ -679,7 +680,16 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         _RIGHT_WIDTH - 32,
         26,
     )
-    parts_y -= 206
+    _draw_button(
+        state,
+        "kitbash:snap",
+        "Snap active to target",
+        x,
+        parts_y - 176,
+        _RIGHT_WIDTH - 32,
+        26,
+    )
+    parts_y -= 236
     _draw_text("PARTS", x, parts_y, 11, _MUTED)
     _draw_text("Voxel assets", x, parts_y - 25, 13, _TEXT)
     objects = _asset_objects()
@@ -995,6 +1005,13 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                 scene,
                 lambda: bpy.ops.voxtart.zoo_sync_placements(),
                 "Scene hierarchy synchronized",
+            )
+            return
+        if key == "kitbash:snap":
+            _run_operator(
+                scene,
+                lambda: bpy.ops.voxtart.snap_active(),
+                "Selected assets snapped",
             )
             return
         if key == "palette:reduce":

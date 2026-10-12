@@ -534,6 +534,9 @@ rotation. Kitbash matching requires opposite normals and prefers exact tags,
 then wildcard tags, then the shortest grid translation. Blob joints add names,
 roles, and optional target bone names without changing the authoritative
 socket contract.
+The project shell exposes **Snap active to target** for the common two-object
+handoff; the full Zoo Gallery/sidebar remains the authoring surface for named
+joints, socket metadata, and compatibility feedback.
 
 ### Voxel Character Editor
 
