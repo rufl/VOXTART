@@ -541,7 +541,11 @@ joints, socket metadata, and compatibility feedback.
 ### Voxel Character Editor
 
 The **Voxel Character Editor** assembles a reusable character recipe from
-Blob Gallery parts instead of baking one monolithic mesh:
+Blob Gallery parts instead of baking one monolithic mesh.
+
+The project shell keeps the compact rig, animation, and export controls in
+Character mode; the full **Voxel Character Editor** sidebar owns recipe
+assignment, slot replacement, and character cleanup.
 
 - choose a target slot (`Root`, `Torso`, `Head`, left/right arms, left/right
   legs, or `Accessory`) and filter the local gallery;

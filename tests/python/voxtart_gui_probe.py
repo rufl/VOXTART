@@ -22,6 +22,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import (
     blob_gallery,
     blockbench_formats,
+    character_editor_ui,
     desktop_shell,
     desktop_ui,
     minecraft_formats,
@@ -34,7 +35,7 @@ from voxtart import (
     stacking,
     voxel_editor,
 )
-from voxtart.voxel import VoxelAsset  # noqa: E402
+from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
 
 
 MARKER = Path(os.environ.get("VOXTART_GUI_MARKER", "voxtart_gui_probe.json"))
@@ -386,6 +387,7 @@ def _finish_mouse_clicks():
                 "blockbench_roundtrip": STATE.get("blockbench_roundtrip", False),
                 "hierarchy_roundtrip": STATE.get("hierarchy_roundtrip", False),
                 "kitbash_roundtrip": STATE.get("kitbash_roundtrip", False),
+                "character_editor_roundtrip": STATE.get("character_editor_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "stack_roundtrip": STATE.get("stack_roundtrip", False),
                 "gallery_roundtrip": STATE.get("gallery_roundtrip", False),
@@ -1158,6 +1160,122 @@ def _probe():
                     bpy.data.objects.remove(armature_object, do_unlink=True)
                     if armature_data.users == 0:
                         bpy.data.armatures.remove(armature_data)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                native_object.select_set(True)
+                bpy.context.view_layer.objects.active = native_object
+                scene.voxtart_blob_gallery_path = str(GUI_GALLERY_PATH)
+                character_gallery = blob_gallery.BlobGallery(GUI_GALLERY_PATH)
+                root_socket = VoxelSocket((0, 0, 0), (0, 0, 1), "mount")
+                root_asset = VoxelAsset.box(1)
+                root_asset.sockets = [root_socket]
+                torso_socket = VoxelSocket((0, 0, 0), (0, 0, -1), "mount")
+                torso_asset = VoxelAsset.box(1)
+                torso_asset.sockets = [torso_socket]
+                root_entry = blob_gallery.make_blob_entry(
+                    root_asset,
+                    "GUI Character Root",
+                    blob_id="gui_character_root",
+                    category="GUI Tests",
+                    joints=(
+                        blob_gallery.BlobJoint(
+                            name="mount",
+                            socket=root_socket,
+                            role="mount",
+                        ),
+                    ),
+                )
+                torso_entry = blob_gallery.make_blob_entry(
+                    torso_asset,
+                    "GUI Character Torso",
+                    blob_id="gui_character_torso",
+                    category="GUI Tests",
+                    joints=(
+                        blob_gallery.BlobJoint(
+                            name="mount",
+                            socket=torso_socket,
+                            role="mount",
+                        ),
+                    ),
+                )
+                character_gallery.save(root_entry)
+                character_gallery.save(torso_entry)
+                scene.voxtart_character_name = "GUI Character"
+                scene.voxtart_character_slot = "ROOT"
+                scene.voxtart_character_auto_snap = True
+                desktop_shell._set_mode(scene, "CHARACTER")
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if not any(key == "character:rebuild" for key, _bounds in shell_state.targets):
+                    return _fail("Character surface did not expose Rebuild character")
+                root_result = bpy.ops.voxtart.character_assign_blob(
+                    slot="ROOT",
+                    blob_id=root_entry.blob_id,
+                )
+                torso_result = bpy.ops.voxtart.character_assign_blob(
+                    slot="TORSO",
+                    blob_id=torso_entry.blob_id,
+                )
+                shell_operator._activate(bpy.context, "character:rebuild")
+                character_id = str(scene.get(character_editor_ui.CHARACTER_ID_PROPERTY, ""))
+                recipe = character_editor_ui._load_recipe(scene)
+                generated = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                snap_record = json.loads(
+                    generated["TORSO"].get("voxtart_character_snap", "{}")
+                ) if "TORSO" in generated else {}
+                if (
+                    "FINISHED" not in root_result
+                    or "FINISHED" not in torso_result
+                    or scene.get(desktop_shell.SHELL_STATUS_PROPERTY) != "Character rebuilt"
+                    or set(generated) != {"ROOT", "TORSO"}
+                    or generated["TORSO"].parent != generated["ROOT"]
+                    or recipe.get("ROOT") is None
+                    or recipe.get("TORSO") is None
+                    or recipe.get("TORSO").parent_slot != "ROOT"
+                    or snap_record.get("target") != generated["ROOT"].name
+                ):
+                    return _fail(
+                        f"Character editor assignment/rebuild failed: "
+                        f"{root_result!r}, {torso_result!r}, {generated!r}"
+                    )
+                remove_result = bpy.ops.voxtart.character_remove_part(slot="TORSO")
+                removed_recipe = character_editor_ui._load_recipe(scene)
+                if (
+                    "FINISHED" not in remove_result
+                    or removed_recipe.get("TORSO") is not None
+                    or any(
+                        obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY) == "TORSO"
+                        and obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY)
+                        == character_id
+                        for obj in bpy.data.objects
+                    )
+                ):
+                    return _fail(f"Character editor remove failed: {remove_result!r}")
+                reassign_result = bpy.ops.voxtart.character_assign_blob(
+                    slot="TORSO",
+                    blob_id=torso_entry.blob_id,
+                )
+                clear_result = bpy.ops.voxtart.character_clear()
+                character_gallery.remove(root_entry.blob_id)
+                character_gallery.remove(torso_entry.blob_id)
+                if (
+                    "FINISHED" not in reassign_result
+                    or "FINISHED" not in clear_result
+                    or character_editor_ui.CHARACTER_RECIPE_PROPERTY in scene
+                    or character_editor_ui.CHARACTER_ID_PROPERTY in scene
+                    or any(
+                        obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY)
+                        == character_id
+                        for obj in bpy.data.objects
+                    )
+                ):
+                    return _fail(
+                        f"Character editor clear failed: {reassign_result!r}, {clear_result!r}"
+                    )
+                STATE["character_editor_roundtrip"] = True
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)
