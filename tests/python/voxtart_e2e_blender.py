@@ -31,6 +31,7 @@ if str(SOURCE_ROOT) not in sys.path:
 import voxtart as addon  # noqa: E402
 from voxtart import layers, operators, palette_ui, viewport_workflow_ui, voxel_brush, voxel_editor  # noqa: E402
 from voxtart.voxel import VoxelAsset  # noqa: E402
+EXPECTED_TESTS = 7
 
 
 class _EditorContext:
@@ -519,4 +520,9 @@ class BlenderEndToEndTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(argv=[sys.argv[0]])
+    program = unittest.main(argv=[sys.argv[0]], exit=False)
+    if program.result.testsRun != EXPECTED_TESTS:
+        raise SystemExit(
+            f"VOXTART_E2E_TEST_COUNT {program.result.testsRun} != {EXPECTED_TESTS}"
+        )
+    raise SystemExit(not program.result.wasSuccessful())

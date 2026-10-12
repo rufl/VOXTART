@@ -33,6 +33,7 @@ from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_u
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
+EXPECTED_TESTS = 29
 
 
 def _gallery_entry(name, blob_id, normal):
@@ -1383,4 +1384,9 @@ class BlenderRegistrationTest(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main(argv=[sys.argv[0]])
+    program = unittest.main(argv=[sys.argv[0]], exit=False)
+    if program.result.testsRun != EXPECTED_TESTS:
+        raise SystemExit(
+            f"VOXTART_BLENDER_TEST_COUNT {program.result.testsRun} != {EXPECTED_TESTS}"
+        )
+    raise SystemExit(not program.result.wasSuccessful())
