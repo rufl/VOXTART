@@ -432,10 +432,11 @@ def _draw_editor_topbar(editor, context) -> None:
     height = float(region.height)
     bar_y = height - 48.0
     asset_name = getattr(getattr(editor, "obj", None), "name", "Voxel asset")
+    asset_summary = f"{asset_name[:30]}  ·  {len(editor.asset.voxels)} blocks"
     _draw_editor_rect(0.0, bar_y, width, 48.0, (0.025, 0.032, 0.045, 0.98))
     _draw_editor_text("VOXTART", 18.0, bar_y + 28.0, 14.0, (0.98, 0.82, 0.35, 1.0))
     _draw_editor_text(
-        f"{asset_name[:30]}  ·  {len(editor.asset.voxels)} blocks",
+        asset_summary,
         102.0,
         bar_y + 28.0,
         12.0,
@@ -459,6 +460,50 @@ def _draw_editor_topbar(editor, context) -> None:
     try:
         if gpu is not None:
             gpu.state.blend_set("ALPHA")
+        workspace = _scene_workspace(context.scene)
+        workspace_label = workspace
+        workspace_accent = (
+            (0.35, 0.62, 1.0, 1.0)
+            if workspace == "EDIT"
+            else (0.98, 0.72, 0.3, 1.0)
+        )
+        workspace_pill_width = 90.0
+        workspace_x = 102.0 + _editor_text_width(asset_summary, 12.0) + 16.0
+        project_x = _editor_topbar_action_bounds(region)[0][1][0]
+        if workspace_x + workspace_pill_width + 12.0 < project_x:
+            _draw_editor_panel(
+                workspace_x,
+                bar_y + 9.0,
+                workspace_pill_width,
+                28.0,
+                (0.07, 0.12, 0.19, 0.98)
+                if workspace == "EDIT"
+                else (0.18, 0.12, 0.05, 0.98),
+                border=workspace_accent,
+                radius=14.0,
+            )
+            _draw_editor_round_rect(
+                workspace_x + 11.0,
+                bar_y + 20.0,
+                6.0,
+                6.0,
+                workspace_accent,
+                radius=3.0,
+            )
+            _draw_editor_text(
+                workspace_label,
+                workspace_x + 24.0,
+                bar_y + 18.0,
+                10.0,
+                (0.9, 0.95, 1.0, 1.0),
+            )
+            _draw_editor_text(
+                "TAB",
+                workspace_x + 59.0,
+                bar_y + 18.0,
+                9.0,
+                (0.62, 0.72, 0.84, 1.0),
+            )
         for action, bounds in _editor_topbar_action_bounds(region):
             x0, y0, x1, y1 = bounds
             hovered = action == getattr(editor, "topbar_hover", None)
