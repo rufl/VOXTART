@@ -191,6 +191,8 @@ jobs:
         env:
           VOXTART_E2E_ARTIFACT_DIR: ${{ github.workspace }}\voxtart-e2e-artifacts
           VOXTART_PERF_OUTPUT: ${{ github.workspace }}\voxtart-e2e-artifacts\performance.json
+          # GitHub-hosted Windows has no usable Workbench GPU context.
+          VOXTART_SPRITESHEET_CPU: "1"
         run: call tools\run_voxtart_e2e.cmd > "voxtart-e2e-artifacts\e2e.log" 2>&1
       - name: Verify Windows E2E evidence
         if: always()

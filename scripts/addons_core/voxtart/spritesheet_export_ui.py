@@ -6,8 +6,11 @@
 
 
 import json
+import math
+import os
 import tempfile
 from pathlib import Path
+
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, IntProperty, StringProperty
@@ -167,6 +170,109 @@ def _render_result_texture(image) -> PixelTexture:
     )
     return PixelTexture.from_rgba(width, height, top_left)
 
+def _cpu_render_frames(
+    context: bpy.types.Context,
+    source_obj,
+    frame_numbers: tuple[int, ...],
+    *,
+    frame_width: int,
+    frame_height: int,
+    view: str,
+    margin: float,
+    explicit_scale: float,
+    animation_owner,
+) -> tuple[tuple[PixelTexture, ...], float]:
+    """Render a deterministic orthographic fallback without a GPU context."""
+    asset = operators._load_asset(source_obj)
+    if not asset.voxels:
+        raise RuntimeError("the voxel asset has no renderable voxels")
+    direction = _VIEW_DIRECTIONS.get(str(view).upper())
+    if direction is None:
+        raise ValueError(f"unsupported spritesheet view: {view!r}")
+    direction = direction.normalized()
+    up_reference = Vector((0.0, 1.0, 0.0)) if abs(direction.z) > 0.9 else Vector((0.0, 0.0, 1.0))
+    screen_right = up_reference.cross(direction).normalized()
+    screen_up = direction.cross(screen_right).normalized()
+    half_grid = max(float(asset.grid_size), 0.0001) * 0.5
+    transparent = (0.0, 0.0, 0.0, 0.0)
+    frame_before = int(context.scene.frame_current)
+    subframe_before = float(getattr(context.scene, "frame_subframe", 0.0))
+    frames = []
+    used_scale = 0.0
+    try:
+        for frame_number in frame_numbers:
+            context.scene.frame_set(frame_number)
+            evaluated = source_obj.evaluated_get(context.evaluated_depsgraph_get())
+            matrix_world = evaluated.matrix_world
+            projected = []
+            for cell, palette_index in asset.voxels.items():
+                center = Vector((
+                    (cell[0] + 0.5) * asset.grid_size,
+                    (cell[1] + 0.5) * asset.grid_size,
+                    (cell[2] + 0.5) * asset.grid_size,
+                ))
+                corners = tuple(
+                    (matrix_world @ (center + Vector((
+                        sign_x * half_grid,
+                        sign_y * half_grid,
+                        sign_z * half_grid,
+                    )))).to_3d()
+                    for sign_x in (-1.0, 1.0)
+                    for sign_y in (-1.0, 1.0)
+                    for sign_z in (-1.0, 1.0)
+                )
+                screen = tuple(
+                    (
+                        corner.x * screen_right.x + corner.y * screen_right.y + corner.z * screen_right.z,
+                        corner.x * screen_up.x + corner.y * screen_up.y + corner.z * screen_up.z,
+                        corner.x * direction.x + corner.y * direction.y + corner.z * direction.z,
+                    )
+                    for corner in corners
+                )
+                color = (
+                    asset.palette[palette_index]
+                    if 0 <= palette_index < len(asset.palette)
+                    else (1.0, 1.0, 1.0, 1.0)
+                )
+                projected.append((
+                    sum(point[2] for point in screen) / len(screen),
+                    min(point[0] for point in screen),
+                    max(point[0] for point in screen),
+                    min(point[1] for point in screen),
+                    max(point[1] for point in screen),
+                    color,
+                ))
+            minimum_x = min(item[1] for item in projected)
+            maximum_x = max(item[2] for item in projected)
+            minimum_y = min(item[3] for item in projected)
+            maximum_y = max(item[4] for item in projected)
+            center_x = (minimum_x + maximum_x) * 0.5
+            center_y = (minimum_y + maximum_y) * 0.5
+            aspect = max(float(frame_width) / max(float(frame_height), 1.0), 0.001)
+            required_scale = max(
+                maximum_y - minimum_y,
+                (maximum_x - minimum_x) / aspect,
+                0.001,
+            ) * max(float(margin), 1.0)
+            used_scale = max(float(explicit_scale), required_scale) if explicit_scale > 0.0 else required_scale
+            pixels = [transparent] * (frame_width * frame_height)
+            for _, minimum_cell_x, maximum_cell_x, minimum_cell_y, maximum_cell_y, color in sorted(projected):
+                left = max(0, math.floor((minimum_cell_x - center_x) / used_scale * frame_height + frame_width * 0.5))
+                right_pixel = min(frame_width - 1, math.ceil((maximum_cell_x - center_x) / used_scale * frame_height + frame_width * 0.5) - 1)
+                top = max(0, math.floor((center_y - maximum_cell_y) / used_scale * frame_height + frame_height * 0.5))
+                bottom = min(frame_height - 1, math.ceil((center_y - minimum_cell_y) / used_scale * frame_height + frame_height * 0.5) - 1)
+                if right_pixel < left:
+                    right_pixel = left
+                if bottom < top:
+                    bottom = top
+                for y in range(top, bottom + 1):
+                    row = y * frame_width
+                    pixels[row + left:row + right_pixel + 1] = [color] * (right_pixel - left + 1)
+            frames.append(PixelTexture(frame_width, frame_height, tuple(pixels)))
+    finally:
+        context.scene.frame_set(frame_before, subframe=subframe_before)
+    return tuple(frames), used_scale
+
 
 def _render_dependencies(scene: bpy.types.Scene, source_obj, animation_owner) -> frozenset:
     allowed = {source_obj}
@@ -197,6 +303,18 @@ def _render_frames(
     scene = context.scene
     if frame_width < 1 or frame_height < 1:
         raise ValueError("spritesheet frame dimensions must be positive")
+    if os.environ.get("VOXTART_SPRITESHEET_CPU") == "1":
+        return _cpu_render_frames(
+            context,
+            source_obj,
+            frame_numbers,
+            frame_width=frame_width,
+            frame_height=frame_height,
+            view=view,
+            margin=margin,
+            explicit_scale=explicit_scale,
+            animation_owner=animation_owner,
+        )
     selected_camera = scene.camera
     frame_before = int(scene.frame_current)
     subframe_before = float(getattr(scene, "frame_subframe", 0.0))
