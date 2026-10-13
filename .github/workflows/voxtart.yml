@@ -19,7 +19,7 @@ on:
       - "tools/**"
       - "run_voxtart.cmd"
       - ".github/workflows/voxtart.yml"
-  workflow_dispatch:
+  workflow_dispatch: {}
 concurrency:
   group: voxtart-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -86,15 +86,18 @@ jobs:
       - name: Extract Blender
         run: tar -xJf "${RUNNER_TEMP}/blender.tar.xz" -C "${RUNNER_TEMP}"
       - name: Run Blender native suite
-        run: "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --python tests/python/voxtart_blender_test.py
+        run: >-
+          "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --python tests/python/voxtart_blender_test.py
       - name: Run headless editor end-to-end matrix
         env:
           VOXTART_PERF_OUTPUT: ${{ github.workspace }}/voxtart-blender-artifacts/performance.json
-        run: "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --factory-startup --python tests/python/voxtart_e2e_blender.py
+        run: >-
+          "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --factory-startup --python tests/python/voxtart_e2e_blender.py
       - name: Measure Blender-facing coverage
         env:
           VOXTART_COVERAGE_OUTPUT: ${{ github.workspace }}/voxtart-blender-artifacts/coverage.json
-        run: "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --factory-startup --python tests/python/voxtart_blender_coverage.py
+        run: >-
+          "${RUNNER_TEMP}/blender-${BLENDER_VERSION}-linux-x64/blender" --background --factory-startup --python tests/python/voxtart_blender_coverage.py
       - name: Verify Blender evidence
         if: always()
         run: |
