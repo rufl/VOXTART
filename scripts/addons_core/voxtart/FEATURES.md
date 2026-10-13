@@ -700,13 +700,13 @@ clipboard in a second process. The GUI probe invokes the real operator in a
 containing the editor overlay and brush preview. Use `--skip-launcher` only
 when the compiled Windows launcher is unavailable.
 
-The current local regression baseline is 93 deterministic core tests, 29
+The current local regression baseline is 109 deterministic core tests, 29
 Blender-native tests, and 7 additional end-to-end Blender tests. The E2E
 performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
-The latest local coverage probes report 6,466/6,466 core lines (100.00%) and
-6,137/13,784 Blender-facing lines (44.52%). The latest headless performance
-probe reported 32³ rebuild in 541.13 ms and selection in 61.89 ms on this
+The latest local coverage probes report 7,955/7,955 core lines (100.00%) and
+6,318/14,136 Blender-facing lines (44.69%). The latest headless performance
+probe reported 32³ rebuild in 582.33 ms and selection in 65.22 ms on this
 workstation.
 The CI core-coverage step enforces the 100.0% deterministic-line threshold;
 coverage regressions fail the Linux core job instead of becoming upload-only
@@ -717,7 +717,7 @@ read access to repository contents.
 All reusable GitHub Actions are pinned to immutable commit revisions, and
 checkout steps disable credential persistence after fetching source.
 The three direct suite entrypoints also enforce their collected-test contracts:
-93 core tests, 29 Blender-native tests, and 7 headless editor tests. A suite
+109 core tests, 29 Blender-native tests, and 7 headless editor tests. A suite
 that silently loses coverage now fails its own process before CI can publish a
 false-positive pass.
 
