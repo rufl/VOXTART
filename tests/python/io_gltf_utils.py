@@ -63,11 +63,11 @@ def gltf_generate_descr(output_datafile: pathlib.Path) -> str:
         for extension_used in sorted(gltf.json['extensionsUsed']):
             text += extension_used + "\n"
         for idx, buffer in enumerate(gltf.json.get('buffers', [])):
-            text += f"buffer {idx} with extension fallback {
-                buffer.get(
-                    'extensions', {}).get(
-                    'KHR_meshopt_compression', {}).get(
-                    'fallback', False)}\n"
+            fallback = buffer.get(
+                'extensions', {}).get(
+                'KHR_meshopt_compression', {}).get(
+                'fallback', False)
+            text += f"buffer {idx} with extension fallback {fallback}\n"
 
     elif is_draco_compare(gltf.json):
         # Avoid comparing data when draco compression is used, as it can lead to
