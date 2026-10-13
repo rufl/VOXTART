@@ -376,21 +376,28 @@ without resampling:
   priority calibration before calling `voxtart.reconstruct`.
 
 The deterministic `voxtart.sprite_pipeline` composes intake, calibrated
-reconstruction, candidate review, optional missing-only symmetry, an optional
-pre-voxelized guide volume, and a geometric skeleton suggestion. The
+reconstruction, candidate review, optional missing-only symmetry, a mesh or
+pre-voxelized guide prior, and a skeleton payload. The
 `voxtart.sprite_sequence` API reconstructs independent frames and reports
-added, removed, and recolored voxel cells relative to the base frame. Guide
-volumes are the portable boundary for the existing mesh voxelizer: a mesh is
-voxelized first, then reconciled without overriding explicit free evidence.
-
+added, removed, and recolored voxel cells relative to the base frame.
+`voxtart.guide_prior.MeshGuide` and `voxelize_mesh_guide` provide a portable
+closed-mesh-to-voxel guide path before evidence reconciliation; the guide
+cannot override explicit free evidence.
+Typed `VoxelAsset.part_assignments` persist per-voxel semantic labels in the
+asset payload and provenance compatibility field. Recognized labels produce
+deterministic semantic role anchors (`HEAD`, `TORSO`, `ARM_L`, and related
+roles) in `SkeletonGraph`; unlabeled assets remain explicitly geometric.
 
 `voxtart.reconstruct_ui` loads Blender-supported image files, creates a new
 non-destructive voxel asset, and stores source/calibration/report metadata,
-evidence, acceptance, depth-observation digest, and part-mask digest.
-The single-view and multi-view panels accept optional strict JSON files for
-per-pixel front/back depths and semantic part labels. They draw unresolved
-candidate cells as a purple wire overlay and report unresolved, conflicting,
-missing, extra, and color-mismatched pixels.
+evidence, acceptance, depth-observation digest, part-mask digest, and typed
+part assignments. The single-view and multi-view panels accept optional
+strict, size-bounded JSON files for per-pixel front/back depths and semantic
+part labels. Selecting `Review candidates` generates the deterministic policy
+set, selects the stable winner, persists every candidate report and the
+selected policy on the Blender object, and displays the review in the panel.
+They draw unresolved candidate cells as a purple wire overlay and report
+unresolved, conflicting, missing, extra, and color-mismatched pixels.
 
 The core remains offline-capable and testable with deterministic RGBA fixtures;
 file-format decoding is delegated to Blender's image loader at the adapter

@@ -16,12 +16,15 @@ from . import operators
 from .depth_observations import DepthObservation, PartMask, load_observation, load_part_mask
 from .image_intake import ImageFrame, PaletteIntakeSettings, extract_palette_frames, index_image
 from .reconstruct import AcceptancePolicy, ReconstructionSettings, reconstruct_views
+from .sprite_pipeline import generate_candidates, select_candidate
 
 
 RECONSTRUCTION_REPORT_PROPERTY = "voxtart_reconstruction_report"
 RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY = "voxtart_reconstruction_unresolved_cells"
 RECONSTRUCTION_EVIDENCE_PROPERTY = "voxtart_reconstruction_evidence"
 RECONSTRUCTION_ACCEPTANCE_PROPERTY = "voxtart_reconstruction_acceptance"
+RECONSTRUCTION_CANDIDATES_PROPERTY = "voxtart_reconstruction_candidates"
+RECONSTRUCTION_SELECTED_CANDIDATE_PROPERTY = "voxtart_reconstruction_selected_candidate"
 RECONSTRUCTION_OVERLAY_PROPERTY = "voxtart_reconstruction_overlay"
 RECONSTRUCTION_SOURCE_PROPERTY = "voxtart_reconstruction_source"
 RECONSTRUCTION_SOURCES_PROPERTY = "voxtart_reconstruction_sources"
@@ -57,6 +60,7 @@ _MODE_ITEMS = (
     ("LAYERED", "Layered", "Use the per-pixel front/back depth observation"),
     ("SHELL", "Shell", "Keep the configured number of front layers"),
     ("VOLUME", "Volume", "Keep every viable voxel in the calibrated depth slab"),
+    ("REVIEW", "Review candidates", "Generate and persist deterministic reconstruction candidates"),
 )
 _MATERIAL_ITEMS = (
     ("VISIBLE_ONLY", "Visible only", "Project visible source colors onto the frontmost voxels"),
@@ -167,7 +171,14 @@ def _view_dict(view) -> dict[str, object]:
     return value
 
 
-def _store_common_result(obj: bpy.types.Object, result) -> None:
+def _candidate_review_payload(candidates, selected) -> dict[str, object]:
+    return {
+        "selected": selected.name,
+        "candidates": [candidate.to_dict() for candidate in candidates],
+    }
+
+
+def _store_common_result(obj: bpy.types.Object, result, candidate_review=None) -> None:
     report = result.report.to_dict()
     obj[RECONSTRUCTION_REPORT_PROPERTY] = json.dumps(report, sort_keys=True, separators=(",", ":"))
     obj[RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY] = json.dumps(
@@ -185,6 +196,15 @@ def _store_common_result(obj: bpy.types.Object, result) -> None:
         sort_keys=True,
         separators=(",", ":"),
     )
+    if candidate_review is not None:
+        candidates, selected = candidate_review
+        payload = _candidate_review_payload(candidates, selected)
+        obj[RECONSTRUCTION_CANDIDATES_PROPERTY] = json.dumps(
+            payload["candidates"],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        obj[RECONSTRUCTION_SELECTED_CANDIDATE_PROPERTY] = selected.name
     operators._update_overlay(
         obj,
         result.asset,
@@ -194,9 +214,8 @@ def _store_common_result(obj: bpy.types.Object, result) -> None:
         (0.75, 0.2, 1.0, 1.0),
     )
 
-
-def _store_result(obj: bpy.types.Object, source: Path, view, result) -> None:
-    _store_common_result(obj, result)
+def _store_result(obj: bpy.types.Object, source: Path, view, result, candidate_review=None) -> None:
+    _store_common_result(obj, result, candidate_review)
     obj[RECONSTRUCTION_SOURCE_PROPERTY] = str(source)
     obj[RECONSTRUCTION_VIEW_PROPERTY] = json.dumps(
         _view_dict(view),
@@ -205,8 +224,8 @@ def _store_result(obj: bpy.types.Object, source: Path, view, result) -> None:
     )
 
 
-def _store_multiview_result(obj: bpy.types.Object, sources, views, result) -> None:
-    _store_common_result(obj, result)
+def _store_multiview_result(obj, sources, views, result, candidate_review=None) -> None:
+    _store_common_result(obj, result, candidate_review)
     obj[RECONSTRUCTION_SOURCES_PROPERTY] = json.dumps(
         [str(source) for source in sources],
         sort_keys=True,
@@ -231,6 +250,55 @@ def _report_from_object(obj):
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
+def _candidate_review_from_object(obj):
+    if obj is None:
+        return None
+    encoded = obj.get(RECONSTRUCTION_CANDIDATES_PROPERTY)
+    selected = obj.get(RECONSTRUCTION_SELECTED_CANDIDATE_PROPERTY)
+    if not isinstance(encoded, str) or not isinstance(selected, str):
+        return None
+    try:
+        candidates = json.loads(encoded)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(candidates, list):
+        return None
+    return candidates, selected
+
+
+def _draw_candidate_review(layout, obj) -> None:
+    review = _candidate_review_from_object(obj)
+    if review is None:
+        return
+    candidates, selected = review
+    box = layout.box()
+    box.label(text=f"Candidate review · selected: {selected}", icon="SORTALPHA")
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        report = candidate.get("report", {})
+        if not isinstance(report, dict):
+            report = {}
+        status = "accepted" if candidate.get("accepted") else "rejected"
+        box.label(
+            text=(
+                f"{candidate.get('name', '?')}: {status}; "
+                f"{report.get('occupied_voxels', 0)} voxels; "
+                f"{report.get('unresolved_voxels', 0)} unresolved"
+            )
+        )
+
+
+
+
+def _review_candidates(views, palette, source_provenance):
+    candidates = generate_candidates(
+        tuple(views),
+        palette,
+        acceptance=AcceptancePolicy(require_source_identities=True),
+        source_provenance=source_provenance,
+    )
+    return candidates, select_candidate(candidates)
 
 
 class VOXTART_OT_reconstruct_image(bpy.types.Operator):
@@ -302,22 +370,31 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
                 depth_observation=depth_observation,
                 part_mask=part_mask,
             )
-            result = reconstruct_views(
-                (view,),
-                indexed.palette,
-                ReconstructionSettings(
-                    mode=self.mode,
-                    shell_thickness=int(self.shell_thickness),
-                    material_policy=self.material_policy,
-                ),
-                source_provenance=indexed.provenance(),
-            )
+            candidate_review = None
+            if self.mode == "REVIEW":
+                candidate_review = _review_candidates(
+                    (view,),
+                    indexed.palette,
+                    indexed.provenance(),
+                )
+                result = candidate_review[1].result
+            else:
+                result = reconstruct_views(
+                    (view,),
+                    indexed.palette,
+                    ReconstructionSettings(
+                        mode=self.mode,
+                        shell_thickness=int(self.shell_thickness),
+                        material_policy=self.material_policy,
+                    ),
+                    source_provenance=indexed.provenance(),
+                )
             obj = operators._create_asset_object(
                 context,
                 f"VOXTART {frame.name} Reconstruction",
                 result.asset,
             )
-            _store_result(obj, source, view, result)
+            _store_result(obj, source, view, result, candidate_review)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -411,22 +488,31 @@ class VOXTART_OT_reconstruct_views(bpy.types.Operator):
                 raise ValueError(
                     f"calibrated views exceed the {MAX_RECONSTRUCTION_CELLS:,}-cell reconstruction budget"
                 )
-            result = reconstruct_views(
-                tuple(views),
-                palette,
-                ReconstructionSettings(
-                    mode=scene.voxtart_reconstruction_mode,
-                    shell_thickness=int(scene.voxtart_reconstruction_shell_thickness),
-                    material_policy=scene.voxtart_reconstruction_material_policy,
-                ),
-                source_provenance=source_provenance,
-            )
+            candidate_review = None
+            if scene.voxtart_reconstruction_mode == "REVIEW":
+                candidate_review = _review_candidates(
+                    tuple(views),
+                    palette,
+                    source_provenance,
+                )
+                result = candidate_review[1].result
+            else:
+                result = reconstruct_views(
+                    tuple(views),
+                    palette,
+                    ReconstructionSettings(
+                        mode=scene.voxtart_reconstruction_mode,
+                        shell_thickness=int(scene.voxtart_reconstruction_shell_thickness),
+                        material_policy=scene.voxtart_reconstruction_material_policy,
+                    ),
+                    source_provenance=source_provenance,
+                )
             obj = operators._create_asset_object(
                 context,
                 "VOXTART Multi-view Reconstruction",
                 result.asset,
             )
-            _store_multiview_result(obj, sources, views, result)
+            _store_multiview_result(obj, sources, views, result, candidate_review)
         except (OSError, RuntimeError, TypeError, ValueError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -498,6 +584,7 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
         report_box.label(text=f"Missing pixels: {report.get('missing_pixels', 0)}")
         report_box.label(text=f"Extra pixels: {report.get('extra_pixels', 0)}")
         report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
+        _draw_candidate_review(layout, context.active_object)
 
 
 class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
@@ -548,6 +635,7 @@ class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
         report_box.label(text=f"Missing pixels: {report.get('missing_pixels', 0)}")
         report_box.label(text=f"Extra pixels: {report.get('extra_pixels', 0)}")
         report_box.label(text=f"Color mismatches: {report.get('color_mismatches', 0)}")
+        _draw_candidate_review(layout, context.active_object)
 
 
 
@@ -739,8 +827,10 @@ def unregister() -> None:
 
 __all__ = [
     "RECONSTRUCTION_ACCEPTANCE_PROPERTY",
+    "RECONSTRUCTION_CANDIDATES_PROPERTY",
     "RECONSTRUCTION_EVIDENCE_PROPERTY",
     "RECONSTRUCTION_REPORT_PROPERTY",
+    "RECONSTRUCTION_SELECTED_CANDIDATE_PROPERTY",
     "RECONSTRUCTION_SOURCE_PROPERTY",
     "RECONSTRUCTION_SOURCES_PROPERTY",
     "RECONSTRUCTION_UNRESOLVED_CELLS_PROPERTY",

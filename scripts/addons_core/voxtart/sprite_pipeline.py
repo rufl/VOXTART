@@ -11,8 +11,14 @@ from typing import Mapping, Sequence
 
 from .depth_observations import DepthObservation, PartMask
 from .geometry_skeleton import SkeletonGraph, derive_skeleton
-from .guide_prior import GuidePriorResult, apply_guide_prior
+from .guide_prior import (
+    GuidePriorResult,
+    MeshGuide,
+    apply_guide_prior,
+    voxelize_mesh_guide,
+)
 from .image_intake import IndexedImage
+from .provenance import sha256_json
 from .reconstruct import (
     AcceptanceDecision,
     AcceptancePolicy,
@@ -80,6 +86,9 @@ class SpriteConversionSettings:
     symmetry_axis: str | None = None
     symmetry_plane: int = 0
     guide_mode: str = "ALLOW_HIDDEN"
+    guide_grid_size: float = 1.0
+    guide_voxelizer_mode: str = "SOLID"
+    guide_shell_thickness: int = 1
     max_skeleton_nodes: int = 256
     acceptance: AcceptancePolicy = AcceptancePolicy(require_source_identities=True)
 
@@ -141,7 +150,9 @@ def generate_candidates(
             candidate_settings,
             source_provenance=source_provenance,
         )
-        digest = result.asset.content_digest
+        payload = result.asset.to_dict()
+        payload.pop("provenance", None)
+        digest = sha256_json(payload)
         if digest in seen:
             continue
         seen.add(digest)
@@ -168,13 +179,15 @@ def convert_sprite(
     settings: SpriteConversionSettings = SpriteConversionSettings(),
     depth_observation: DepthObservation | None = None,
     part_mask: PartMask | None = None,
-    guide: VoxelAsset | None = None,
+    guide: VoxelAsset | MeshGuide | None = None,
     source_provenance: Mapping[str, str] | None = None,
 ) -> SpriteConversionResult:
-    """Run intake, constrained reconstruction, priors, and skeleton suggestion."""
+    """Run intake, constrained reconstruction, mesh/template priors, and skeleton suggestion."""
 
     if not isinstance(image, IndexedImage):
         raise TypeError("sprite conversion expects an IndexedImage")
+    if guide is not None and not isinstance(guide, (VoxelAsset, MeshGuide)):
+        raise TypeError("sprite conversion guide must be a VoxelAsset or MeshGuide")
     provenance = image.provenance() if source_provenance is None else source_provenance
     view = _view(image, settings, depth_observation=depth_observation, part_mask=part_mask)
     reconstruction = reconstruct_views(
@@ -202,6 +215,16 @@ def convert_sprite(
         asset = symmetry.asset
     guide_result = None
     if guide is not None:
+        guide_asset = (
+            voxelize_mesh_guide(
+                guide,
+                grid_size=settings.guide_grid_size,
+                mode=settings.guide_voxelizer_mode,
+                shell_thickness=settings.guide_shell_thickness,
+            )
+            if isinstance(guide, MeshGuide)
+            else guide
+        )
         guide_result = apply_guide_prior(
             reconstruction if asset is reconstruction.asset else ReconstructionResult(
                 asset=asset,
@@ -210,7 +233,7 @@ def convert_sprite(
                 evidence=reconstruction.evidence,
                 source_identities=reconstruction.source_identities,
             ),
-            guide,
+            guide_asset,
             mode=settings.guide_mode,
         )
         asset = guide_result.asset

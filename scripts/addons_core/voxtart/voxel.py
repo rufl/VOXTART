@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
@@ -75,9 +76,43 @@ class VoxelAsset:
     grid_size: float = 1.0
     palette: list[Color] = field(default_factory=lambda: [(0.8, 0.8, 0.8, 1.0)])
     voxels: dict[Cell, int] = field(default_factory=dict)
+    part_assignments: dict[Cell, str] = field(default_factory=dict)
     sockets: list[VoxelSocket] = field(default_factory=list)
     provenance: dict[str, str] = field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
+
+    @staticmethod
+    def _normalize_part_assignments(value: Any) -> dict[Cell, str]:
+        if value is None:
+            return {}
+        if isinstance(value, Mapping):
+            records = value.items()
+        else:
+            records = []
+            for item in value:
+                if not isinstance(item, (list, tuple)):
+                    raise ValueError(f"invalid voxel part assignment: {item!r}")
+                if len(item) == 4:
+                    records.append((item[:3], item[3]))
+                elif len(item) == 2:
+                    records.append((item[0], item[1]))
+                else:
+                    raise ValueError(f"invalid voxel part assignment: {item!r}")
+        normalized: dict[Cell, str] = {}
+        for cell, label in records:
+            normalized_cell = _cell(cell)
+            if not isinstance(label, str) or not label.strip():
+                raise ValueError(f"voxel part labels must be non-empty strings: {label!r}")
+            normalized[normalized_cell] = label.strip()
+        return normalized
+
+    @staticmethod
+    def _part_payload(assignments: Mapping[Cell, str]) -> str:
+        return json.dumps(
+            [[list(cell), label] for cell, label in sorted(assignments.items())],
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
     def __post_init__(self) -> None:
         if isinstance(self.schema_version, bool) or not isinstance(self.schema_version, int) or self.schema_version != SCHEMA_VERSION:
@@ -93,7 +128,22 @@ class VoxelAsset:
         if not self.palette:
             raise ValueError("voxel assets require at least one palette entry")
         self.voxels = {_cell(cell): self._palette_index(index) for cell, index in self.voxels.items()}
-        self.provenance = {str(key): str(value) for key, value in self.provenance.items()}
+        provenance = {str(key): str(value) for key, value in self.provenance.items()}
+        assignments = self._normalize_part_assignments(self.part_assignments)
+        encoded_assignments = provenance.get("part_assignments")
+        if not assignments and encoded_assignments:
+            try:
+                assignments = self._normalize_part_assignments(json.loads(encoded_assignments))
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ValueError("provenance part_assignments must be valid JSON") from error
+        self.part_assignments = {
+            cell: label for cell, label in assignments.items() if cell in self.voxels
+        }
+        if self.part_assignments:
+            provenance["part_assignments"] = self._part_payload(self.part_assignments)
+        else:
+            provenance.pop("part_assignments", None)
+        self.provenance = provenance
 
     def _palette_index(self, index: int) -> int:
         if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(self.palette):
@@ -106,11 +156,33 @@ class VoxelAsset:
         normalized = _color(color)
         self.palette.append(normalized)
         return len(self.palette) - 1
+
     def set_voxel(self, cell: Iterable[int], palette_index: int = 0) -> None:
         self.voxels[_cell(cell)] = self._palette_index(palette_index)
 
+    def set_part(self, cell: Iterable[int], label: str) -> None:
+        """Assign a semantic part label to an occupied voxel."""
+
+        normalized_cell = _cell(cell)
+        if normalized_cell not in self.voxels:
+            raise KeyError(f"cannot assign a part to an unoccupied voxel: {normalized_cell!r}")
+        if not isinstance(label, str) or not label.strip():
+            raise ValueError("voxel part labels must be non-empty strings")
+        self.part_assignments[normalized_cell] = label.strip()
+        self.provenance["part_assignments"] = self._part_payload(self.part_assignments)
+
+    def remove_part(self, cell: Iterable[int]) -> None:
+        normalized_cell = _cell(cell)
+        self.part_assignments.pop(normalized_cell, None)
+        if self.part_assignments:
+            self.provenance["part_assignments"] = self._part_payload(self.part_assignments)
+        else:
+            self.provenance.pop("part_assignments", None)
+
     def remove_voxel(self, cell: Iterable[int]) -> None:
-        self.voxels.pop(_cell(cell), None)
+        normalized_cell = _cell(cell)
+        self.voxels.pop(normalized_cell, None)
+        self.remove_part(normalized_cell)
 
     def get_voxel(self, cell: Iterable[int]) -> int | None:
         return self.voxels.get(_cell(cell))
@@ -147,6 +219,9 @@ class VoxelAsset:
             "grid_size": self.grid_size,
             "palette": [list(color) for color in self.palette],
             "voxels": [[*cell, palette_index] for cell, palette_index in self.iter_voxels()],
+            "part_assignments": [
+                [*cell, label] for cell, label in sorted(self.part_assignments.items())
+            ],
             "sockets": [socket.to_dict() for socket in self.sockets],
             "provenance": dict(sorted(self.provenance.items())),
         }
@@ -182,6 +257,7 @@ class VoxelAsset:
             grid_size=data["grid_size"],
             palette=data["palette"],
             voxels=voxels,
+            part_assignments=data.get("part_assignments"),
             sockets=sockets,
             provenance=data.get("provenance", {}),
             schema_version=SCHEMA_VERSION,
