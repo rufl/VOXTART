@@ -51,6 +51,15 @@ PACKAGE_ASSEMBLER = ROOT / "tools" / "assemble_voxtart_package.py"
 REGRESSION_BASELINE = {"core_tests": 109, "blender_tests": 29, "e2e_tests": 7}
 
 
+def _blender_background_command(*, factory_startup: bool) -> list[str]:
+    command = [str(BLENDER), "--background"]
+    if factory_startup:
+        command.append("--factory-startup")
+    if os.name == "nt":
+        command.append("--debug-gpu-force-workarounds")
+    return command
+
+
 def _run(
     name: str,
     command: list[str],
@@ -217,7 +226,11 @@ def _run_persistence_probe() -> None:
         environment["VOXTART_PERSISTENCE_PHASE"] = "write"
         _run(
             "cross-process persistence write",
-            [str(BLENDER), "--background", "--factory-startup", "--python", str(PERSISTENCE_PROBE)],
+            [
+                *_blender_background_command(factory_startup=True),
+                "--python",
+                str(PERSISTENCE_PROBE),
+            ],
             env=environment,
         )
         write_payload = json.loads(marker.read_text(encoding="utf-8"))
@@ -232,8 +245,7 @@ def _run_persistence_probe() -> None:
         _run(
             "cross-process persistence reopen",
             [
-                str(BLENDER),
-                "--background",
+                *_blender_background_command(factory_startup=False),
                 "--python-expr",
                 addon_bootstrap,
                 str(blend_path),
@@ -416,12 +428,20 @@ def main() -> int:
     _assert_test_baseline("core", core_output, REGRESSION_BASELINE["core_tests"])
     blender_output = _run(
         "Blender regression",
-        [str(BLENDER), "--background", "--factory-startup", "--python", str(BLENDER_TEST)],
+        [
+            *_blender_background_command(factory_startup=True),
+            "--python",
+            str(BLENDER_TEST),
+        ],
     )
     _assert_test_baseline("Blender", blender_output, REGRESSION_BASELINE["blender_tests"])
     e2e_output = _run(
         "Blender end-to-end editor matrix",
-        [str(BLENDER), "--background", "--factory-startup", "--python", str(BLENDER_E2E_TEST)],
+        [
+            *_blender_background_command(factory_startup=True),
+            "--python",
+            str(BLENDER_E2E_TEST),
+        ],
     )
     _assert_test_baseline("Blender E2E", e2e_output, REGRESSION_BASELINE["e2e_tests"])
     _write_baseline_artifact()
