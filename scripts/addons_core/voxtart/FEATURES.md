@@ -705,8 +705,8 @@ Blender-native tests, and 7 additional end-to-end Blender tests. The E2E
 performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
 The latest local coverage probes report 7,955/7,955 core lines (100.00%) and
-6,318/14,136 Blender-facing lines (44.69%). The latest headless performance
-probe reported 32³ rebuild in 582.33 ms and selection in 65.22 ms on this
+6,452/14,335 Blender-facing lines (45.01%). The latest headless performance
+probe reported 32³ rebuild in 584.15 ms and selection in 65.75 ms on this
 workstation.
 The CI core-coverage step enforces the 100.0% deterministic-line threshold;
 coverage regressions fail the Linux core job instead of becoming upload-only
