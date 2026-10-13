@@ -186,14 +186,14 @@ jobs:
       - name: Prepare Windows evidence directory
         shell: pwsh
         run: New-Item -ItemType Directory -Path (Join-Path $env:GITHUB_WORKSPACE "voxtart-e2e-artifacts") -Force | Out-Null
-      - name: Run complete Windows E2E matrix
+      - name: Run Windows headless E2E matrix
         shell: cmd
         env:
           VOXTART_E2E_ARTIFACT_DIR: ${{ github.workspace }}\voxtart-e2e-artifacts
           VOXTART_PERF_OUTPUT: ${{ github.workspace }}\voxtart-e2e-artifacts\performance.json
-          # GitHub-hosted Windows has no usable Workbench GPU context.
+          # Hosted Windows has no interactive desktop or usable Workbench GPU context.
           VOXTART_SPRITESHEET_CPU: "1"
-        run: call tools\run_voxtart_e2e.cmd > "voxtart-e2e-artifacts\e2e.log" 2>&1
+        run: call tools\run_voxtart_e2e.cmd --skip-gui > "voxtart-e2e-artifacts\e2e.log" 2>&1
       - name: Verify Windows E2E evidence
         if: always()
         shell: pwsh
@@ -202,8 +202,7 @@ jobs:
             "e2e.log",
             "performance.json",
             "regression-baseline.json",
-            "voxtart_gui.json",
-            "voxtart_gui.png"
+            "gui-skipped.txt"
           )
           foreach ($name in $required) {
             $path = Join-Path $env:GITHUB_WORKSPACE "voxtart-e2e-artifacts\$name"

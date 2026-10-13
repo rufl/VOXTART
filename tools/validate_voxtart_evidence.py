@@ -117,8 +117,6 @@ def _validate_windows(directory: Path) -> None:
         "e2e.log",
         "performance.json",
         "regression-baseline.json",
-        "voxtart_gui.json",
-        "voxtart_gui.png",
     )
     for name in required:
         path = directory / name
@@ -139,12 +137,30 @@ def _validate_windows(directory: Path) -> None:
     _positive_number(performance.get("rebuild_ms"), "Windows rebuild timing must be positive")
     _positive_number(performance.get("selection_ms"), "Windows selection timing must be positive")
 
-    _validate_png(directory / "voxtart_gui.png")
-    gui = _read_json(directory / "voxtart_gui.json")
-    _require(gui.get("ok") is True, "Windows GUI evidence is not successful")
+    gui_skipped = directory / "gui-skipped.txt"
+    if gui_skipped.is_file():
+        reason = gui_skipped.read_text(encoding="utf-8").strip()
+        _require(
+            reason == "Visible GUI probe skipped: host has no interactive desktop.",
+            "Windows GUI skip evidence has an unexpected reason",
+        )
+    else:
+        gui_png = directory / "voxtart_gui.png"
+        gui_json = directory / "voxtart_gui.json"
+        _require(
+            gui_png.is_file() and gui_png.stat().st_size > 0,
+            f"missing or empty Windows artifact: {gui_png}",
+        )
+        _require(
+            gui_json.is_file() and gui_json.stat().st_size > 0,
+            f"missing or empty Windows artifact: {gui_json}",
+        )
+        _validate_png(gui_png)
+        gui = _read_json(gui_json)
+        _require(gui.get("ok") is True, "Windows GUI evidence is not successful")
+
     log = (directory / "e2e.log").read_text(encoding="utf-8", errors="replace")
     _require("VOXTART_E2E_OK" in log, "Windows E2E log is missing its success marker")
-
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)

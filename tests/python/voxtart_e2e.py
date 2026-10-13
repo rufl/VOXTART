@@ -18,6 +18,8 @@ Run from the repository root with::
     python tests/python/voxtart_e2e.py
 
 Use ``--skip-launcher`` only when the compiled ``VoxTart.exe`` is unavailable.
+Use ``--skip-gui`` only on hosts without an interactive desktop; the run writes
+an explicit evidence marker instead of silently dropping the GUI probe.
 The default run intentionally fails instead of silently narrowing coverage.
 """
 
@@ -104,17 +106,32 @@ def _write_baseline_artifact() -> None:
         json.dumps({"schema": 1, **REGRESSION_BASELINE}, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-def _assert_paths(skip_launcher: bool) -> None:
+
+
+def _write_gui_skipped_artifact() -> None:
+    artifact_root = os.environ.get("VOXTART_E2E_ARTIFACT_DIR")
+    if not artifact_root:
+        return
+    target = Path(artifact_root) / "gui-skipped.txt"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        "Visible GUI probe skipped: host has no interactive desktop.\n",
+        encoding="utf-8",
+    )
+
+
+def _assert_paths(skip_launcher: bool, skip_gui: bool) -> None:
     required = [
         BLENDER,
         CORE_TEST,
         BLENDER_TEST,
         BLENDER_E2E_TEST,
         PERSISTENCE_PROBE,
-        GUI_PROBE,
     ]
     if not skip_launcher:
         required.extend((RUNNER, LAUNCHER, LAUNCHER_PROBE, PACKAGE_ASSEMBLER))
+        if not skip_gui:
+            required.append(GUI_PROBE)
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError("Missing E2E prerequisites:\n" + "\n".join(missing))
@@ -421,8 +438,13 @@ def main() -> int:
         action="store_true",
         help="skip launcher-dependent background and visible GUI checks",
     )
+    parser.add_argument(
+        "--skip-gui",
+        action="store_true",
+        help="skip the visible GUI probe on hosts without an interactive desktop",
+    )
     args = parser.parse_args()
-    _assert_paths(args.skip_launcher)
+    _assert_paths(args.skip_launcher, args.skip_gui)
 
     core_output = _run("core regression", [sys.executable, str(CORE_TEST)])
     _assert_test_baseline("core", core_output, REGRESSION_BASELINE["core_tests"])
@@ -449,7 +471,11 @@ def main() -> int:
     if not args.skip_launcher:
         _run_launcher_probe()
         _run_package_probe()
-        _run_gui_probe()
+        if args.skip_gui:
+            _write_gui_skipped_artifact()
+            print("VOXTART_GUI_PROBE_SKIPPED host_has_no_interactive_desktop=true")
+        else:
+            _run_gui_probe()
     print("\nVOXTART_E2E_OK")
     return 0
 
