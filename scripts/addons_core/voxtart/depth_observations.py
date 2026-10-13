@@ -14,11 +14,13 @@ from typing import Any, Mapping, Sequence
 
 from .provenance import SourceIdentity, sha256_json
 
+
+MAX_OBSERVATION_PIXELS = 1_000_000
+MAX_OBSERVATION_BYTES = 64 * 1024 * 1024
+MAX_DEPTH_VALUE = 4_000_000
 DepthInterval = tuple[int, int]
 DepthPixel = int | None
 PartPixel = str | None
-
-
 def _rows(value: Sequence[Sequence[Any]], name: str) -> tuple[tuple[Any, ...], ...]:
     result = tuple(tuple(row) for row in value)
     if not result or not result[0]:
@@ -26,6 +28,10 @@ def _rows(value: Sequence[Sequence[Any]], name: str) -> tuple[tuple[Any, ...], .
     width = len(result[0])
     if any(len(row) != width for row in result):
         raise ValueError(f"{name} rows must have equal widths")
+    if len(result) * width > MAX_OBSERVATION_PIXELS:
+        raise ValueError(
+            f"{name} exceeds the {MAX_OBSERVATION_PIXELS:,}-pixel observation limit"
+        )
     return result
 
 
@@ -64,12 +70,24 @@ class DepthObservation:
             normalized_back_row: list[DepthPixel] = []
             for column_index, value in enumerate(row):
                 if value is not None:
-                    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                        raise ValueError("depth values must be non-negative integers or None")
+                    if (
+                        isinstance(value, bool)
+                        or not isinstance(value, int)
+                        or not 0 <= value <= MAX_DEPTH_VALUE
+                    ):
+                        raise ValueError(
+                            f"depth values must be integers in [0, {MAX_DEPTH_VALUE:,}] or None"
+                        )
                 back_value = None if back is None else back[row_index][column_index]
                 if back_value is not None:
-                    if isinstance(back_value, bool) or not isinstance(back_value, int) or back_value < 0:
-                        raise ValueError("depth values must be non-negative integers or None")
+                    if (
+                        isinstance(back_value, bool)
+                        or not isinstance(back_value, int)
+                        or not 0 <= back_value <= MAX_DEPTH_VALUE
+                    ):
+                        raise ValueError(
+                            f"depth values must be integers in [0, {MAX_DEPTH_VALUE:,}] or None"
+                        )
                 if value is None and back_value is not None:
                     raise ValueError("a back depth requires a front depth")
                 if value is not None and back_value is not None and back_value < value:
@@ -251,24 +269,37 @@ class PartMask:
         return sha256_json(self.to_dict())
 
 
-def load_observation(path: str | Path) -> DepthObservation:
-    """Load a strict JSON depth observation without accepting executable data."""
+def _load_json(path: str | Path) -> Mapping[str, Any]:
+    candidate = Path(path)
+    if candidate.stat().st_size > MAX_OBSERVATION_BYTES:
+        raise ValueError(
+            f"observation file exceeds the {MAX_OBSERVATION_BYTES:,}-byte limit"
+        )
+    value = json.loads(candidate.read_text(encoding="utf-8"))
+    if not isinstance(value, Mapping):
+        raise ValueError("observation JSON root must be an object")
+    return value
 
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
-    return DepthObservation.from_dict(value)
+
+def load_observation(path: str | Path) -> DepthObservation:
+    """Load a strict, size-bounded JSON depth observation."""
+
+    return DepthObservation.from_dict(_load_json(path))
 
 
 def load_part_mask(path: str | Path) -> PartMask:
-    """Load a strict JSON part mask without accepting executable data."""
+    """Load a strict, size-bounded JSON part mask."""
 
-    value = json.loads(Path(path).read_text(encoding="utf-8"))
-    return PartMask.from_dict(value)
+    return PartMask.from_dict(_load_json(path))
 
 
 __all__ = [
     "DepthInterval",
     "DepthObservation",
     "DepthPixel",
+    "MAX_DEPTH_VALUE",
+    "MAX_OBSERVATION_BYTES",
+    "MAX_OBSERVATION_PIXELS",
     "PartMask",
     "PartPixel",
     "load_observation",

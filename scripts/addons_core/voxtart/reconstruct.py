@@ -570,6 +570,7 @@ def reconstruct_views(
     asset = VoxelAsset(
         palette=list(normalized_palette),
         voxels=occupied,
+        part_assignments=part_assignments,
         provenance=provenance,
     )
     visible_material_conflicts = 0

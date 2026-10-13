@@ -21,7 +21,35 @@ _NEIGHBORS = (
     (0, 0, -1),
     (0, 0, 1),
 )
-_METHOD = "semantic6/manhattan6-empty/deepest-root/geodesic-farthest/coverage/v1"
+_METHOD = "geometry6/manhattan6-empty/deepest-root/geodesic-farthest/coverage/v2"
+_ROLE_ALIASES = {
+    "ROOT": "ROOT",
+    "PELVIS": "PELVIS",
+    "HIP": "PELVIS",
+    "TORSO": "TORSO",
+    "BODY": "TORSO",
+    "CHEST": "TORSO",
+    "NECK": "NECK",
+    "HEAD": "HEAD",
+    "ARM_L": "ARM_L",
+    "LEFT_ARM": "ARM_L",
+    "ARM_LEFT": "ARM_L",
+    "ARM_R": "ARM_R",
+    "RIGHT_ARM": "ARM_R",
+    "ARM_RIGHT": "ARM_R",
+    "HAND_L": "HAND_L",
+    "LEFT_HAND": "HAND_L",
+    "HAND_R": "HAND_R",
+    "RIGHT_HAND": "HAND_R",
+    "LEG_L": "LEG_L",
+    "LEFT_LEG": "LEG_L",
+    "LEG_R": "LEG_R",
+    "RIGHT_LEG": "LEG_R",
+    "FOOT_L": "FOOT_L",
+    "LEFT_FOOT": "FOOT_L",
+    "FOOT_R": "FOOT_R",
+    "RIGHT_FOOT": "FOOT_R",
+}
 
 
 def _neighbors(cell: Cell, occupied: set[Cell]) -> tuple[Cell, ...]:
@@ -59,6 +87,31 @@ def _root_distances(root: Cell, occupied: set[Cell]) -> tuple[dict[Cell, int], d
     return distances, parents
 
 
+def _semantic_roles(asset: VoxelAsset, selected: set[Cell]) -> tuple[tuple[str, Cell], ...]:
+    by_role: dict[str, list[Cell]] = {}
+    for cell, label in asset.part_assignments.items():
+        normalized = str(label).strip().upper().replace("-", "_").replace(" ", "_")
+        role = _ROLE_ALIASES.get(normalized)
+        if role is not None:
+            by_role.setdefault(role, []).append(cell)
+    roles: list[tuple[str, Cell]] = []
+    for role, cells in sorted(by_role.items()):
+        selected_cells = [cell for cell in cells if cell in selected]
+        candidates = selected_cells or sorted(selected)
+        if not candidates:
+            continue
+        centroid = tuple(sum(cell[axis] for cell in cells) / len(cells) for axis in range(3))
+        chosen = min(
+            candidates,
+            key=lambda cell: (
+                sum((cell[axis] - centroid[axis]) ** 2 for axis in range(3)),
+                cell,
+            ),
+        )
+        roles.append((role, chosen))
+    return tuple(roles)
+
+
 @dataclass(frozen=True, slots=True)
 class SkeletonNode:
     cell: Cell
@@ -78,14 +131,28 @@ class SkeletonNode:
 @dataclass(frozen=True, slots=True)
 class SkeletonGraph:
     nodes: tuple[SkeletonNode, ...]
+    semantic_roles: tuple[tuple[str, Cell], ...] = ()
+    semantic_source: str = "GEOMETRIC"
     method: str = _METHOD
 
+    @property
+    def role_by_name(self) -> dict[str, Cell]:
+        return dict(self.semantic_roles)
+
     def to_dict(self) -> dict[str, object]:
-        return {"method": self.method, "nodes": [node.to_dict() for node in self.nodes]}
+        return {
+            "method": self.method,
+            "nodes": [node.to_dict() for node in self.nodes],
+            "semantic_source": self.semantic_source,
+            "semantic_roles": [
+                {"role": role, "cell": list(cell)}
+                for role, cell in self.semantic_roles
+            ],
+        }
 
 
 def derive_skeleton(asset: VoxelAsset, *, max_nodes: int = 256) -> SkeletonGraph:
-    """Derive a deterministic geometric graph; it makes no anatomy claim."""
+    """Derive geometry nodes and optional roles from typed part assignments."""
 
     if not isinstance(asset, VoxelAsset):
         raise TypeError("skeleton derivation expects a VoxelAsset")
@@ -125,7 +192,14 @@ def derive_skeleton(asset: VoxelAsset, *, max_nodes: int = 256) -> SkeletonGraph
                 geodesic_distance=geodesic.get(cell, 0),
             )
         )
-    return SkeletonGraph(tuple(nodes))
+    roles = _semantic_roles(asset, selected)
+    return SkeletonGraph(
+        tuple(nodes),
+        semantic_roles=roles,
+        semantic_source="PART_ASSIGNMENTS" if roles else "GEOMETRIC",
+    )
+
+
 
 
 __all__ = ["SkeletonGraph", "SkeletonNode", "derive_skeleton"]

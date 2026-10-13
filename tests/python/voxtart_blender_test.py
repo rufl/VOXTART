@@ -1041,7 +1041,7 @@ class BlenderRegistrationTest(unittest.TestCase):
                 depth=2,
                 background_mode="ALPHA",
                 max_colors=8,
-                mode="LAYERED",
+                mode="REVIEW",
             )
             self.assertEqual(result, {"FINISHED"})
             obj = bpy.context.active_object
@@ -1066,6 +1066,9 @@ class BlenderRegistrationTest(unittest.TestCase):
             )
             self.assertTrue(json.loads(obj[reconstruct_ui.RECONSTRUCTION_EVIDENCE_PROPERTY])["cells"])
             self.assertTrue(json.loads(obj[reconstruct_ui.RECONSTRUCTION_ACCEPTANCE_PROPERTY])["accepted"])
+            self.assertEqual(obj[reconstruct_ui.RECONSTRUCTION_SELECTED_CANDIDATE_PROPERTY], "LAYERED")
+            candidates = json.loads(obj[reconstruct_ui.RECONSTRUCTION_CANDIDATES_PROPERTY])
+            self.assertEqual({candidate["name"] for candidate in candidates}, {"SURFACE", "LAYERED"})
             overlay_name = obj[reconstruct_ui.RECONSTRUCTION_OVERLAY_PROPERTY]
             self.assertIn(overlay_name, bpy.data.objects)
             self.assertTrue(bpy.data.objects[overlay_name].hide_viewport)

@@ -57,6 +57,7 @@ def apply_missing_only(
         grid_size=asset.grid_size,
         palette=list(asset.palette),
         voxels=dict(asset.voxels),
+        part_assignments=dict(asset.part_assignments),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
     )
@@ -73,9 +74,15 @@ def apply_missing_only(
         existing = result.voxels.get(mirrored)
         if existing is None:
             result.voxels[mirrored] = palette_index
+            if cell in asset.part_assignments:
+                result.part_assignments[mirrored] = asset.part_assignments[cell]
             added.append(mirrored)
         elif existing != palette_index:
             conflicts.append(mirrored)
+    if result.part_assignments:
+        result.provenance["part_assignments"] = VoxelAsset._part_payload(result.part_assignments)
+    else:
+        result.provenance.pop("part_assignments", None)
     result.provenance.update({
         "symmetry_axis": str(axis).upper(),
         "symmetry_plane": str(plane),

@@ -45,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 105
+EXPECTED_TESTS = 109
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -158,6 +158,21 @@ class VoxelCoreTest(unittest.TestCase):
         self.assertEqual(restored.voxels, asset.voxels)
         self.assertEqual(restored.provenance, {"test": "true"})
         self.assertEqual(len(voxel.VoxelAsset.box(2).voxels), 8)
+
+    def test_typed_part_assignments_round_trip_with_asset(self):
+        asset = make_asset({(0, 0, 0): 0, (1, 0, 0): 1})
+        asset.set_part((0, 0, 0), "TORSO")
+        asset.set_part((1, 0, 0), "HEAD")
+        restored = voxel.VoxelAsset.from_dict(asset.to_dict())
+        self.assertEqual(restored.part_assignments, asset.part_assignments)
+        self.assertEqual(json.loads(restored.provenance["part_assignments"]), [
+            [[0, 0, 0], "TORSO"],
+            [[1, 0, 0], "HEAD"],
+        ])
+        asset.remove_voxel((1, 0, 0))
+        self.assertNotIn((1, 0, 0), asset.part_assignments)
+        with self.assertRaises(KeyError):
+            asset.set_part((2, 0, 0), "HAND_L")
 
     def test_invalid_core_values(self):
         with self.assertRaises(ValueError):
@@ -4152,6 +4167,7 @@ class Sprite2DEndToEndTest(unittest.TestCase):
             json.loads(result.asset.provenance["part_assignments"]),
             [[[0, 0, 0], "arm"]],
         )
+        self.assertEqual(result.asset.part_assignments, {(0, 0, 0): "arm"})
         self.assertEqual(result.source_identities, (source,))
         self.assertEqual(result.asset.provenance["part_mask_digests"], part_mask.digest)
 
@@ -4179,6 +4195,44 @@ class Sprite2DEndToEndTest(unittest.TestCase):
         self.assertEqual(guided.rejected_free_cells, ((0, 0, 0),))
         self.assertEqual(guided.added_cells, ((2, 0, 0),))
 
+    def test_mesh_guide_voxelization_and_semantic_roles_are_typed(self):
+        vertices = (
+            (0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0),
+            (2.0, 2.0, 0.0),
+            (0.0, 2.0, 0.0),
+            (0.0, 0.0, 2.0),
+            (2.0, 0.0, 2.0),
+            (2.0, 2.0, 2.0),
+            (0.0, 2.0, 2.0),
+        )
+        faces = (
+            (0, 1, 2, 3),
+            (4, 7, 6, 5),
+            (0, 4, 5, 1),
+            (1, 5, 6, 2),
+            (2, 6, 7, 3),
+            (4, 0, 3, 7),
+        )
+        mesh = guide_prior.MeshGuide(vertices, faces)
+        guide = guide_prior.voxelize_mesh_guide(mesh, grid_size=1.0)
+        self.assertEqual(len(guide.voxels), 8)
+        self.assertEqual(guide.provenance["guide_source"], "MESH")
+        semantic = make_asset({(x, 0, 0): 0 for x in range(5)})
+        semantic.set_part((0, 0, 0), "HEAD")
+        semantic.set_part((4, 0, 0), "LEFT_ARM")
+        skeleton = geometry_skeleton.derive_skeleton(semantic)
+        self.assertEqual(skeleton.semantic_source, "PART_ASSIGNMENTS")
+        self.assertEqual(skeleton.role_by_name["HEAD"], (0, 0, 0))
+        self.assertEqual(skeleton.role_by_name["ARM_L"], (4, 0, 0))
+
+    def test_depth_observation_limits_are_enforced_before_reconstruction(self):
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows(
+                "too-deep",
+                [[depth_observations.MAX_DEPTH_VALUE + 1]],
+            )
+
     def test_candidate_review_and_skeleton_are_deterministic(self):
         observation = depth_observations.DepthObservation.from_rows("layers", [[0]], back=[[1]])
         view = reconstruct.OrthographicView.from_rows(
@@ -4190,7 +4244,7 @@ class Sprite2DEndToEndTest(unittest.TestCase):
         candidates = sprite_pipeline.generate_candidates((view,), PALETTE[:1])
         self.assertEqual(
             tuple(candidate.name for candidate in candidates),
-            ("SURFACE", "LAYERED", "SHELL", "VOLUME"),
+            ("SURFACE", "LAYERED"),
         )
         self.assertEqual(sprite_pipeline.select_candidate(candidates).name, "LAYERED")
         asset = make_asset({(x, 0, 0): 0 for x in range(5)})
@@ -4244,7 +4298,7 @@ class Sprite2DEndToEndTest(unittest.TestCase):
         self.assertEqual(set(conversion.reconstruction.asset.voxels), {(0, 0, 0), (0, 0, 1)})
         self.assertEqual(conversion.guide.added_cells, ((0, 0, 2),))
         self.assertTrue(conversion.skeleton.nodes)
-        self.assertEqual(len(conversion.candidates), 4)
+        self.assertEqual(len(conversion.candidates), 2)
 
     def test_sprite_contracts_reject_invalid_sequence_and_limits(self):
         indexed = image_intake.IndexedImage(
@@ -4266,6 +4320,239 @@ class Sprite2DEndToEndTest(unittest.TestCase):
             geometry_skeleton.derive_skeleton(make_asset(), max_nodes=0)
         with self.assertRaises(ValueError):
             sprite_pipeline.SpriteConversionSettings(mode="INVALID").reconstruction()
+
+    def test_completion_contract_edges(self):
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("", [[0]])
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("empty", [])
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("ragged", [[0], [0, 1]])
+        with self.assertRaises(ValueError):
+            depth_observations._rows(([None] * (depth_observations.MAX_OBSERVATION_PIXELS + 1),), "large")
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("bad-confidence", [[0]], confidence=[[2.0]])
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("bad-back-shape", [[0]], back=[[0, 1]])
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows(
+                "bad-back-value",
+                [[0]],
+                back=[[depth_observations.MAX_DEPTH_VALUE + 1]],
+            )
+        asset_none = voxel.VoxelAsset(part_assignments=None, voxels={(0, 0, 0): 0}, palette=PALETTE[:1])
+        self.assertEqual(asset_none.part_assignments, {})
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("back-without-front", [[None]], back=[[0]])
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("confidence-shape", [[0]], confidence=[[0.5, 0.5]])
+        with self.assertRaises(TypeError):
+            depth_observations.DepthObservation.from_rows("bad-source", [[0]], source_identity=object())
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_rows("bad-method", [[0]], method=" ")
+        observation = depth_observations.DepthObservation.from_rows("bounds", [[0]], confidence=[[None]])
+        with self.assertRaises(IndexError):
+            observation.interval(1, 0, 1)
+        with self.assertRaises(IndexError):
+            observation.confidence_at(0, 1)
+        self.assertIsNone(observation.confidence_at(0, 0))
+        with self.assertRaises(ValueError):
+            depth_observations.DepthObservation.from_dict({"schema": 2, "front": [[0]]})
+        with self.assertRaises(ValueError):
+            depth_observations.PartMask.from_rows("", [["body"]])
+        with self.assertRaises(ValueError):
+            depth_observations.PartMask.from_rows("ragged", [["body"], ["body", None]])
+        with self.assertRaises(ValueError):
+            depth_observations.PartMask.from_rows("empty-label", [[""]])
+        with self.assertRaises(TypeError):
+            depth_observations.PartMask.from_rows("bad-source", [["body"]], source_identity=object())
+        parts = depth_observations.PartMask.from_rows("bounds", [["body"]])
+        with self.assertRaises(IndexError):
+            parts.part_at(1, 0)
+        with self.assertRaises(ValueError):
+            depth_observations.PartMask.from_dict({"schema": 2, "labels": [["body"]]})
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            invalid_json = root / "invalid.json"
+            invalid_json.write_text("[]", encoding="utf-8")
+            with self.assertRaises(ValueError):
+                depth_observations.load_observation(invalid_json)
+            too_large = root / "large.json"
+            too_large.write_text("{}", encoding="utf-8")
+            previous_limit = depth_observations.MAX_OBSERVATION_BYTES
+            depth_observations.MAX_OBSERVATION_BYTES = 0
+            try:
+                with self.assertRaises(ValueError):
+                    depth_observations.load_part_mask(too_large)
+            finally:
+                depth_observations.MAX_OBSERVATION_BYTES = previous_limit
+
+        asset_none = voxel.VoxelAsset(part_assignments=None, voxels={(0, 0, 0): 0}, palette=PALETTE[:1])
+        self.assertEqual(asset_none.part_assignments, {})
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(part_assignments=[object()], voxels={(0, 0, 0): 0}, palette=PALETTE[:1])
+        mapped = voxel.VoxelAsset(
+            part_assignments=[[[0, 0, 0], "HEAD"]],
+            voxels={(0, 0, 0): 0},
+            palette=PALETTE[:1],
+        )
+        self.assertEqual(mapped.part_assignments, {(0, 0, 0): "HEAD"})
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(part_assignments=[[0, 0, 0]], voxels={(0, 0, 0): 0}, palette=PALETTE[:1])
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(part_assignments=[[0, 0, 0, ""]], voxels={(0, 0, 0): 0}, palette=PALETTE[:1])
+        with self.assertRaises(ValueError):
+            voxel.VoxelAsset(
+                voxels={(0, 0, 0): 0},
+                palette=PALETTE[:1],
+                provenance={"part_assignments": "["},
+            )
+        with self.assertRaises(ValueError):
+            make_asset().set_part((0, 0, 0), " ")
+
+        cube_vertices = (
+            (0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 2.0, 0.0), (0.0, 2.0, 0.0),
+            (0.0, 0.0, 2.0), (2.0, 0.0, 2.0), (2.0, 2.0, 2.0), (0.0, 2.0, 2.0),
+        )
+        cube_faces = (
+            (0, 1, 2, 3), (4, 7, 6, 5), (0, 4, 5, 1),
+            (1, 5, 6, 2), (2, 6, 7, 3), (4, 0, 3, 7),
+        )
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide((), cube_faces)
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(((float("nan"), 0.0, 0.0),), ((0, 0, 0),))
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(cube_vertices, ((0, 1),))
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(cube_vertices, ((0, 1, "2"),))
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(cube_vertices, ((0, 1, 99),))
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(cube_vertices, ())
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(cube_vertices, cube_faces, material_indices=(0,))
+        with self.assertRaises(ValueError):
+            guide_prior.MeshGuide(cube_vertices, cube_faces, palette=PALETTE[:1], material_indices=(1,) * 6)
+        mesh = guide_prior.MeshGuide(cube_vertices, cube_faces)
+        with self.assertRaises(TypeError):
+            guide_prior.voxelize_mesh_guide(object())
+        with self.assertRaises(ValueError):
+            guide_prior.voxelize_mesh_guide(mesh, grid_size=object())
+        with self.assertRaises(ValueError):
+            guide_prior.voxelize_mesh_guide(mesh, grid_size=0)
+        with self.assertRaises(ValueError):
+            guide_prior.voxelize_mesh_guide(mesh, max_cells=0)
+        with self.assertRaises(ValueError):
+            guide_prior.voxelize_mesh_guide(mesh, max_cells=1)
+        open_mesh = guide_prior.MeshGuide(
+            ((0.0, 0.0, 0.0), (2.0, 0.0, 0.0), (0.0, 1.0, 1.0)),
+            ((0, 1, 2),),
+        )
+        with self.assertRaises(ValueError):
+            guide_prior.voxelize_mesh_guide(open_mesh)
+
+        view = reconstruct.OrthographicView.from_rows("edge-guide", [[0]])
+        result = reconstruct.reconstruct_views((view,), PALETTE[:1])
+        with self.assertRaises(TypeError):
+            guide_prior.apply_guide_prior(object(), make_asset())
+        with self.assertRaises(TypeError):
+            guide_prior.apply_guide_prior(result, object())
+        with self.assertRaises(ValueError):
+            guide_prior.apply_guide_prior(result, make_asset(), mode="INVALID")
+        hidden_guide = make_asset({(1, 0, 0): 0})
+        observed = guide_prior.apply_guide_prior(result, hidden_guide, mode="OBSERVED_ONLY")
+        self.assertEqual(observed.added_cells, ())
+        recolor_guide = make_asset({(0, 0, 0): 1}, palette_values=PALETTE)
+        recolor_guide.set_part((0, 0, 0), "HEAD")
+        recolored = guide_prior.apply_guide_prior(result, recolor_guide)
+        self.assertEqual(recolored.recolored_cells, ((0, 0, 0),))
+
+        with self.assertRaises(ValueError):
+            sprite_pipeline.generate_candidates((), PALETTE)
+        with self.assertRaises(ValueError):
+            sprite_pipeline.select_candidate(())
+        self.assertTrue(sprite_pipeline.generate_candidates((view,), PALETTE[:1]))
+        self.assertEqual(sprite_pipeline.generate_candidates((view,), PALETTE[:1])[0].to_dict()["name"], "SURFACE")
+        with self.assertRaises(TypeError):
+            sprite_pipeline.convert_sprite(object())
+        indexed = image_intake.index_image(
+            image_intake.ImageFrame.from_rows("edge", [[PALETTE[0]]]),
+            image_intake.PaletteIntakeSettings(background_mode="NONE"),
+        )
+        with self.assertRaises(TypeError):
+            sprite_pipeline.convert_sprite(indexed, guide=object())
+        mesh_conversion = sprite_pipeline.convert_sprite(
+            indexed,
+            settings=sprite_pipeline.SpriteConversionSettings(
+                depth=1,
+                symmetry_axis="X",
+                guide_grid_size=1.0,
+            ),
+            guide=mesh,
+        )
+        self.assertIsNotNone(mesh_conversion.guide)
+        solid_skeleton = geometry_skeleton.derive_skeleton(voxel.VoxelAsset.box(3))
+        self.assertTrue(solid_skeleton.nodes)
+        self.assertTrue(solid_skeleton.to_dict()["nodes"])
+        self.assertEqual(geometry_skeleton.derive_skeleton(voxel.VoxelAsset()).nodes, ())
+        self.assertEqual(
+            len(geometry_skeleton.derive_skeleton(voxel.VoxelAsset.box(3), max_nodes=1).nodes),
+            1,
+        )
+        with self.assertRaises(TypeError):
+            geometry_skeleton.derive_skeleton(object())
+        self.assertEqual(geometry_skeleton._semantic_roles(voxel.VoxelAsset.box(1), set()), ())
+        empty_role_asset = voxel.VoxelAsset.box(1)
+        empty_role_asset.set_part((0, 0, 0), "HEAD")
+        empty_role_graph = geometry_skeleton.derive_skeleton(empty_role_asset)
+        self.assertEqual(empty_role_graph.to_dict()["semantic_roles"], [{"role": "HEAD", "cell": [0, 0, 0]}])
+        self.assertEqual(geometry_skeleton._semantic_roles(empty_role_asset, set()), ())
+
+        with self.assertRaises(ValueError):
+            sprite_sequence.SequenceFrame("", indexed)
+        with self.assertRaises(TypeError):
+            sprite_sequence.SequenceFrame("bad-image", object())
+        frame = sprite_sequence.SequenceFrame("frame", indexed)
+        with self.assertRaises(ValueError):
+            frame.to_view(palette=PALETTE[1:])
+        with self.assertRaises(ValueError):
+            sprite_sequence.SpriteSequence(())
+        self.assertEqual(
+            sprite_sequence.PoseDelta("frame", ((0, 0, 0),), (), ()).to_dict()["added"],
+            [[0, 0, 0]],
+        )
+
+        with self.assertRaises(ValueError):
+            symmetry.mirror_cell((0, 0, 0), "Q")
+        with self.assertRaises(ValueError):
+            symmetry.mirror_cell((0, 0, 0), "X", plane=True)
+        with self.assertRaises(TypeError):
+            symmetry.apply_missing_only(object(), "X")
+        labeled = make_asset({(1, 0, 0): 0})
+        labeled.set_part((1, 0, 0), "ARM_L")
+        mirrored = symmetry.apply_missing_only(labeled, "X")
+        self.assertEqual(mirrored.asset.part_assignments[(-1, 0, 0)], "ARM_L")
+        self.assertEqual(
+            symmetry.apply_missing_only(make_asset({(0, 0, 0): 0}), "X").added_cells,
+            (),
+        )
+        evidence = reconstruct.reconstruct_views(
+            (
+                reconstruct.OrthographicView.from_rows(
+                    "free",
+                    [[None]],
+                    origin=(-1, 0, 0),
+                ),
+            ),
+            PALETTE[:1],
+        ).evidence
+        blocked_by_evidence = symmetry.apply_missing_only(
+            make_asset({(1, 0, 0): 0}),
+            "X",
+            evidence=evidence,
+        )
+        self.assertEqual(blocked_by_evidence.skipped_free_cells, ((-1, 0, 0),))
 
 if __name__ == "__main__":
     program = unittest.main(exit=False)
