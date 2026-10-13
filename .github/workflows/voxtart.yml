@@ -8,14 +8,14 @@ on:
   push:
     paths:
       - "scripts/addons_core/voxtart/**"
-      - "tests/python/voxtart_*.py"
+      - "tests/python/**"
       - "tools/**"
       - "run_voxtart.cmd"
       - ".github/workflows/voxtart.yml"
   pull_request:
     paths:
       - "scripts/addons_core/voxtart/**"
-      - "tests/python/voxtart_*.py"
+      - "tests/python/**"
       - "tools/**"
       - "run_voxtart.cmd"
       - ".github/workflows/voxtart.yml"
