@@ -68,7 +68,7 @@ jobs:
           path: voxtart-coverage/core.json
           if-no-files-found: error
   blender:
-    name: Blender ${{ env.BLENDER_VERSION }} native
+    name: Blender 5.2.2 native
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
