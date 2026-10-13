@@ -54,6 +54,39 @@ def _remove_objects(objects):
             bpy.data.objects.remove(obj, do_unlink=True)
 
 
+def _create_test_cube(size=2.0, location=(0.0, 0.0, 0.0)):
+    half = size / 2.0
+    vertices = [
+        (-half, -half, -half),
+        (half, -half, -half),
+        (half, half, -half),
+        (-half, half, -half),
+        (-half, -half, half),
+        (half, -half, half),
+        (half, half, half),
+        (-half, half, half),
+    ]
+    faces = [
+        (0, 3, 2, 1),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
+    ]
+    mesh = bpy.data.meshes.new("VOXTART Test Cube Mesh")
+    mesh.from_pydata(vertices, [], faces)
+    mesh.update()
+    obj = bpy.data.objects.new("VOXTART Test Cube", mesh)
+    (bpy.context.collection or bpy.context.scene.collection).objects.link(obj)
+    obj.location = location
+    for selected in bpy.context.selected_objects:
+        selected.select_set(False)
+    obj.select_set(True)
+    bpy.context.view_layer.objects.active = obj
+    return obj
+
+
 class BlenderRegistrationTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -865,8 +898,7 @@ class BlenderRegistrationTest(unittest.TestCase):
     def test_voxelizer_operator_keeps_source_link(self):
         before_names = {obj.name for obj in bpy.data.objects}
         try:
-            bpy.ops.mesh.primitive_cube_add(size=2.0, location=(3.0, 0.0, 0.0))
-            source = bpy.context.active_object
+            source = _create_test_cube(location=(3.0, 0.0, 0.0))
             source_name = source.name
             self.assertEqual(
                 bpy.ops.voxtart.voxelize_active(
@@ -894,8 +926,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         before_names = {obj.name for obj in bpy.data.objects}
         before_actions = {action.name for action in bpy.data.actions}
         try:
-            bpy.ops.mesh.primitive_cube_add(size=2.0)
-            mesh = bpy.context.active_object
+            mesh = _create_test_cube()
             blockout = animation.create_blockout_rig(bpy.context, mesh, bind=False)
             armature = bpy.data.objects[blockout["armature"]]
             self.assertEqual(blockout["bone_count"], 20)
