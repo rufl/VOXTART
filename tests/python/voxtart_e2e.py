@@ -56,7 +56,7 @@ def _blender_background_command(*, factory_startup: bool) -> list[str]:
     if factory_startup:
         command.append("--factory-startup")
     if os.name == "nt":
-        command.append("--debug-gpu-force-workarounds")
+        command.extend(("--gpu-backend", "vulkan"))
     return command
 
 
