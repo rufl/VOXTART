@@ -103,6 +103,10 @@ class BlenderRegistrationTest(unittest.TestCase):
     def tearDownClass(cls):
         addon.unregister()
 
+    def setUp(self):
+        print(f"VOXTART_TEST_START {self._testMethodName}", flush=True)
+
+
     def test_addon_metadata_and_scene_properties(self):
         self.assertEqual(addon.bl_info["name"], "VOXTART")
         self.assertGreaterEqual(addon.bl_info["version"], (0, 16, 0))
