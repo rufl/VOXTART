@@ -127,10 +127,10 @@ def _validate_windows(directory: Path) -> None:
     baseline = _read_json(directory / "regression-baseline.json")
     _require(baseline.get("schema") == 1, "Windows regression baseline schema must be 1")
     _require(
-        baseline.get("core_tests") == 93
+        baseline.get("core_tests") == 109
         and baseline.get("blender_tests") == 29
         and baseline.get("e2e_tests") == 7,
-        "Windows regression baseline does not match 93/29/7",
+        "Windows regression baseline does not match 109/29/7",
     )
 
     performance = _read_json(directory / "performance.json")
