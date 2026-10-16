@@ -1011,7 +1011,13 @@ def _editor_dock_layout(editor, region):
         available = max(96.0 * scale, top - bottom)
         total = sum(desired[name] for name in side_names)
         panel_scale = min(1.0, max(0.24, (available - gap * (len(side_names) - 1)) / total))
-        x0 = 8.0 * scale if side == "LEFT" else width - dock_width - 8.0 * scale
+        if side == "LEFT":
+            x0 = 8.0 * scale
+            if _scene_workspace(editor.scene) == "EDIT":
+                toolbar_panel, _toolbar_entries = _editor_toolbar_layout(height, editor.scene)
+                x0 = max(x0, toolbar_panel[2] + 12.0 * scale)
+        else:
+            x0 = width - dock_width - 8.0 * scale
         cursor = top
         drawer_bottom = top
         for name in side_names:

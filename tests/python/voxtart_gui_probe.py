@@ -2166,9 +2166,15 @@ def _probe():
             for panel in voxel_editor._editor_dock_layout(editor, region)["panels"].values()
             if panel.get("side") == "RIGHT"
         )
+        left_docks = tuple(
+            panel["bounds"][0]
+            for panel in voxel_editor._editor_dock_layout(editor, region)["panels"].values()
+            if panel.get("side") == "LEFT"
+        )
         if (
             tool_layout["panel"][2] <= tool_layout["panel"][0]
             or tool_layout["panel"][0] <= toolbar_panel[2]
+            or left_docks and toolbar_panel[2] >= min(left_docks)
             or right_docks and tool_layout["panel"][2] >= min(right_docks)
             or not {
                 "TOOL_RADIUS_DOWN",

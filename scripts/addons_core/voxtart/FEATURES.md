@@ -36,9 +36,11 @@ their `Ctrl+Z` and `Ctrl+Y` shortcuts; **More** opens a small menu: **Grid**
 draws a bounded 3D box around the active asset, with one line per voxel
 interval, and `G` toggles it directly (`Shift+G` keeps the Select- or Scene-mode
 move transform); **Hints** shows helpful
-**Advanced tools** expands VOXTART's own tool strip. The left and right drawers
-contain draggable **Layers**, **History**, and **Colors** panels; dragging a
-panel across the canvas snaps it to the nearest drawer and keeps its ordering.
+**Advanced tools** expands VOXTART's own tool strip. In Edit, the vertical tool
+shelf reserves its own lane before the left drawer instead of covering panel
+content. The left and right drawers contain draggable **Layers**, **History**, and
+**Colors** panels; dragging a panel across the canvas snaps it to the nearest
+drawer and keeps its ordering.
 Blender's native chrome remains hidden throughout the product surface. The
 editor starts with four
 simple tools — **Add block**, **Erase block**, **Color block**, and
