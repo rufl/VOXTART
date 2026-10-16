@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender operators and panels for the VOXTART Blob Gallery."""
 
@@ -332,14 +332,15 @@ def _restore_scene_placer_settings(context: bpy.types.Context) -> int:
         restored += 1
     return restored
 
+
 def _load_scene_assembly(scene: bpy.types.Scene) -> SceneAssembly:
     raw = scene.get(ASSEMBLY_PROPERTY)
     if not isinstance(raw, str) or not raw.strip():
         return SceneAssembly()
     try:
         return SceneAssembly.decode(raw)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return SceneAssembly()
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"saved scene assembly is invalid: {error}") from error
 
 
 def _store_scene_assembly(scene: bpy.types.Scene, assembly: SceneAssembly) -> None:
@@ -360,6 +361,23 @@ def _set_object_transform(
 def _apply_material_override(obj: bpy.types.Object, material_name: str) -> None:
     material_name = str(material_name or "").strip()
     if not material_name:
+        for property_name in (
+            "voxtart_material_override",
+            "voxtart_material_override_pending",
+        ):
+            if property_name in obj:
+                del obj[property_name]
+        try:
+            from . import operators
+
+            asset = operators._load_asset(obj)
+            stack = operators._load_layer_stack(obj, asset)
+            operators._palette_materials(
+                obj,
+                operators._asset_from_layer_stack(asset, stack),
+            )
+        except (AttributeError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
+            obj["voxtart_material_override_pending"] = True
         return
     obj["voxtart_material_override"] = material_name
     materials_library = getattr(getattr(bpy, "data", None), "materials", None)
@@ -370,12 +388,37 @@ def _apply_material_override(obj: bpy.types.Object, material_name: str) -> None:
         return
     materials.clear()
     materials.append(material)
+    if "voxtart_material_override_pending" in obj:
+        del obj["voxtart_material_override_pending"]
 
 
 def _apply_collision_preset(context: bpy.types.Context, obj: bpy.types.Object, preset: str) -> None:
     preset = str(preset or "NONE").upper()
     obj["voxtart_collision_preset"] = preset
     if preset == "NONE":
+        if getattr(obj, "rigid_body", None) is None:
+            if "voxtart_collision_pending" in obj:
+                del obj["voxtart_collision_pending"]
+            return
+        selected_before = tuple(getattr(context, "selected_objects", ()))
+        active_before = getattr(context, "active_object", None)
+        try:
+            bpy.ops.object.select_all(action="DESELECT")
+            obj.select_set(True)
+            context.view_layer.objects.active = obj
+            bpy.ops.rigidbody.object_remove()
+            if getattr(obj, "rigid_body", None) is not None:
+                raise RuntimeError("Blender did not remove the rigid-body collision")
+            if "voxtart_collision_pending" in obj:
+                del obj["voxtart_collision_pending"]
+        except (AttributeError, RuntimeError, TypeError):
+            obj["voxtart_collision_pending"] = True
+        finally:
+            bpy.ops.object.select_all(action="DESELECT")
+            for previous in selected_before:
+                previous.select_set(True)
+            if active_before is not None:
+                context.view_layer.objects.active = active_before
         return
     shapes = {"BOX": "BOX", "CONVEX": "CONVEX_HULL", "MESH": "MESH"}
     shape = shapes.get(preset)
@@ -396,6 +439,8 @@ def _apply_collision_preset(context: bpy.types.Context, obj: bpy.types.Object, p
             raise RuntimeError("Blender did not create a rigid-body collision")
         rigid_body.type = "PASSIVE"
         rigid_body.collision_shape = shape
+        if "voxtart_collision_pending" in obj:
+            del obj["voxtart_collision_pending"]
     except (AttributeError, RuntimeError, TypeError):
         obj["voxtart_collision_pending"] = True
     finally:
@@ -405,8 +450,10 @@ def _apply_collision_preset(context: bpy.types.Context, obj: bpy.types.Object, p
         if active_before is not None:
             context.view_layer.objects.active = active_before
 
-
-def _apply_placement_overrides(context: bpy.types.Context, obj: bpy.types.Object) -> None:
+def _apply_placement_overrides(
+    context: bpy.types.Context,
+    obj: bpy.types.Object,
+) -> tuple[bool, bool]:
     scene = context.scene
     obj["voxtart_placer_mode"] = _placement_mode(context)
     obj["voxtart_placer_seed"] = int(getattr(scene, "voxtart_zoo_random_seed", 0))
@@ -415,6 +462,10 @@ def _apply_placement_overrides(context: bpy.types.Context, obj: bpy.types.Object
         context,
         obj,
         getattr(scene, "voxtart_zoo_collision_preset", "NONE"),
+    )
+    return (
+        bool(obj.get("voxtart_material_override_pending", False)),
+        bool(obj.get("voxtart_collision_pending", False)),
     )
 
 
@@ -472,6 +523,7 @@ def _place_entry(
     surface_normal=None,
     mesh_source=None,
 ):
+    _load_scene_assembly(context.scene)
     obj = _instantiate_entry(context, entry, mesh_source=mesh_source)
     location, rotation, scale = _resolve_placement_transform(
         context,
@@ -1076,10 +1128,27 @@ class VOXTART_OT_zoo_apply_overrides(bpy.types.Operator):
         if not assets:
             self.report({"ERROR"}, "select at least one placed asset")
             return {"CANCELLED"}
-        for obj in assets:
-            _apply_placement_overrides(context, obj)
-        _sync_scene_assembly(context)
-        self.report({"INFO"}, f"updated {len(assets)} placed asset(s)")
+        try:
+            _load_scene_assembly(context.scene)
+            pending_material = False
+            pending_collision = False
+            for obj in assets:
+                material_pending, collision_pending = _apply_placement_overrides(context, obj)
+                pending_material = pending_material or material_pending
+                pending_collision = pending_collision or collision_pending
+            _sync_scene_assembly(context)
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        pending = []
+        if pending_material:
+            pending.append("material override could not be applied")
+        if pending_collision:
+            pending.append("collision setup could not be applied")
+        if pending:
+            self.report({"WARNING"}, f"updated {len(assets)} asset(s); {'; '.join(pending)}")
+        else:
+            self.report({"INFO"}, f"updated {len(assets)} placed asset(s)")
         return {"FINISHED"}
 
 
@@ -1089,7 +1158,11 @@ class VOXTART_OT_zoo_restore_settings(bpy.types.Operator):
     bl_description = "Restore the placement settings stored in the current scene assembly"
 
     def execute(self, context):
-        restored = _restore_scene_placer_settings(context)
+        try:
+            restored = _restore_scene_placer_settings(context)
+        except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         if not restored:
             self.report({"WARNING"}, "the scene has no saved asset placer settings")
             return {"CANCELLED"}
@@ -1107,6 +1180,9 @@ class VOXTART_OT_zoo_sync_placements(bpy.types.Operator):
             updated = _sync_scene_assembly(context)
         except (AttributeError, TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        if not updated:
+            self.report({"WARNING"}, "No Zoo placements were synchronized")
             return {"CANCELLED"}
         self.report({"INFO"}, f"synced {updated} placement(s)")
         return {"FINISHED"}
@@ -1130,6 +1206,9 @@ class VOXTART_OT_zoo_clear_placements(bpy.types.Operator):
                 del context.scene[ASSEMBLY_PROPERTY]
         except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as error:
             self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
+        if not placed:
+            self.report({"WARNING"}, "No Zoo-placed assets exist in the scene")
             return {"CANCELLED"}
         self.report({"INFO"}, f"cleared {len(placed)} placed asset(s)")
         return {"FINISHED"}
@@ -1443,6 +1522,20 @@ class VOXTART_PT_zoo_asset_placer(bpy.types.Panel):
         override_box.prop_search(scene, "voxtart_zoo_material_override", bpy.data, "materials", text="Material")
         override_box.prop(scene, "voxtart_zoo_instance_meshes", text="Shared Mesh Instances")
         override_box.operator(VOXTART_OT_zoo_apply_overrides.bl_idname, icon="MOD_PHYSICS")
+        pending_objects = tuple(
+            obj
+            for obj in context.selected_objects
+            if _is_asset(obj)
+            and (
+                obj.get("voxtart_material_override_pending")
+                or obj.get("voxtart_collision_pending")
+            )
+        )
+        if pending_objects:
+            override_box.label(
+                text=f"{len(pending_objects)} asset(s) have unapplied overrides",
+                icon="ERROR",
+            )
 
         selected_id = str(getattr(scene, "voxtart_blob_gallery_selected", "") or "")
         if selected_id:

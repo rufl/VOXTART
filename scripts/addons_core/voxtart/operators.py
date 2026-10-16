@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender-facing operators for the VOXTART voxel prototype."""
 
@@ -32,7 +32,7 @@ from .meshing import scaled_mesh
 from .optimize import DecimationPolicy, decimate
 from .palette import DEFAULT_PALETTE, MAX_PALETTE_COLORS, nearest_palette_index, scene_palette
 from .pick import raycast_voxel
-from .voxel import VoxelAsset, VoxelSocket
+from .voxel import VoxelAsset, VoxelSocket, remap_palette_materials
 from .voxelizer import MAX_SHELL_THICKNESS, VOXELIZER_MODES, apply_voxelizer_mode
 from .volume_ops import (
     ROTATION_DEGREES,
@@ -100,12 +100,14 @@ def _load_asset(obj: bpy.types.Object) -> VoxelAsset:
 def _load_layer_stack(obj: bpy.types.Object, asset: VoxelAsset | None = None) -> LayerStack:
     asset = asset or _load_asset(obj)
     raw = obj.get(LAYER_STACK_PROPERTY)
-    if isinstance(raw, str):
-        try:
-            return LayerStack.decode(raw)
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
-    return LayerStack.from_asset(asset)
+    if raw is None:
+        return LayerStack.from_asset(asset)
+    if not isinstance(raw, str):
+        raise ValueError("saved layer stack is not text")
+    try:
+        return LayerStack.decode(raw)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"saved layer stack is invalid: {error}") from error
 
 
 def _asset_from_layer_stack(asset: VoxelAsset, stack: LayerStack) -> VoxelAsset:
@@ -115,6 +117,7 @@ def _asset_from_layer_stack(asset: VoxelAsset, stack: LayerStack) -> VoxelAsset:
         voxels=stack.composite(asset.palette),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
 
 
@@ -123,16 +126,94 @@ def _retarget_asset_palette(
     palette,
     layer_stack: LayerStack | None = None,
 ) -> tuple[VoxelAsset, LayerStack]:
+    target_palette = list(palette)
     stack = layer_stack or LayerStack.from_asset(asset)
-    stack.remap_palette(asset.palette, palette)
+    stack.remap_palette(asset.palette, target_palette)
     replacement = VoxelAsset(
         grid_size=asset.grid_size,
-        palette=list(palette),
-        voxels=stack.composite(palette),
+        palette=target_palette,
+        voxels=stack.composite(target_palette),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=remap_palette_materials(
+            asset.get_palette_materials(),
+            len(target_palette),
+        ),
     )
     return replacement, stack
+
+
+def _configure_material(material, color, spec) -> None:
+    alpha = max(0.0, min(1.0, float(color[3]) * spec.alpha))
+    material.diffuse_color = (*color[:3], alpha)
+    if getattr(material, "node_tree", None) is None:
+        material.use_nodes = True
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    shader = nodes.get("Principled BSDF")
+    output = nodes.get("Material Output")
+    if shader is None:
+        shader = nodes.new("ShaderNodeBsdfPrincipled")
+        shader.name = "Principled BSDF"
+    if output is None:
+        output = nodes.new("ShaderNodeOutputMaterial")
+        output.name = "Material Output"
+    if not any(
+        link.from_node is shader and link.to_node is output
+        for link in links
+    ):
+        links.new(shader.outputs["BSDF"], output.inputs["Surface"])
+    values = {
+        "Base Color": (*color[:3], alpha),
+        "Metallic": spec.metallic,
+        "Roughness": spec.roughness,
+        "Alpha": alpha,
+        "IOR": spec.ior,
+        "Transmission Weight": spec.transmission,
+        "Emission Color": (*color[:3], 1.0),
+        "Emission Strength": spec.emission_strength,
+    }
+    transmission = shader.inputs.get("Transmission Weight")
+    if transmission is None:
+        transmission = shader.inputs.get("Transmission")
+        if transmission is not None:
+            values["Transmission"] = values.pop("Transmission Weight")
+    for input_name, value in values.items():
+        socket = shader.inputs.get(input_name)
+        if socket is None:
+            continue
+        if input_name in {"Base Color", "Emission Color"}:
+            for link in tuple(socket.links):
+                links.remove(link)
+        socket.default_value = value
+    transparent = alpha < 0.999 or spec.transmission > 0.0
+    if hasattr(material, "surface_render_method"):
+        material.surface_render_method = "BLENDED" if transparent else "DITHERED"
+    elif hasattr(material, "blend_method"):
+        material.blend_method = "BLEND" if transparent else "HASHED"
+    if hasattr(material, "use_transparency_overlap"):
+        material.use_transparency_overlap = False
+
+
+def _assign_mesh_materials(
+    mesh: bpy.types.Mesh,
+    asset: VoxelAsset,
+    owner_name: str,
+    material_indices=None,
+) -> None:
+    if material_indices is None:
+        material_indices = tuple(int(polygon.material_index) for polygon in mesh.polygons)
+    mesh.materials.clear()
+    material_specs = asset.get_palette_materials()
+    for index, color in enumerate(asset.palette):
+        material = bpy.data.materials.get(f"VOXTART {owner_name} Palette {index}")
+        if material is None:
+            material = bpy.data.materials.new(f"VOXTART {owner_name} Palette {index}")
+        _configure_material(material, color, material_specs[index])
+        mesh.materials.append(material)
+    for polygon, palette_index in zip(mesh.polygons, material_indices):
+        if 0 <= int(palette_index) < len(mesh.materials):
+            polygon.material_index = int(palette_index)
 
 
 def _new_mesh(name: str, asset: VoxelAsset, backend: str = "greedy") -> bpy.types.Mesh:
@@ -140,19 +221,13 @@ def _new_mesh(name: str, asset: VoxelAsset, backend: str = "greedy") -> bpy.type
     mesh = bpy.data.meshes.new(name)
     mesh.from_pydata(mesh_data.vertices, [], mesh_data.faces)
     mesh.update()
-    for polygon, palette_index in zip(mesh.polygons, mesh_data.materials):
-        polygon.material_index = palette_index
+    owner_name = name[:-5] if name.endswith(" Mesh") else name
+    _assign_mesh_materials(mesh, asset, owner_name, mesh_data.materials)
     return mesh
 
 
 def _palette_materials(obj: bpy.types.Object, asset: VoxelAsset) -> None:
-    obj.data.materials.clear()
-    for index, color in enumerate(asset.palette):
-        material = bpy.data.materials.get(f"VOXTART {obj.name} Palette {index}")
-        if material is None:
-            material = bpy.data.materials.new(f"VOXTART {obj.name} Palette {index}")
-        material.diffuse_color = color
-        obj.data.materials.append(material)
+    _assign_mesh_materials(obj.data, asset, obj.name)
 
 
 def _link_object(context: bpy.types.Context, obj: bpy.types.Object) -> None:
@@ -289,6 +364,8 @@ def _update_overlay(
     overlay.parent = obj
     overlay.matrix_parent_inverse = Matrix.Identity(4)
     overlay.display_type = 'WIRE'
+    overlay.show_wire = True
+    overlay.show_all_edges = True
     overlay.hide_render = True
     overlay.hide_viewport = not bool(cells)
     overlay.color = color
@@ -453,6 +530,7 @@ def _apply_edit(
         voxels=dict(stack.active.voxels),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
     report = edit_asset(
         editable,
@@ -831,7 +909,9 @@ class VOXTART_OT_add_palette_color(bpy.types.Operator):
                 if color not in palette:
                     raise ValueError("palette enforcement is active; add colors in the VOXTART Palette window")
                 palette_index = palette.index(color)
-                context.scene.voxtart_edit_palette_index = palette_index
+                from . import palette_ui
+
+                palette_ui._set_palette_selection(context.scene, palette_index)
                 obj["voxtart_last_palette_index"] = palette_index
             else:
                 asset = _load_asset(obj)
@@ -839,6 +919,7 @@ class VOXTART_OT_add_palette_color(bpy.types.Operator):
                     raise ValueError(f"palettes may contain at most {MAX_PALETTE_COLORS} colors")
                 palette_index = asset.add_palette_color(self.color)
                 _replace_asset_mesh(obj, asset)
+                context.scene.voxtart_edit_palette_index = palette_index
                 obj["voxtart_last_palette_index"] = palette_index
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({'ERROR'}, str(error))
@@ -1243,6 +1324,7 @@ class VOXTART_OT_transform_asset(bpy.types.Operator):
                     grid_size=asset.grid_size,
                     palette=list(asset.palette),
                     voxels=dict(layer.voxels),
+                    palette_materials=asset.get_palette_materials(),
                 )
                 layer_result = _apply_volume_operation(
                     layer_asset,

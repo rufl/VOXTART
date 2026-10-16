@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Validate VOXTART release evidence produced by the CI probes.
 

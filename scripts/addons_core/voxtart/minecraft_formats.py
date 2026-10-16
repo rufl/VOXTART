@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Minecraft model, structure, schematic, and Anvil map conversion codecs."""
 

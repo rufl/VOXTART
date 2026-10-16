@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Optional animation-library plugins and humanoid retargeting for VOXTART.
 
@@ -1223,6 +1223,17 @@ class VOXTART_PT_animation_panel(bpy.types.Panel):
         layout.prop_search(scene, "voxtart_animation_action", bpy.data, "actions", text="Action")
         layout.prop_search(scene, "voxtart_animation_target", bpy.data, "objects", text="Target")
         state = animation_state(context)
+        missing = [
+            label
+            for label, key in (
+                ("source armature", "source_armature"),
+                ("action", "action"),
+                ("target armature", "target_armature"),
+            )
+            if not state[key]
+        ]
+        if missing:
+            layout.label(text=f"Choose {', '.join(missing)} to enable retargeting.", icon="INFO")
         layout.label(text=f"Suggested bone mappings: {state['suggested_mapping_count']}")
         layout.operator(VOXTART_OT_retarget_animation.bl_idname, icon="ARMATURE_DATA")
         layout.operator(VOXTART_OT_bind_character.bl_idname, icon="BONE_DATA")

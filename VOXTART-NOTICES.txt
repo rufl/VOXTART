@@ -1,0 +1,22 @@
+VoxTart licensing and attribution
+=================================
+
+Copyright (c) 2026 VOXTART contributors
+
+The VoxTart add-on, launcher, tools, and release probes in this distribution
+are licensed under the GNU General Public License, version 3 or any later
+version (GPL-3.0-or-later). The complete license text is distributed as
+LICENSES/GPL-3.0-or-later.txt and in the source tree at
+doc/license/GPL3-license.txt.
+
+The bundled Blender runtime is distributed under the GNU GPL 3.0 or later.
+Its complete third-party attribution and license inventory is included in the
+runtime at build/blender-5.2.2/blender-5.2.2-windows-x64/license/license.md,
+with the runtime copyright notice at
+build/blender-5.2.2/blender-5.2.2-windows-x64/copyright.txt.
+
+The VoxTart artwork and icon assets are released under CC0 1.0 Universal;
+see LICENSES/CC0-1.0.txt (source: assets/LICENSE). Blender and
+other third-party names, logos, libraries, and assets remain subject to their
+respective copyright and trademark terms.
+User-created artwork and project files are not licensed by this notice.

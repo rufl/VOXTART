@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Bounded, deterministic voxel edits with protection and rollback semantics."""
 
@@ -238,6 +238,7 @@ class VoxelEditTransaction:
         restored = VoxelAsset.from_dict(self._snapshot)
         self.asset.grid_size = restored.grid_size
         self.asset.palette = restored.palette
+        self.asset.palette_materials = restored.palette_materials
         self.asset.voxels.clear()
         self.asset.voxels.update(restored.voxels)
         self.asset.sockets = restored.sockets

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Palette window, importers, and palette enforcement for VOXTART."""
 
@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 
 import bpy
-from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatVectorProperty, IntProperty, StringProperty
+from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, FloatVectorProperty, IntProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
 from .palette import (
@@ -29,12 +29,13 @@ from .palette import (
     palette_gradient,
     parse_palette_bytes,
     reorder_palette,
+    scene_linear_to_srgb,
     scene_palette,
     source_by_id,
 )
 from .palette_reduce import PALETTE_REDUCTION_METHODS, reduce_asset_palette
 from .operators import ASSET_PROPERTY
-from .voxel import VoxelAsset
+from .voxel import PaletteMaterial, VoxelAsset, remap_palette_materials
 _REDUCTION_ITEMS = tuple(
     (
         method,
@@ -85,11 +86,44 @@ def _set_palette(
             item.selected = False
     scene.voxtart_palette_name = name[:128] or "VOXTART Palette"
     scene.voxtart_palette_source = source[:512]
-    scene.voxtart_palette_index = 0
-    scene.voxtart_edit_palette_index = 0
-    if hasattr(scene, "voxtart_palette_anchor"):
-        scene.voxtart_palette_anchor = 0
+    _set_palette_selection(scene, 0)
     return normalized
+
+
+def _set_palette_selection(
+    scene,
+    index: int,
+    *,
+    selected_indices=None,
+    edit_index: int | None = None,
+) -> int:
+    collection = getattr(scene, "voxtart_palette_colors", None)
+    count = len(collection) if collection is not None else 0
+    display_index = max(0, min(count - 1, int(index))) if count else 0
+    if edit_index is None:
+        edit_index = display_index
+    if hasattr(scene, "voxtart_palette_index"):
+        scene.voxtart_palette_index = display_index
+    if hasattr(scene, "voxtart_edit_palette_index"):
+        scene.voxtart_edit_palette_index = max(0, int(edit_index))
+    if hasattr(scene, "voxtart_palette_anchor"):
+        scene.voxtart_palette_anchor = display_index
+    if hasattr(scene, "voxtart_palette_hover_index"):
+        scene.voxtart_palette_hover_index = display_index
+    if collection is not None:
+        selected = (
+            {display_index}
+            if selected_indices is None
+            else {
+                int(selected_index)
+                for selected_index in selected_indices
+                if 0 <= int(selected_index) < count
+            }
+        )
+        for item_index, item in enumerate(collection):
+            if hasattr(item, "selected"):
+                item.selected = item_index in selected
+    return display_index
 
 
 def _ensure_palette(scene) -> list[tuple[float, float, float, float]]:
@@ -101,7 +135,10 @@ def _ensure_palette(scene) -> list[tuple[float, float, float, float]]:
             item.color = color
         scene.voxtart_palette_name = "VOXTART Default"
         scene.voxtart_palette_source = ""
+        _set_palette_selection(scene, 0)
     return scene_palette(scene, deduplicate=False)
+
+
 
 
 def _palette_for_display(scene) -> list[tuple[float, float, float, float]]:
@@ -111,6 +148,7 @@ def _palette_for_display(scene) -> list[tuple[float, float, float, float]]:
         return list(DEFAULT_PALETTE)
     return scene_palette(scene, deduplicate=False)
 def _color_hex(color) -> str:
+    color = scene_linear_to_srgb(color)
     channels = tuple(max(0, min(255, int(round(float(value) * 255.0)))) for value in color)
     return "#" + "".join(f"{channel:02X}" for channel in channels[:3])
 
@@ -135,11 +173,12 @@ def _apply_palette_to_active(context, colors, *, index_map=None) -> None:
         voxels=stack.composite(target),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=remap_palette_materials(
+            asset.get_palette_materials(),
+            len(target),
+            index_map=index_map,
+        ),
     )
-    replacement.provenance["palette"] = str(getattr(context.scene, "voxtart_palette_name", "VOXTART Palette"))
-    source = str(getattr(context.scene, "voxtart_palette_source", ""))
-    if source:
-        replacement.provenance["palette_source"] = source
     operators._replace_asset_mesh(obj, replacement, layer_stack=stack)
     context.scene.voxtart_edit_palette_index = min(
         int(context.scene.voxtart_palette_index), len(target) - 1
@@ -260,10 +299,17 @@ class VOXTART_OT_palette_select(bpy.types.Operator):
             for item in collection:
                 item.selected = False
             collection[self.index].selected = True
-        scene.voxtart_palette_hover_index = self.index
-        scene.voxtart_palette_index = self.index
-        scene.voxtart_edit_palette_index = self.index
-        scene.voxtart_palette_anchor = self.index
+        selected = [
+            item_index
+            for item_index, item in enumerate(collection)
+            if bool(getattr(item, "selected", False))
+        ]
+        _set_palette_selection(
+            scene,
+            self.index,
+            selected_indices=selected,
+            edit_index=self.index,
+        )
         return {"FINISHED"}
 class VOXTART_OT_palette_set_selected(bpy.types.Operator):
     bl_idname = "voxtart.palette_set_selected"
@@ -288,10 +334,7 @@ class VOXTART_OT_palette_set_selected(bpy.types.Operator):
             preserve_duplicates=True,
             index_map={palette_index: palette_index for palette_index in range(len(colors))},
         )
-        scene.voxtart_palette_index = index
-        scene.voxtart_edit_palette_index = index
-        for item_index, item in enumerate(scene.voxtart_palette_colors):
-            item.selected = item_index == index
+        _set_palette_selection(scene, index)
         return {"FINISHED"}
 
 
@@ -305,6 +348,34 @@ def _selected_palette_indices(scene) -> list[int]:
         return selected
     index = int(getattr(scene, "voxtart_palette_index", 0))
     return [index] if 0 <= index < len(collection) else []
+
+
+def _capture_palette_selection(scene) -> tuple[int, tuple[int, ...]]:
+    return (
+        int(getattr(scene, "voxtart_palette_index", 0)),
+        tuple(_selected_palette_indices(scene)),
+    )
+
+
+def _restore_palette_selection(scene, active_index: int, selected_indices, index_map) -> None:
+    collection = getattr(scene, "voxtart_palette_colors", None)
+    if collection is None or len(collection) == 0:
+        return
+    mapped_active = index_map.get(active_index)
+    if mapped_active is None:
+        mapped_active = max(0, min(len(collection) - 1, int(active_index)))
+    mapped_selected = [
+        index_map[index]
+        for index in selected_indices
+        if index in index_map and 0 <= index_map[index] < len(collection)
+    ]
+    if not mapped_selected:
+        mapped_selected = [mapped_active]
+    _set_palette_selection(
+        scene,
+        mapped_active,
+        selected_indices=mapped_selected,
+    )
 
 
 class VOXTART_OT_palette_gradient(bpy.types.Operator):
@@ -351,7 +422,8 @@ class VOXTART_OT_palette_duplicate(bpy.types.Operator):
 
     def execute(self, context):
         colors = _ensure_palette(context.scene)
-        indices = set(_selected_palette_indices(context.scene))
+        active_index, selected_indices = _capture_palette_selection(context.scene)
+        indices = set(selected_indices)
         if not indices and 0 <= self.index < len(colors):
             indices = {self.index}
         if len(colors) + len(indices) > MAX_PALETTE_COLORS:
@@ -371,6 +443,7 @@ class VOXTART_OT_palette_duplicate(bpy.types.Operator):
             preserve_duplicates=True,
             index_map=index_map,
         )
+        _restore_palette_selection(context.scene, active_index, selected_indices, index_map)
         return {"FINISHED"}
 
 
@@ -385,6 +458,7 @@ class VOXTART_OT_palette_reorder(bpy.types.Operator):
 
     def execute(self, context):
         colors = _ensure_palette(context.scene)
+        active_index, selected_indices = _capture_palette_selection(context.scene)
         if not 0 <= self.index < len(colors) or not 0 <= self.target_index < len(colors):
             self.report({"ERROR"}, "palette index out of range")
             return {"CANCELLED"}
@@ -399,8 +473,7 @@ class VOXTART_OT_palette_reorder(bpy.types.Operator):
             preserve_duplicates=True,
             index_map=index_map,
         )
-        context.scene.voxtart_palette_index = self.target_index
-        context.scene.voxtart_edit_palette_index = self.target_index
+        _restore_palette_selection(context.scene, active_index, selected_indices, index_map)
         return {"FINISHED"}
 
 
@@ -416,6 +489,7 @@ class VOXTART_OT_palette_compact(bpy.types.Operator):
 
     def execute(self, context):
         colors = _ensure_palette(context.scene)
+        active_index, selected_indices = _capture_palette_selection(context.scene)
         active = _active_asset(context)
         used = None
         if active is not None:
@@ -437,6 +511,7 @@ class VOXTART_OT_palette_compact(bpy.types.Operator):
         except (TypeError, ValueError, IndexError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
+        _restore_palette_selection(context.scene, active_index, selected_indices, index_map)
         return {"FINISHED"}
 
 
@@ -460,7 +535,9 @@ class VOXTART_OT_palette_add(bpy.types.Operator):
         if len(colors) >= MAX_PALETTE_COLORS:
             self.report({"ERROR"}, f"palettes may contain at most {MAX_PALETTE_COLORS} colors")
             return {"CANCELLED"}
+        selected_index = len(colors)
         _commit_palette(context, [*colors, tuple(self.color)], name=context.scene.voxtart_palette_name)
+        _set_palette_selection(context.scene, selected_index)
         return {"FINISHED"}
 
 
@@ -474,6 +551,7 @@ class VOXTART_OT_palette_remove(bpy.types.Operator):
 
     def execute(self, context):
         colors = _ensure_palette(context.scene)
+        active_index, selected_indices = _capture_palette_selection(context.scene)
         if len(colors) <= 1:
             self.report({"ERROR"}, "a palette must keep at least one color")
             return {"CANCELLED"}
@@ -497,6 +575,7 @@ class VOXTART_OT_palette_remove(bpy.types.Operator):
             preserve_duplicates=True,
             index_map=index_map,
         )
+        _restore_palette_selection(context.scene, active_index, selected_indices, index_map)
         return {"FINISHED"}
 
 
@@ -558,9 +637,18 @@ class VOXTART_OT_palette_reduce(bpy.types.Operator):
                 voxels=stack.composite(reduced.palette),
                 sockets=list(reduced.sockets),
                 provenance=dict(reduced.provenance),
+                palette_materials=reduced.get_palette_materials(),
             )
             operators._replace_asset_mesh(obj, replacement, layer_stack=stack)
             obj["voxtart_palette_reduction_report"] = json.dumps(report.to_dict(), sort_keys=True)
+            next_index = min(
+                int(getattr(context.scene, "voxtart_edit_palette_index", 0)),
+                len(reduced.palette) - 1,
+            )
+            if tuple(_ensure_palette(context.scene)) == tuple(asset.palette):
+                _set_palette_selection(context.scene, next_index)
+            else:
+                context.scene.voxtart_edit_palette_index = next_index
         except (TypeError, ValueError, IndexError, json.JSONDecodeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -655,6 +743,102 @@ class VOXTART_OT_palette_open_source(bpy.types.Operator):
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
         return {"FINISHED"}
+class VOXTART_OT_palette_material(bpy.types.Operator):
+    bl_idname = "voxtart.palette_material"
+    bl_label = "Edit Palette Material"
+    bl_description = "Set MagicaVoxel-style diffuse, metal, glass, or emissive material properties"
+    bl_options = {"REGISTER", "UNDO"}
+
+    index: IntProperty(name="Palette Slot", min=0, default=0, options={"HIDDEN"})
+    preset: EnumProperty(
+        name="Preset",
+        items=(
+            ("DIFFUSE", "Diffuse", "Opaque matte material"),
+            ("METAL", "Metal", "Metallic reflective material"),
+            ("GLASS", "Glass", "Transparent refractive material"),
+            ("EMISSIVE", "Emissive", "Self-lit glowing material"),
+            ("CUSTOM", "Custom", "Combine transparency, metallic, and emission controls"),
+        ),
+        default="CUSTOM",
+    )
+    alpha: FloatProperty(name="Alpha", min=0.0, max=1.0, default=1.0)
+    metallic: FloatProperty(name="Metallic", min=0.0, max=1.0, default=0.0)
+    roughness: FloatProperty(name="Roughness", min=0.0, max=1.0, default=0.5)
+    transmission: FloatProperty(name="Transmission", min=0.0, max=1.0, default=0.0)
+    emission_strength: FloatProperty(
+        name="Emission Strength",
+        min=0.0,
+        max=1000.0,
+        default=0.0,
+    )
+    ior: FloatProperty(name="IOR", min=1.0, max=3.0, default=1.45)
+
+    @classmethod
+    def poll(cls, context):
+        return _active_asset(context) is not None
+
+    def invoke(self, context, _event):
+        active = _active_asset(context)
+        if active is None:
+            self.report({"ERROR"}, "activate a VOXTART voxel asset first")
+            return {"CANCELLED"}
+        _obj, asset, _stack = active
+        if not 0 <= self.index < len(asset.palette):
+            self.report({"ERROR"}, "palette index out of range")
+            return {"CANCELLED"}
+        material = asset.get_palette_materials()[self.index]
+        self.preset = material.kind
+        self.alpha = material.alpha
+        self.metallic = material.metallic
+        self.roughness = material.roughness
+        self.transmission = material.transmission
+        self.emission_strength = material.emission_strength
+        self.ior = material.ior
+        return context.window_manager.invoke_props_dialog(self)
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop(self, "preset")
+        if self.preset == "CUSTOM":
+            layout.prop(self, "alpha")
+            layout.prop(self, "metallic")
+            layout.prop(self, "roughness")
+            layout.prop(self, "transmission")
+            layout.prop(self, "emission_strength")
+            layout.prop(self, "ior")
+        else:
+            layout.label(text=f"Preset: {self.preset.title()}", icon="MATERIAL")
+
+    def execute(self, context):
+        from . import operators
+
+        active = _active_asset(context)
+        if active is None:
+            self.report({"ERROR"}, "activate a VOXTART voxel asset first")
+            return {"CANCELLED"}
+        obj, asset, stack = active
+        if not 0 <= self.index < len(asset.palette):
+            self.report({"ERROR"}, "palette index out of range")
+            return {"CANCELLED"}
+        material = (
+            PaletteMaterial.from_preset(self.preset)
+            if self.preset != "CUSTOM"
+            else PaletteMaterial(
+                kind="CUSTOM",
+                alpha=self.alpha,
+                metallic=self.metallic,
+                roughness=self.roughness,
+                transmission=self.transmission,
+                emission_strength=self.emission_strength,
+                ior=self.ior,
+            )
+        )
+        asset.set_palette_material(self.index, material)
+        operators._replace_asset_mesh(obj, asset, layer_stack=stack)
+        self.report({"INFO"}, f"palette slot {self.index} uses {material.kind.lower()} material")
+        return {"FINISHED"}
+
+
 class VOXTART_PT_color_picker(bpy.types.Panel):
     bl_label = "Color Picker"
     bl_idname = "VOXTART_PT_color_picker"
@@ -679,6 +863,28 @@ class VOXTART_PT_color_picker(bpy.types.Panel):
         add = layout.operator(VOXTART_OT_palette_add.bl_idname, text="Add Picker Color", icon="ADD")
         add.color = tuple(scene.voxtart_palette_edit_color)
         layout.label(text=f"Active slot {index}: {_color_hex(colors[index])}", icon="MATERIAL")
+        active = _active_asset(context)
+        if active is not None:
+            _obj, asset, _stack = active
+            if 0 <= index < len(asset.palette):
+                material = asset.get_palette_materials()[index]
+                material_box = layout.box()
+                material_box.label(
+                    text=f"Material: {material.kind.title()}",
+                    icon="MATERIAL",
+                )
+                material_box.label(
+                    text=(
+                        f"A {material.alpha:.2f} · M {material.metallic:.2f} · "
+                        f"T {material.transmission:.2f} · E {material.emission_strength:.1f}"
+                    )
+                )
+                edit_material = material_box.operator(
+                    VOXTART_OT_palette_material.bl_idname,
+                    text="Edit Material",
+                    icon="MATERIAL",
+                )
+                edit_material.index = index
 
 
 
@@ -710,6 +916,12 @@ class VOXTART_PT_palette_panel(bpy.types.Panel):
             )
             select.index = index
             row.prop(item, "color", text="")
+            material = row.operator(
+                VOXTART_OT_palette_material.bl_idname,
+                text="",
+                icon="MATERIAL",
+            )
+            material.index = index
             duplicate = row.operator(VOXTART_OT_palette_duplicate.bl_idname, text="", icon="DUPLICATE")
             duplicate.index = index
             remove = row.operator(VOXTART_OT_palette_remove.bl_idname, text="", icon="X")
@@ -764,7 +976,7 @@ class VOXTART_PT_palette_panel(bpy.types.Panel):
         try:
             layout.label(text=source_by_id(source_id).license_note, icon="INFO")
         except KeyError:
-            pass
+            layout.label(text=f"Palette source is unavailable: {source_id}", icon="ERROR")
 
 
 _CLASSES = (
@@ -783,6 +995,7 @@ _CLASSES = (
     VOXTART_OT_palette_import_url,
     VOXTART_OT_palette_import_source,
     VOXTART_OT_palette_open_source,
+    VOXTART_OT_palette_material,
     VOXTART_PT_color_picker,
     VOXTART_PT_palette_panel,
 )

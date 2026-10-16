@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Palette parsing, quantization, and source metadata for VOXTART."""
 
@@ -73,6 +73,48 @@ _HEX_TOKEN = re.compile(r"^(?:#)?([0-9a-fA-F]{3,8})$")
 
 def _clamp(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
+
+
+def scene_linear_to_srgb_channel(value: float) -> float:
+    """Convert one palette channel to the sRGB Color Picker display space."""
+
+    value = _clamp(value)
+    if value <= 0.0031308:
+        return value * 12.92
+    return 1.055 * value ** (1.0 / 2.4) - 0.055
+
+
+def scene_linear_to_srgb(color: Iterable[float]) -> Color:
+    """Convert a linear RGBA palette color to the picker/display space."""
+
+    values = tuple(float(value) for value in color)
+    if len(values) not in (3, 4):
+        raise ValueError("color must contain three or four channels")
+    rgb = tuple(scene_linear_to_srgb_channel(value) for value in values[:3])
+    alpha = values[3] if len(values) == 4 else 1.0
+    return (*rgb, _clamp(alpha))  # type: ignore[return-value]
+
+
+def srgb_to_scene_linear_channel(value: float) -> float:
+    """Convert one sRGB Color Picker channel to scene-linear space."""
+
+    value = _clamp(value)
+    if value <= 0.04045:
+        return value / 12.92
+    return ((value + 0.055) / 1.055) ** 2.4
+
+
+def srgb_to_scene_linear(color: Iterable[float]) -> Color:
+    """Convert an sRGB picker color to a linear RGBA palette color."""
+
+    values = tuple(float(value) for value in color)
+    if len(values) not in (3, 4):
+        raise ValueError("color must contain three or four channels")
+    rgb = tuple(srgb_to_scene_linear_channel(value) for value in values[:3])
+    alpha = values[3] if len(values) == 4 else 1.0
+    return (*rgb, _clamp(alpha))  # type: ignore[return-value]
+
+
 
 
 def _channel(value: Any) -> float:

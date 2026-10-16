@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender operators and panels for Blockbench and Minecraft interchange."""
 
@@ -203,11 +203,19 @@ class VOXTART_PT_blockbench_minecraft(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        has_asset = (
+            getattr(context, "active_object", None) is not None
+            and operators.ASSET_PROPERTY in context.active_object
+        )
+        if not has_asset:
+            layout.label(text="Select a VOXTART asset to enable export.", icon="INFO")
         blockbench = layout.box()
         blockbench.label(text="Blockbench")
         blockbench.prop(scene, "voxtart_blockbench_units_per_voxel")
         blockbench.operator(VOXTART_OT_import_blockbench.bl_idname, text="Import .BBMODEL")
-        export = blockbench.operator(VOXTART_OT_export_blockbench.bl_idname, text="Export .BBMODEL")
+        export_row = blockbench.row()
+        export_row.enabled = has_asset
+        export = export_row.operator(VOXTART_OT_export_blockbench.bl_idname, text="Export .BBMODEL")
         export.units_per_voxel = scene.voxtart_blockbench_units_per_voxel
         minecraft = layout.box()
         minecraft.label(text="Minecraft")
@@ -215,7 +223,9 @@ class VOXTART_PT_blockbench_minecraft(bpy.types.Panel):
         minecraft.prop(scene, "voxtart_minecraft_format")
         minecraft.prop(scene, "voxtart_minecraft_default_block")
         minecraft.operator(VOXTART_OT_import_minecraft.bl_idname, text="Import Map / Schematic")
-        export = minecraft.operator(VOXTART_OT_export_minecraft.bl_idname, text="Export Map / Schematic")
+        export_row = minecraft.row()
+        export_row.enabled = has_asset
+        export = export_row.operator(VOXTART_OT_export_minecraft.bl_idname, text="Export Map / Schematic")
         export.format = scene.voxtart_minecraft_format
         export.default_block = scene.voxtart_minecraft_default_block
 

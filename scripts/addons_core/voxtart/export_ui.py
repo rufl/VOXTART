@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Qubicle-style optimized voxel mesh export for VOXTART assets."""
 
@@ -72,11 +72,16 @@ def _mesh_from_data(name: str, mesh_data, asset, material_remap: tuple[int, ...]
     mesh.from_pydata(mesh_data.vertices, [], mesh_data.faces)
     mesh.update()
     palette_indices = material_remap or tuple(range(len(asset.palette)))
+    material_specs = asset.get_palette_materials()
     for slot_index, palette_index in enumerate(palette_indices):
         material = bpy.data.materials.get(f"VOXTART Export {name} Palette {palette_index}")
         if material is None:
             material = bpy.data.materials.new(f"VOXTART Export {name} Palette {palette_index}")
-        material.diffuse_color = asset.palette[palette_index]
+        operators._configure_material(
+            material,
+            asset.palette[palette_index],
+            material_specs[palette_index],
+        )
         mesh.materials.append(material)
     for polygon, palette_index in zip(mesh.polygons, mesh_data.materials):
         if 0 <= palette_index < len(mesh.materials):

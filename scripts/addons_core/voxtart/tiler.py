@@ -1,13 +1,14 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Pixel-tile projection and 2D-to-voxel conversion for VOXTART.
 
-The tiler keeps one explicit scale contract: one source texture pixel occupies
-exactly ``pixel_scale`` scene units and one voxel cell in the target asset. The
-Blender adapter supplies the editor's current grid size; this module contains
-only deterministic texture, tile, projection, and palette logic.
+The tiler keeps the source-image scale separate from block density. A source
+pixel can be grouped with neighboring pixels into one voxel, preserving pixel
+art's hard color edges while avoiding a one-pixel/one-voxel explosion. The
+Blender adapter supplies the editor's block size; this module contains only
+deterministic texture, tile, projection, and palette logic.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import math
 from dataclasses import dataclass
 from typing import Iterable, Sequence
 
+from .image_intake import MAX_PIXELS_PER_VOXEL
 from .palette import MAX_PALETTE_COLORS, nearest_palette_index
 from .voxel import Cell, Color, VoxelAsset
 
@@ -312,6 +314,7 @@ class TilerSettings:
     flip_y: bool = False
     mode: str = "STAMP"
     alpha_threshold: float = 0.05
+    pixels_per_voxel: int = 1
 
     def __post_init__(self) -> None:
         pixel_scale = float(self.pixel_scale)
@@ -335,6 +338,15 @@ class TilerSettings:
         alpha_threshold = float(self.alpha_threshold)
         if not math.isfinite(alpha_threshold) or not 0.0 <= alpha_threshold <= 1.0:
             raise ValueError("tiler alpha threshold must be in [0, 1]")
+        pixels_per_voxel = self.pixels_per_voxel
+        if (
+            isinstance(pixels_per_voxel, bool)
+            or not isinstance(pixels_per_voxel, int)
+            or not 1 <= pixels_per_voxel <= MAX_PIXELS_PER_VOXEL
+        ):
+            raise ValueError(
+                f"tiler pixels_per_voxel must be between 1 and {MAX_PIXELS_PER_VOXEL}"
+            )
         object.__setattr__(self, "pixel_scale", pixel_scale)
         object.__setattr__(self, "axis", axis)
         object.__setattr__(self, "side", side)
@@ -342,6 +354,7 @@ class TilerSettings:
         object.__setattr__(self, "rotation", rotation)
         object.__setattr__(self, "mode", mode)
         object.__setattr__(self, "alpha_threshold", alpha_threshold)
+        object.__setattr__(self, "pixels_per_voxel", pixels_per_voxel)
 
 
 def ensure_pixel_scale(asset: VoxelAsset, pixel_scale: float) -> float:
@@ -379,6 +392,42 @@ def _transformed_pixels(tile: Tile, settings: TilerSettings) -> tuple[int, int, 
                 y = height - 1 - y
             output[y * width + x] = tile.pixels.pixel(source_x, source_y)
     return width, height, tuple(output)
+
+
+def _group_pixels(
+    width: int,
+    height: int,
+    pixels: tuple[Color, ...],
+    settings: TilerSettings,
+) -> tuple[int, int, tuple[Color, ...]]:
+    """Reduce source pixels to deterministic hard-edged macro-pixels."""
+
+    group = settings.pixels_per_voxel
+    if group == 1:
+        return width, height, pixels
+    grouped_width = (width + group - 1) // group
+    grouped_height = (height + group - 1) // group
+    grouped: list[Color] = []
+    for group_y in range(grouped_height):
+        for group_x in range(grouped_width):
+            counts: dict[Color, int] = {}
+            for source_y in range(group_y * group, min(height, (group_y + 1) * group)):
+                for source_x in range(group_x * group, min(width, (group_x + 1) * group)):
+                    color = pixels[source_y * width + source_x]
+                    if color[3] <= settings.alpha_threshold:
+                        continue
+                    counts[color] = counts.get(color, 0) + 1
+            if not counts:
+                grouped.append((0.0, 0.0, 0.0, 0.0))
+                continue
+            best_color = next(iter(counts))
+            best_count = counts[best_color]
+            for color, count in counts.items():
+                if count > best_count:
+                    best_color = color
+                    best_count = count
+            grouped.append(best_color)
+    return grouped_width, grouped_height, tuple(grouped)
 
 
 def _cell_for_pixel(anchor: Cell, axis: str, side: int, depth: int, x: int, y: int, height: int) -> Cell:
@@ -462,10 +511,13 @@ class TileProjection:
 
 
 def project_tile(tile: Tile, anchor: Iterable[int], settings: TilerSettings) -> TileProjection:
-    """Project opaque tile pixels into voxel cells without touching an asset."""
+    """Project grouped opaque pixels into voxel cells without touching an asset."""
 
     anchor = _cell(anchor)
-    width, height, pixels = _transformed_pixels(tile, settings)
+    width, height, pixels = _group_pixels(
+        *_transformed_pixels(tile, settings),
+        settings,
+    )
     footprint = []
     cells: dict[Cell, Color] = {}
     for depth in range(settings.depth):
@@ -505,7 +557,7 @@ def _palette_index(asset: VoxelAsset, color: Color) -> int:
         return asset.palette.index(color)
     except ValueError:
         if len(asset.palette) < MAX_PALETTE_COLORS:
-            asset.palette.append(color)
+            asset.add_palette_color(color)
             return len(asset.palette) - 1
         return nearest_palette_index(color, asset.palette)
 
@@ -567,6 +619,7 @@ def tile_to_voxel_asset(
         "tile_index": str(tile.index),
         "pixel_scale": f"{settings.pixel_scale:g}",
         "axis": settings.axis,
+        "pixels_per_voxel": str(settings.pixels_per_voxel),
     })
     return asset, report
 
@@ -614,6 +667,7 @@ def generate_seamless_voxel_asset(
 
 
 __all__ = [
+    "MAX_PIXELS_PER_VOXEL",
     "MAX_SEAMLESS_REPEAT",
     "MAX_TILE_DEPTH",
     "MAX_TILE_PIXELS",

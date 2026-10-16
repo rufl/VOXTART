@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender adapter for calibrated image-to-voxel reconstruction."""
 
@@ -14,7 +14,13 @@ from bpy.props import EnumProperty, FloatProperty, FloatVectorProperty, IntPrope
 
 from . import operators
 from .depth_observations import DepthObservation, PartMask, load_observation, load_part_mask
-from .image_intake import ImageFrame, PaletteIntakeSettings, extract_palette_frames, index_image
+from .image_intake import (
+    MAX_PIXELS_PER_VOXEL,
+    ImageFrame,
+    PaletteIntakeSettings,
+    extract_palette_frames,
+    index_image,
+)
 from .reconstruct import AcceptancePolicy, ReconstructionSettings, reconstruct_views
 from .sprite_pipeline import generate_candidates, select_candidate
 
@@ -243,39 +249,53 @@ def _report_from_object(obj):
     if obj is None:
         return None
     encoded = obj.get(RECONSTRUCTION_REPORT_PROPERTY)
-    if not isinstance(encoded, str):
+    if encoded is None:
         return None
+    if not isinstance(encoded, str):
+        raise ValueError("saved reconstruction report is not text")
     try:
         value = json.loads(encoded)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"saved reconstruction report is invalid: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError("saved reconstruction report must be an object")
+    return value
+
+
 def _candidate_review_from_object(obj):
     if obj is None:
         return None
     encoded = obj.get(RECONSTRUCTION_CANDIDATES_PROPERTY)
     selected = obj.get(RECONSTRUCTION_SELECTED_CANDIDATE_PROPERTY)
-    if not isinstance(encoded, str) or not isinstance(selected, str):
+    if encoded is None and selected is None:
         return None
+    if not isinstance(encoded, str) or not isinstance(selected, str):
+        raise ValueError("saved reconstruction candidate review is incomplete")
     try:
         candidates = json.loads(encoded)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"saved reconstruction candidate review is invalid: {error}") from error
     if not isinstance(candidates, list):
-        return None
+        raise ValueError("saved reconstruction candidate review must be a list")
+    if not selected.strip():
+        raise ValueError("saved reconstruction candidate selection is empty")
+    if any(not isinstance(candidate, dict) for candidate in candidates):
+        raise ValueError("saved reconstruction candidate review contains a non-object")
     return candidates, selected
 
 
 def _draw_candidate_review(layout, obj) -> None:
-    review = _candidate_review_from_object(obj)
+    try:
+        review = _candidate_review_from_object(obj)
+    except ValueError as error:
+        layout.label(text=str(error), icon="ERROR")
+        return
     if review is None:
         return
     candidates, selected = review
     box = layout.box()
     box.label(text=f"Candidate review · selected: {selected}", icon="SORTALPHA")
     for candidate in candidates:
-        if not isinstance(candidate, dict):
-            continue
         report = candidate.get("report", {})
         if not isinstance(report, dict):
             report = {}
@@ -326,6 +346,12 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
         default=(0.0, 0.0, 0.0, 1.0),
     )
     background_tolerance: FloatProperty(name="Background Tolerance", min=0.0, max=1.0, default=0.0)
+    pixels_per_voxel: IntProperty(
+        name="Pixels per Block",
+        min=1,
+        max=MAX_PIXELS_PER_VOXEL,
+        default=1,
+    )
     max_colors: IntProperty(name="Maximum Colors", min=1, max=256, default=256)
     mode: EnumProperty(name="Depth Mode", items=_MODE_ITEMS, default="SURFACE")
     shell_thickness: IntProperty(name="Shell Thickness", min=1, max=MAX_RECONSTRUCTION_CELLS, default=1)
@@ -360,6 +386,11 @@ class VOXTART_OT_reconstruct_image(bpy.types.Operator):
                 max_colors=int(self.max_colors),
             )
             indexed = index_image(frame, intake_settings)
+            if self.pixels_per_voxel > 1 and (depth_observation is not None or part_mask is not None):
+                raise ValueError(
+                    "Pixels per Block must be 1 when depth or part-mask data is supplied"
+                )
+            indexed = indexed.coarsen(self.pixels_per_voxel)
             view = indexed.to_view(
                 axis=self.axis,
                 direction=int(self.direction),
@@ -463,6 +494,14 @@ class VOXTART_OT_reconstruct_views(bpy.types.Operator):
             total_cells = 0
             for slot, frame, source, depth, depth_observation, part_mask in entries:
                 indexed = index_image(frame, intake_settings, palette=palette)
+                if (
+                    scene.voxtart_reconstruction_pixels_per_voxel > 1
+                    and (depth_observation is not None or part_mask is not None)
+                ):
+                    raise ValueError(
+                        "Pixels per Block must be 1 when depth or part-mask data is supplied"
+                    )
+                indexed = indexed.coarsen(scene.voxtart_reconstruction_pixels_per_voxel)
                 views.append(
                     indexed.to_view(
                         name=f"view_{slot}_{indexed.name}",
@@ -477,7 +516,7 @@ class VOXTART_OT_reconstruct_views(bpy.types.Operator):
                     )
                 )
                 sources.append(source)
-                total_cells += frame.width * frame.height * depth
+                total_cells += indexed.width * indexed.height * depth
                 for key, value in indexed.provenance().items():
                     source_provenance[f"view_{slot}_{key}"] = value
                 if depth_observation is not None:
@@ -550,6 +589,7 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
             layout.prop(scene, "voxtart_reconstruction_background_color")
             layout.prop(scene, "voxtart_reconstruction_background_tolerance")
         layout.prop(scene, "voxtart_reconstruction_max_colors")
+        layout.prop(scene, "voxtart_reconstruction_pixels_per_voxel", text="Pixels / Block")
         layout.prop(scene, "voxtart_reconstruction_mode", text="Depth Mode")
         layout.prop(scene, "voxtart_reconstruction_shell_thickness")
         layout.prop(scene, "voxtart_reconstruction_material_policy")
@@ -570,9 +610,14 @@ class VOXTART_PT_reconstruction(bpy.types.Panel):
         operator.max_colors = scene.voxtart_reconstruction_max_colors
         operator.mode = scene.voxtart_reconstruction_mode
         operator.shell_thickness = scene.voxtart_reconstruction_shell_thickness
+        operator.pixels_per_voxel = scene.voxtart_reconstruction_pixels_per_voxel
         operator.material_policy = scene.voxtart_reconstruction_material_policy
 
-        report = _report_from_object(context.active_object)
+        try:
+            report = _report_from_object(context.active_object)
+        except ValueError as error:
+            layout.label(text=str(error), icon="ERROR")
+            return
         if report is None:
             layout.label(text="No reconstruction report yet", icon="INFO")
             return
@@ -617,12 +662,17 @@ class VOXTART_PT_multiview_reconstruction(bpy.types.Panel):
             layout.prop(scene, "voxtart_reconstruction_background_color")
             layout.prop(scene, "voxtart_reconstruction_background_tolerance")
         layout.prop(scene, "voxtart_reconstruction_max_colors")
+        layout.prop(scene, "voxtart_reconstruction_pixels_per_voxel", text="Pixels / Block")
         layout.prop(scene, "voxtart_reconstruction_mode", text="Depth Mode")
         layout.prop(scene, "voxtart_reconstruction_shell_thickness")
         layout.prop(scene, "voxtart_reconstruction_material_policy")
         layout.operator(VOXTART_OT_reconstruct_views.bl_idname, icon="IMAGE_DATA")
 
-        report = _report_from_object(context.active_object)
+        try:
+            report = _report_from_object(context.active_object)
+        except ValueError as error:
+            layout.label(text=str(error), icon="ERROR")
+            return
         if report is None:
             layout.label(text="No reconstruction report yet", icon="INFO")
             return
@@ -722,6 +772,12 @@ def register() -> None:
         max=256,
         default=256,
     )
+    bpy.types.Scene.voxtart_reconstruction_pixels_per_voxel = IntProperty(
+        name="Reconstruction Pixels per Block",
+        min=1,
+        max=MAX_PIXELS_PER_VOXEL,
+        default=2,
+    )
     bpy.types.Scene.voxtart_reconstruction_mode = EnumProperty(
         name="Reconstruction Depth Mode",
         items=_MODE_ITEMS,
@@ -792,6 +848,7 @@ def unregister() -> None:
         "voxtart_reconstruction_shell_thickness",
         "voxtart_reconstruction_mode",
         "voxtart_reconstruction_max_colors",
+        "voxtart_reconstruction_pixels_per_voxel",
         "voxtart_reconstruction_background_tolerance",
         "voxtart_reconstruction_background_color",
         "voxtart_reconstruction_alpha_threshold",

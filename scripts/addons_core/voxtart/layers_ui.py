@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender UI and operators for non-destructive voxel layers."""
 
@@ -21,7 +21,16 @@ _SURFACE_BACKEND_ITEMS = (
     ("GREEDY", "Greedy Blocks", "Keep the active layer blocky"),
     ("MARCHING", "Marching / Round", "Use a smooth rounded marching surface for the active layer"),
 )
+LAYER_ERROR_PROPERTY = "voxtart_layer_error"
 
+
+def _clear_layer_error(scene) -> None:
+    if LAYER_ERROR_PROPERTY in scene:
+        del scene[LAYER_ERROR_PROPERTY]
+
+
+def _record_layer_error(scene, error) -> None:
+    scene[LAYER_ERROR_PROPERTY] = f"Layer update failed: {error}"
 
 
 def _active_stack(context):
@@ -32,10 +41,13 @@ def _active_stack(context):
         raise ValueError("select a VOXTART asset first")
     asset = operators._load_asset(obj)
     return obj, asset, operators._load_layer_stack(obj, asset)
+
+
 def _sync(context, obj, asset, stack) -> None:
     from . import operators
 
     operators._replace_asset_mesh(obj, asset, layer_stack=stack)
+    _clear_layer_error(context.scene)
     if getattr(context, "area", None) is not None:
         context.area.tag_redraw()
 
@@ -353,6 +365,9 @@ class VOXTART_PT_layers_panel(bpy.types.Panel):
             layout.label(text=str(error))
             return
         scene = context.scene
+        error_message = str(scene.get(LAYER_ERROR_PROPERTY, "") or "")
+        if error_message:
+            layout.label(text=error_message, icon="ERROR")
         _set_scene_controls(scene, stack.active)
         controls = layout.row(align=True)
         controls.operator(VOXTART_OT_layer_new.bl_idname, text="", icon="ADD")
@@ -445,8 +460,9 @@ def _update_layer_opacity(scene, _context):
         asset = operators._load_asset(obj)
         stack = operators._load_layer_stack(obj, asset)
         stack.active.opacity = scene.voxtart_layer_opacity
-        operators._replace_asset_mesh(obj, asset, layer_stack=stack)
-    except (TypeError, ValueError, IndexError, json.JSONDecodeError):
+        _sync(bpy.context, obj, asset, stack)
+    except (RuntimeError, TypeError, ValueError, IndexError, json.JSONDecodeError) as error:
+        _record_layer_error(scene, error)
         return
 
 
@@ -462,9 +478,12 @@ def _update_layer_blend(scene, _context):
         asset = operators._load_asset(obj)
         stack = operators._load_layer_stack(obj, asset)
         stack.active.blend_mode = scene.voxtart_layer_blend_mode
-        operators._replace_asset_mesh(obj, asset, layer_stack=stack)
-    except (TypeError, ValueError, IndexError, json.JSONDecodeError):
+        _sync(bpy.context, obj, asset, stack)
+    except (RuntimeError, TypeError, ValueError, IndexError, json.JSONDecodeError) as error:
+        _record_layer_error(scene, error)
         return
+
+
 def _update_layer_surface(scene, _context):
     if scene.get("voxtart_layer_ui_sync"):
         return
@@ -478,8 +497,9 @@ def _update_layer_surface(scene, _context):
         stack = operators._load_layer_stack(obj, asset)
         stack.active.surface_backend = scene.voxtart_layer_surface_backend
         obj[MESH_BACKEND_OVERRIDE_PROPERTY] = False
-        operators._replace_asset_mesh(obj, asset, layer_stack=stack)
-    except (TypeError, ValueError, IndexError, json.JSONDecodeError):
+        _sync(bpy.context, obj, asset, stack)
+    except (RuntimeError, TypeError, ValueError, IndexError, json.JSONDecodeError) as error:
+        _record_layer_error(scene, error)
         return
 
 

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender operators and sidebar controls for voxel mesh optimization."""
 
@@ -28,12 +28,10 @@ def _active_asset(context: bpy.types.Context):
     return obj
 
 
-def _palette_for_result(asset, report):
+def _palette_indices_for_result(asset, report):
     if report.material_remap:
-        return [asset.palette[index] for index in report.material_remap]
-    if report.materials_after == 0:
-        return []
-    return list(asset.palette)
+        return tuple(report.material_remap)
+    return tuple(range(len(asset.palette)))
 
 
 def _replace_mesh(obj: bpy.types.Object, asset, mesh_data, report) -> None:
@@ -45,12 +43,17 @@ def _replace_mesh(obj: bpy.types.Object, asset, mesh_data, report) -> None:
         polygon.material_index = int(material_index)
     obj.data = mesh
 
-    obj.data.materials.clear()
-    for index, color in enumerate(_palette_for_result(asset, report)):
-        material = bpy.data.materials.get(f"VOXTART {obj.name} Palette {index}")
+    palette_indices = _palette_indices_for_result(asset, report)
+    material_specs = asset.get_palette_materials()
+    for slot_index, palette_index in enumerate(palette_indices):
+        material = bpy.data.materials.get(f"VOXTART {obj.name} Palette {palette_index}")
         if material is None:
-            material = bpy.data.materials.new(f"VOXTART {obj.name} Palette {index}")
-        material.diffuse_color = tuple(color)
+            material = bpy.data.materials.new(f"VOXTART {obj.name} Palette {palette_index}")
+        operators._configure_material(
+            material,
+            asset.palette[palette_index],
+            material_specs[palette_index],
+        )
         obj.data.materials.append(material)
 
     obj[operators.MESH_BACKEND_PROPERTY] = report.backend
@@ -61,14 +64,20 @@ def _replace_mesh(obj: bpy.types.Object, asset, mesh_data, report) -> None:
 
 
 def _report_from_object(obj):
-    encoded = obj.get(OPTIMIZER_REPORT_PROPERTY)
-    if not isinstance(encoded, str):
+    if obj is None:
         return None
+    encoded = obj.get(OPTIMIZER_REPORT_PROPERTY)
+    if encoded is None:
+        return None
+    if not isinstance(encoded, str):
+        raise ValueError("saved optimization report is not text")
     try:
         value = json.loads(encoded)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"saved optimization report is invalid: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError("saved optimization report must be an object")
+    return value
 
 
 class VOXTART_OT_optimize_mesh(bpy.types.Operator):
@@ -144,7 +153,11 @@ class VOXTART_PT_optimizer(bpy.types.Panel):
         operator.compact_materials = scene.voxtart_optimizer_compact_materials
 
         obj = _active_asset(context)
-        report = _report_from_object(obj) if obj is not None else None
+        try:
+            report = _report_from_object(obj) if obj is not None else None
+        except ValueError as error:
+            layout.label(text=str(error), icon="ERROR")
+            return
         if report is None:
             layout.label(text="No optimization report yet", icon="INFO")
             return

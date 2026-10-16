@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender import, rendering, and controls for layered sprite stacks."""
 
@@ -433,7 +433,8 @@ class VOXTART_PT_stack_panel(bpy.types.Panel):
         layout.operator(VOXTART_OT_export_stack_manifest.bl_idname, text="Export .sstack.json", icon="EXPORT")
         try:
             document = StackDocument.decode(obj[STACK_PROPERTY])
-        except (TypeError, ValueError, json.JSONDecodeError):
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            layout.label(text=f"Saved stack data is invalid: {error}", icon="ERROR")
             return
         layer_box = layout.box()
         layer_box.label(text="Source layers (top shown first)", icon="LINENUMBERS")

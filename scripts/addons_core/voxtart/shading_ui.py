@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender operators and controls for whole-voxel shading and dithering."""
 
@@ -92,6 +92,7 @@ def _copy_asset_with_voxels(asset: VoxelAsset, voxels: dict[tuple[int, int, int]
         voxels=dict(voxels),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
 
 
@@ -345,6 +346,9 @@ class VOXTART_OT_clear_dither(bpy.types.Operator):
                 errors.append(f"{obj.name}: {error}")
         if errors and not cleared:
             self.report({"ERROR"}, "; ".join(errors[:3]))
+            return {"CANCELLED"}
+        if not cleared:
+            self.report({"WARNING"}, "No dither layers were found on the selected blobs")
             return {"CANCELLED"}
         message = f"removed dither layer from {cleared} blob(s)"
         if errors:

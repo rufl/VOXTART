@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender operators for portable voxel format import and export."""
 
@@ -13,7 +13,7 @@ from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Matrix, Vector
 
 from . import operators
-from .voxel import VoxelAsset
+from .voxel import VoxelAsset, remap_palette_materials
 from .voxel_formats import (
     VoxelFormatModel,
     decode_magica_vox_models,
@@ -69,6 +69,11 @@ def _compact_asset(asset: VoxelAsset) -> VoxelAsset:
             grid_size=asset.grid_size,
             palette=[asset.palette[0]],
             provenance=dict(asset.provenance),
+            palette_materials=remap_palette_materials(
+                asset.get_palette_materials(),
+                1,
+                index_map={0: 0},
+            ),
         )
     remap = {old: new for new, old in enumerate(used)}
     return VoxelAsset(
@@ -77,6 +82,11 @@ def _compact_asset(asset: VoxelAsset) -> VoxelAsset:
         voxels={cell: remap[index] for cell, index in asset.voxels.items()},
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=remap_palette_materials(
+            asset.get_palette_materials(),
+            len(used),
+            index_map=remap,
+        ),
     )
 
 
@@ -202,7 +212,12 @@ class VOXTART_PT_voxel_formats(bpy.types.Panel):
         layout.prop(scene, "voxtart_format_export_selected")
         layout.prop(scene, "voxtart_qb_compressed")
         layout.prop(scene, "voxtart_qb_color_format")
-        export = layout.operator(VOXTART_OT_export_voxel_format.bl_idname, text="Export .VOX / .QB")
+        has_assets = bool(_asset_objects(context, True))
+        if not has_assets:
+            layout.label(text="Select a VOXTART asset to enable export.", icon="INFO")
+        export_row = layout.row()
+        export_row.enabled = has_assets
+        export = export_row.operator(VOXTART_OT_export_voxel_format.bl_idname, text="Export .VOX / .QB")
         export.format = 'AUTO'
         export.export_selected = scene.voxtart_format_export_selected
         export.qb_compressed = scene.voxtart_qb_compressed

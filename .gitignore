@@ -1,5 +1,8 @@
 # generic files to ignore
 .*
+# REUSE compliance metadata is intentionally tracked.
+!.reuse/
+!.reuse/dep5
 # CI workflow configuration is intentionally tracked despite the dotfile rule.
 !.github/
 !.github/workflows/

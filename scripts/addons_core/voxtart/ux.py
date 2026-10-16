@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Beginner-friendly VOXTART workflow controls and shortcut profile."""
 
@@ -93,8 +93,8 @@ SHORTCUTS: tuple[ShortcutSpec, ...] = (
     ShortcutSpec(
         "voxtart.voxel_editor",
         "Q",
-        "Voxel editor",
-        "Open the MagicaVoxel-inspired interactive editor.",
+        "Make blocks",
+        "Open the block builder.",
     ),
     ShortcutSpec(
         "voxtart.show_shortcuts",
@@ -120,7 +120,7 @@ def _is_asset(context: bpy.types.Context) -> bool:
 def _draw_shortcuts(menu, _context) -> None:
     layout = menu.layout
     layout.label(text="VOXTART shortcuts — Blender shortcuts stay active")
-    layout.label(text="Use these in Object Mode with a VOXTART asset selected.")
+    layout.label(text="Most editing shortcuts work in Object Mode with a VOXTART asset selected.")
     layout.separator()
     for shortcut in SHORTCUTS:
         row = layout.row(align=True)
@@ -170,7 +170,7 @@ class VOXTART_OT_quick_palette_step(bpy.types.Operator):
         return _shortcut_enabled(context) and _is_asset(context)
 
     def execute(self, context):
-        from . import operators
+        from . import operators, palette_ui
 
         scene = context.scene
         try:
@@ -178,7 +178,8 @@ class VOXTART_OT_quick_palette_step(bpy.types.Operator):
             if not asset.palette:
                 raise ValueError("the active asset has no color slots")
             current = int(scene.voxtart_edit_palette_index)
-            scene.voxtart_edit_palette_index = (current + self.delta) % len(asset.palette)
+            next_index = (current + self.delta) % len(asset.palette)
+            palette_ui._set_palette_selection(scene, next_index, edit_index=next_index)
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             self.report({"ERROR"}, str(error))
             return {"CANCELLED"}
@@ -200,6 +201,7 @@ class VOXTART_OT_focus_asset(bpy.types.Operator):
             bpy.ops.view3d.view_selected(use_all_regions=True)
         except RuntimeError as error:
             self.report({"WARNING"}, str(error))
+            return {"CANCELLED"}
         return {"FINISHED"}
 
 

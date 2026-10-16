@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
-"""VoxStart splash surface shown before the VOXTART project editor."""
+"""VoxTart splash surface shown before the VOXTART project editor."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ from .desktop_shell import (
     _draw_text,
 )
 
-SPLASH_TITLE = "VoxStart"
-SPLASH_VERSION = "0.0.1-dogfood-(build)"
+SPLASH_TITLE = "VoxTart"
+SPLASH_VERSION = "A friendly voxel editor"
 ICON_IMAGE_PATH = Path(__file__).resolve().parents[3] / "assets" / "voxtart_icon_256.png"
 
 _ACTIVE_AREA = None
@@ -35,8 +35,8 @@ _MUTED = (0.62, 0.67, 0.75, 1.0)
 _ACCENT = (0.35, 0.62, 1.0, 1.0)
 _CARD_BORDER = (0.16, 0.2, 0.29, 0.98)
 _STATUS = (0.09, 0.12, 0.18, 1.0)
-_EYEBROW = "VOXTART DESKTOP"
-_STATUS_TEXT = "Preparing your editor"
+_EYEBROW = "WELCOME"
+_STATUS_TEXT = "Opening your block world..."
 
 
 def _load_icon() -> bool:
@@ -57,30 +57,30 @@ def _draw_splash(_state, context) -> None:
         return
     width = context.region.width
     height = context.region.height
-    card_width = min(620.0, width - 80.0)
-    card_height = min(470.0, height - 80.0)
+    card_width = min(680.0, width - 64.0)
+    card_height = min(520.0, height - 64.0)
     card_x = (width - card_width) / 2.0
     card_y = (height - card_height) / 2.0
 
     gpu.state.blend_set("ALPHA")
     try:
         _draw_rect(0, 0, width, height, _BG)
-        _draw_round_rect(card_x, card_y, card_width, card_height, _CARD_BORDER, radius=18.0)
+        _draw_round_rect(card_x, card_y, card_width, card_height, _CARD_BORDER, radius=20.0)
         _draw_round_rect(
             card_x + 1.0,
             card_y + 1.0,
             card_width - 2.0,
             card_height - 2.0,
             _CARD,
-            radius=17.0,
+            radius=19.0,
         )
-        _draw_rect(card_x + 28.0, card_y + 1.0, card_width - 56.0, 2.0, _ACCENT)
-        _draw_text(_EYEBROW, card_x + 34.0, card_y + card_height - 34.0, 11, _ACCENT)
-        _draw_text(SPLASH_TITLE, card_x + 34.0, card_y + card_height - 72.0, 30, _TEXT)
-        _draw_text(SPLASH_VERSION, card_x + 36.0, card_y + card_height - 98.0, 13, _MUTED)
+        _draw_rect(card_x + 30.0, card_y + 1.0, card_width - 60.0, 3.0, _ACCENT)
+        _draw_text(SPLASH_TITLE, card_x + 38.0, card_y + card_height - 80.0, 32, _TEXT)
+        _draw_text("Make a block world.", card_x + 40.0, card_y + card_height - 108.0, 14, _MUTED)
+        _draw_text(SPLASH_VERSION, card_x + 40.0, card_y + card_height - 128.0, 12, _MUTED)
 
         if _ICON_TEXTURE is not None:
-            icon_size = min(180.0, card_height * 0.42)
+            icon_size = min(184.0, card_height * 0.38)
             draw_texture_2d(
                 _ICON_TEXTURE,
                 (card_x + (card_width - icon_size) / 2.0, card_y + card_height * 0.31),
@@ -88,22 +88,45 @@ def _draw_splash(_state, context) -> None:
                 icon_size,
             )
 
-        _draw_centered("Voxel worlds start here.", card_x, card_y + 72.0, card_width, 17, _TEXT)
-        _draw_centered("A focused workspace for making, shaping, and sharing.", card_x, card_y + 48.0, card_width, 11, _MUTED)
-        status_x = card_x + 32.0
-        status_y = card_y + 16.0
-        status_width = card_width - 64.0
-        _draw_round_rect(status_x, status_y, status_width, 24.0, _STATUS, radius=12.0)
-        _draw_circle(status_x + 15.0, status_y + 12.0, 3.0, _ACCENT, segments=12)
-        _draw_text(_STATUS_TEXT, status_x + 28.0, status_y + 8.0, 11, _MUTED)
+        _draw_centered(
+            "Start with the little pyramid, then make it yours.",
+            card_x,
+            card_y + 112.0,
+            card_width,
+            16,
+            _TEXT,
+        )
+        _draw_centered(
+            "1  Pick a color     2  Click a face     3  Keep creating",
+            card_x,
+            card_y + 84.0,
+            card_width,
+            12,
+            _MUTED,
+        )
+        status_x = card_x + 34.0
+        status_y = card_y + 28.0
+        status_width = card_width - 68.0
+        _draw_round_rect(status_x, status_y, status_width, 30.0, _STATUS, radius=15.0)
+        _draw_circle(status_x + 17.0, status_y + 15.0, 4.0, _ACCENT, segments=12)
+        _draw_text(_STATUS_TEXT, status_x + 30.0, status_y + 10.0, 12, _MUTED)
     finally:
         gpu.state.blend_set("NONE")
 
 
-def _finish() -> None:
+
+
+def dismiss() -> None:
     global _ACTIVE_AREA, _DRAW_HANDLE, _ICON_IMAGE, _ICON_TEXTURE
+    try:
+        bpy.app.timers.unregister(_finish)
+    except (AttributeError, ValueError, RuntimeError):
+        pass
     if _DRAW_HANDLE is not None:
-        bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLE, "WINDOW")
+        try:
+            bpy.types.SpaceView3D.draw_handler_remove(_DRAW_HANDLE, "WINDOW")
+        except (ReferenceError, RuntimeError):
+            pass
     _DRAW_HANDLE = None
     _ICON_TEXTURE = None
     _ICON_IMAGE = None
@@ -111,6 +134,10 @@ def _finish() -> None:
     _ACTIVE_AREA = None
     if area is not None:
         area.tag_redraw()
+
+
+def _finish() -> None:
+    dismiss()
     from . import desktop_shell, desktop_ui
 
     if not desktop_ui.open_default_editor():
@@ -156,4 +183,4 @@ def show() -> bool:
     return False
 
 
-__all__ = ["ICON_IMAGE_PATH", "SPLASH_TITLE", "SPLASH_VERSION", "show"]
+__all__ = ["ICON_IMAGE_PATH", "SPLASH_TITLE", "SPLASH_VERSION", "dismiss", "show"]

@@ -36,3 +36,17 @@ Blender as a whole is licensed under the GNU General Public License, Version 3.
 Individual files may have a different but compatible license.
 
 See [blender.org/about/license](https://www.blender.org/about/license) for details.
+
+VOXTART additions
+-----------------
+
+This checkout contains the VOXTART voxel-authoring add-on, launcher, tools,
+and tests alongside the Blender source tree. VOXTART-owned software is
+licensed under GPL-3.0-or-later. VOXTART artwork and icons are released under
+CC0-1.0.
+
+The repository follows the [REUSE Specification](https://reuse.software/spec/)
+for file-level license metadata. Run `reuse lint` from the repository root to
+verify compliance. See [VOXTART-NOTICES.txt](VOXTART-NOTICES.txt) and
+[VOXTART-SOURCE-CODE-OFFER.txt](VOXTART-SOURCE-CODE-OFFER.txt) for attribution,
+third-party licensing, and corresponding-source details.

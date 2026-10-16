@@ -240,16 +240,19 @@ def txt_find_next_indented_block(text: str, find: str, pos: int, limit: int) -> 
 
 def check_contents(filepath: str, text: str) -> None:
     """
-    Check for license text, e.g: ``SPDX-License-Identifier: GPL-2.0-or-later``
+    Check for license text, e.g:
+    # REUSE-IgnoreStart
+    ``SPDX-License-Identifier: GPL-2.0-or-later``
+    # REUSE-IgnoreEnd
 
     Intentionally be strict here... no extra spaces, no trailing space at the end of line etc.
     As there is no reason to be sloppy in this case.
     """
-    text_header = text[:EXPECT_SPDX_IN_FIRST_CHARS]
-
     # Use the license to limit the copyright search,
     # so code-generation that includes copyright headers don't cause false alarms.
+    # REUSE-IgnoreStart
     license_id = " SPDX-License-Identifier: "
+    # REUSE-IgnoreEnd
     license_id_beg = text_header.find(license_id)
     if license_id_beg == -1:
         # Allow completely empty files (sometimes `__init__.py`).

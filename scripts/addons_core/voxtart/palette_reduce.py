@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic palette reduction for sparse voxel assets.
 
@@ -15,7 +15,7 @@ from dataclasses import asdict, dataclass
 from typing import Iterable, Sequence
 
 from .palette import MAX_PALETTE_COLORS, coerce_color, nearest_palette_index
-from .voxel import Color, VoxelAsset
+from .voxel import Color, VoxelAsset, remap_palette_materials
 
 
 PALETTE_REDUCTION_METHODS = ("MEDIAN_CUT",)
@@ -216,6 +216,10 @@ def reduce_asset_palette(
         voxels=voxels,
         sockets=list(asset.sockets),
         provenance=provenance,
+        palette_materials=remap_palette_materials(
+            asset.get_palette_materials(),
+            len(reduced),
+        ),
     )
     return result, PaletteReductionReport(
         source_colors=len(asset.palette),

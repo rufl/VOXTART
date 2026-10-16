@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Headless Blender end-to-end checks for the VOXTART editor.
 
@@ -76,6 +76,7 @@ class _EditorHarness:
     """Plain-Python shell exposing the registered operator's workflow methods."""
 
     _apply_at_cursor = voxel_editor.VOXTART_OT_voxel_editor._apply_at_cursor
+    _stroke_hits = voxel_editor.VOXTART_OT_voxel_editor._stroke_hits
     _activate_toolbar_tool = voxel_editor.VOXTART_OT_voxel_editor._activate_toolbar_tool
     _grid_hit = voxel_editor.VOXTART_OT_voxel_editor._grid_hit
     _apply_cells = voxel_editor.VOXTART_OT_voxel_editor._apply_cells
@@ -190,7 +191,7 @@ class BlenderEndToEndTest(unittest.TestCase):
             self.scene.voxtart_editor_shape = "VOXEL"
             editor.selection = ((0, 0, 0),)
             voxel_editor._store_selection(obj, editor.selection)
-            self.assertEqual(editor.modal(context, _event("G")), {"RUNNING_MODAL"})
+            self.assertEqual(editor.modal(context, _event("G", shift=True)), {"RUNNING_MODAL"})
             self.assertEqual(editor.modal(context, _event("RIGHT_ARROW")), {"RUNNING_MODAL"})
             self.assertEqual(editor.modal(context, _event("RET")), {"RUNNING_MODAL"})
             self.assertIn((1, 0, 0), operators._load_asset(obj).voxels)
@@ -205,7 +206,7 @@ class BlenderEndToEndTest(unittest.TestCase):
             original_location = tuple(obj.location)
             self.assertEqual(editor.modal(context, _event("TAB")), {"RUNNING_MODAL"})
             self.assertEqual(self.scene.voxtart_editor_workspace, "SCENE")
-            self.assertEqual(editor.modal(context, _event("G")), {"RUNNING_MODAL"})
+            self.assertEqual(editor.modal(context, _event("G", shift=True)), {"RUNNING_MODAL"})
             self.assertEqual(editor.modal(context, _event("RIGHT_ARROW")), {"RUNNING_MODAL"})
             self.assertEqual(editor.modal(context, _event("RET")), {"RUNNING_MODAL"})
             self.assertEqual(tuple(obj.location), (original_location[0] + 1.0, original_location[1], original_location[2]))
@@ -223,6 +224,7 @@ class BlenderEndToEndTest(unittest.TestCase):
                 VoxelAsset.box(1),
             )
             editor = self._make_editor(obj)
+            self.scene[voxel_editor.EDITOR_ADVANCED_PROPERTY] = True
             toolbar_context = SimpleNamespace(
                 scene=self.scene,
                 area=None,
@@ -230,7 +232,10 @@ class BlenderEndToEndTest(unittest.TestCase):
                 region_data=None,
             )
             toolbar_panel, toolbar_entries = voxel_editor._editor_toolbar_layout(900)
-            self.assertLessEqual(toolbar_panel[2], 48.0)
+            self.assertLessEqual(
+                toolbar_panel[2],
+                48.0 * voxel_editor.ui_style.ui_scale(),
+            )
             erase_item, erase_bounds = next(
                 (item, bounds)
                 for item, bounds in toolbar_entries

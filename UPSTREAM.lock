@@ -10,5 +10,5 @@ release_page=https://www.blender.org/download/lts/5-2/
 source_archive=https://download.blender.org/source/blender-5.2.2.tar.xz
 source_archive_sha256=not_downloaded
 release_checksums=https://download.blender.org/release/Blender5.2/blender-5.2.2.sha256
-license_notice=Blender is GPL-licensed; retain upstream notices and publish compatible additions
-voxtart_license=MIT
+license_notice=Blender is GPL-licensed; retain upstream notices and publish GPL-3.0-or-later VOXTART additions
+voxtart_license=GPL-3.0-or-later

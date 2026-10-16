@@ -1,6 +1,6 @@
 /* SPDX-FileCopyrightText: 2026 VOXTART contributors
  *
- * SPDX-License-Identifier: MIT
+ * SPDX-License-Identifier: GPL-3.0-or-later
  */
 
 #include <windows.h>
@@ -303,6 +303,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
   wchar_t preferences_init_path[PATH_CAPACITY];
   wchar_t preferences_directory[PATH_CAPACITY];
   wchar_t preferences_path[PATH_CAPACITY];
+  wchar_t preferences_marker_path[PATH_CAPACITY];
 #if defined(VOXTART_RUNTIME_WRAPPER)
   if (!path_join(root_path, PATH_CAPACITY, executable_directory, L"") ||
       !parent_path(root_path) || !parent_path(root_path) || !parent_path(root_path) ||
@@ -340,7 +341,11 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
       !path_join(preferences_directory, PATH_CAPACITY, root_path, L"\\config\\blender")) {
     return 4;
   }
-  if (!path_join(preferences_path, PATH_CAPACITY, preferences_directory, L"\\userpref.blend")) {
+  if (!path_join(preferences_path, PATH_CAPACITY, preferences_directory, L"\\userpref.blend") ||
+      !path_join(preferences_marker_path,
+                 PATH_CAPACITY,
+                 preferences_directory,
+                 L"\\voxtart-splash-disabled-v1")) {
     return 4;
   }
 
@@ -349,7 +354,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, 
   CreateDirectoryW(L"config", NULL);
   CreateDirectoryW(preferences_directory, NULL);
 
-  if (!file_exists(preferences_path)) {
+  if (!file_exists(preferences_path) || !file_exists(preferences_marker_path)) {
     wchar_t preference_command[COMMAND_CAPACITY];
     size_t length = 0;
     preference_command[0] = L'\0';

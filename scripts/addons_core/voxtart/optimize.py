@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic, policy-driven voxel resampling."""
 
@@ -98,6 +98,7 @@ def decimate(asset: VoxelAsset, policy: DecimationPolicy = DecimationPolicy()) -
             palette=list(asset.palette),
             sockets=_resample_sockets(asset.sockets, policy.factor),
             provenance={**asset.provenance, "decimation_factor": str(policy.factor)},
+            palette_materials=asset.get_palette_materials(),
         )
         return empty, DecimationReport(
             source_voxels=0,
@@ -156,6 +157,7 @@ def decimate(asset: VoxelAsset, policy: DecimationPolicy = DecimationPolicy()) -
             "decimation_factor": str(policy.factor),
             "decimation_threshold": policy.threshold,
         },
+        palette_materials=asset.get_palette_materials(),
     )
     protected_cells_lost = sum(
         1 for cell in protected_present if tuple(axis // policy.factor for axis in cell) not in output.voxels

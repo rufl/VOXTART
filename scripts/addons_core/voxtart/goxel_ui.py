@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Compact Goxel-inspired tool, brush, and palette panels for Blender."""
 
@@ -40,6 +40,8 @@ class VOXTART_PT_goxel_tool_shelf(bpy.types.Panel):
         scene = context.scene
         layout.operator("voxtart.voxel_editor", text="Open Voxel Editor", icon="CUBE")
         layout.separator()
+        if not _has_asset(context):
+            layout.label(text="Select a VOXTART asset for edit and pick tools.", icon="INFO")
         grid = layout.grid_flow(row_major=True, columns=2, even_columns=True, even_rows=True)
 
         cube = grid.operator("voxtart.add_voxel_cube", text="", icon="CUBE")

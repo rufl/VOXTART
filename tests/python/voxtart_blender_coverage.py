@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2026 Blender Authors
+# SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Run the Blender-native VOXTART suite and print UI line coverage."""
 

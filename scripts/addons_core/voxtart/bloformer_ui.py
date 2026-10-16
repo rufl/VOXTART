@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender operator and panel for volume-based blob deformation."""
 
@@ -53,6 +53,7 @@ def _apply_to_active(context, settings: dict):
         voxels=dict(stack.active.voxels),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
     report = apply_bloformer(
         editable,
@@ -131,21 +132,26 @@ class VOXTART_PT_bloformer(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        active_asset = _is_asset(getattr(context, "active_object", None))
         layout.label(text="Volume deformation for the active blob", icon="MOD_DISPLACE")
-        layout.prop(scene, "voxtart_bloformer_mode", text="Mode")
-        layout.prop(scene, "voxtart_bloformer_shape", text="Shape")
-        layout.prop(scene, "voxtart_bloformer_center", text="Center")
-        layout.prop(scene, "voxtart_bloformer_radius", text="Radius")
+        if not active_asset:
+            layout.label(text="Select a VOXTART blob to enable deformation.", icon="INFO")
+        controls = layout.column()
+        controls.enabled = active_asset
+        controls.prop(scene, "voxtart_bloformer_mode", text="Mode")
+        controls.prop(scene, "voxtart_bloformer_shape", text="Shape")
+        controls.prop(scene, "voxtart_bloformer_center", text="Center")
+        controls.prop(scene, "voxtart_bloformer_radius", text="Radius")
         if scene.voxtart_bloformer_mode == "CARVE":
-            layout.prop(scene, "voxtart_bloformer_thickness", text="Shell Thickness")
+            controls.prop(scene, "voxtart_bloformer_thickness", text="Shell Thickness")
         if scene.voxtart_bloformer_shape == "CYLINDER":
-            layout.prop(scene, "voxtart_bloformer_axis", text="Axis")
+            controls.prop(scene, "voxtart_bloformer_axis", text="Axis")
         if scene.voxtart_bloformer_mode in {"ADD", "INFLATE", "SMOOTH"}:
-            layout.prop(scene, "voxtart_bloformer_palette_index", text="Palette")
+            controls.prop(scene, "voxtart_bloformer_palette_index", text="Palette")
         if scene.voxtart_bloformer_mode == "ADD":
-            layout.prop(scene, "voxtart_bloformer_overwrite", text="Overwrite Existing")
-        layout.prop(scene, "voxtart_bloformer_allow_protected", text="Edit Protected")
-        operation = layout.operator(VOXTART_OT_bloformer.bl_idname, text="Apply Bloformer", icon="MOD_DISPLACE")
+            controls.prop(scene, "voxtart_bloformer_overwrite", text="Overwrite Existing")
+        controls.prop(scene, "voxtart_bloformer_allow_protected", text="Edit Protected")
+        operation = controls.operator(VOXTART_OT_bloformer.bl_idname, text="Apply Bloformer", icon="MOD_DISPLACE")
         operation.mode = scene.voxtart_bloformer_mode
         operation.shape = scene.voxtart_bloformer_shape
         operation.center = tuple(scene.voxtart_bloformer_center)

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Optional MCP server and LLM chat panel for VOXTART.
 
@@ -11,10 +11,11 @@ is also opt-in and uses an OpenAI-compatible chat-completions endpoint; its
 model receives the same bounded MCP tools exposed to external clients.
 """
 
-
+import base64
 import http.server
 import json
 import math
+import mimetypes
 import os
 import queue
 import secrets
@@ -23,10 +24,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 import bpy
 from bpy.props import BoolProperty, IntProperty, StringProperty
+from bpy_extras.io_utils import ImportHelper
 
 from .mcp_protocol import (
     MCPDispatcher,
@@ -43,6 +46,11 @@ MAX_HTTP_BODY = 4 * 1024 * 1024
 MAX_TOOL_VOXELS = 100_000
 MAX_BOX_SIZE = 46
 MAX_CHAT_TRANSCRIPT = 60_000
+MAX_CHAT_IMAGES = 4
+MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024
+CHAT_IMAGE_EXTENSIONS = frozenset({".gif", ".jpeg", ".jpg", ".png", ".webp"})
+CHAT_BAR_HEIGHT = 56.0
+CHAT_BAR_Y = 40.0
 MUTATING_TOOLS = frozenset(
     {
         "voxtart_create_box",
@@ -73,6 +81,7 @@ class _ChatResult:
 
 _CHAT_RESULTS: queue.Queue[_ChatResult] = queue.Queue()
 _CHAT_HISTORY: list[dict[str, Any]] = []
+_CHAT_ATTACHMENTS: list[dict[str, str]] = []
 _CHAT_WORKER_ACTIVE = False
 _CHAT_TIMER_REGISTERED = False
 _CHAT_LOCK = threading.Lock()
@@ -88,6 +97,142 @@ def _preferences():
 def _window_manager():
     return bpy.context.window_manager
 
+
+def chat_layout(width: float, height: float, *, scale: float = 1.0) -> dict[str, tuple[float, float, float, float]]:
+    """Return the centered bottom chat bar hit regions for a VOXTART surface."""
+
+    scale = max(0.5, float(scale))
+    viewport_width = max(1.0, float(width))
+    bar_height = CHAT_BAR_HEIGHT * scale
+    bar_width = min(760.0 * scale, max(280.0 * scale, viewport_width - 24.0 * scale))
+    bar_width = min(bar_width, viewport_width - 12.0 * scale)
+    bar_x = max(6.0 * scale, (viewport_width - bar_width) * 0.5)
+    bar_y = CHAT_BAR_Y * scale
+    inner_y = bar_y + 8.0 * scale
+    inner_height = 40.0 * scale
+    gap = 6.0 * scale
+    image_width = 94.0 * scale
+    send_width = 78.0 * scale
+    image_x = bar_x + 8.0 * scale
+    field_x = image_x + image_width + gap
+    send_x = bar_x + bar_width - send_width - 8.0 * scale
+    field_width = max(40.0 * scale, send_x - gap - field_x)
+    return {
+        "panel": (bar_x, bar_y, bar_x + bar_width, bar_y + bar_height),
+        "chat:image": (image_x, inner_y, image_x + image_width, inner_y + inner_height),
+        "chat:field": (field_x, inner_y, field_x + field_width, inner_y + inner_height),
+        "chat:send": (send_x, inner_y, send_x + send_width, inner_y + inner_height),
+    }
+
+
+def chat_input_focused() -> bool:
+    try:
+        return bool(getattr(_window_manager(), "voxtart_chat_focus", False))
+    except AttributeError:
+        return False
+
+
+def set_chat_input_focus(focused: bool) -> None:
+    try:
+        _window_manager().voxtart_chat_focus = bool(focused)
+    except AttributeError:
+        pass
+
+
+def chat_attachment_names() -> tuple[str, ...]:
+    return tuple(str(item.get("name", "")) for item in _CHAT_ATTACHMENTS if item.get("name"))
+
+
+def chat_attachment_label() -> str:
+    names = chat_attachment_names()
+    if not names:
+        return ""
+    if len(names) == 1:
+        return f"Image: {names[0]}"
+    return f"{len(names)} images attached"
+
+
+def chat_model_label() -> str:
+    preferences = _preferences()
+    model = str(getattr(preferences, "llm_model", "")).strip() if preferences else ""
+    return f"LOCAL MCP · {model[:28]}" if model else "LOCAL MCP · configure a model"
+
+
+def handle_chat_text_event(event) -> bool:
+    """Consume focused prompt keyboard events before editor shortcuts see them."""
+
+    if str(getattr(event, "type", "")) in {"LEFTMOUSE", "RIGHTMOUSE", "MOUSEMOVE"}:
+        return False
+    if not chat_input_focused():
+        return False
+    if getattr(event, "value", None) != "PRESS":
+        return True
+    event_type = str(getattr(event, "type", ""))
+    manager = _window_manager()
+    if event_type == "ESC":
+        set_chat_input_focus(False)
+        return True
+    if event_type in {"RET", "NUMPADENTER"}:
+        try:
+            bpy.ops.voxtart.chat_send()
+        except (AttributeError, RuntimeError):
+            _set_chat_status("Chat is not available")
+        return True
+    prompt = str(getattr(manager, "voxtart_chat_prompt", ""))
+    if event_type == "BACK_SPACE":
+        manager.voxtart_chat_prompt = prompt[:-1]
+        return True
+    character = str(getattr(event, "ascii", "") or "")
+    if character and character.isprintable() and len(prompt) < 4096:
+        manager.voxtart_chat_prompt = prompt + character
+    return True
+
+
+def _chat_message_content(prompt: str) -> str | list[dict[str, Any]]:
+    text = str(prompt or "").strip()
+    if not text:
+        text = "Use the attached reference image as the starting point for a VOXTART asset."
+    if not _CHAT_ATTACHMENTS:
+        return text
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+    content.extend(
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{item['mime']};base64,{item['data']}",
+            },
+        }
+        for item in _CHAT_ATTACHMENTS
+    )
+    return content
+
+
+def _attach_chat_image(filepath: str) -> None:
+    path = Path(bpy.path.abspath(str(filepath or ""))).expanduser()
+    if not path.is_file():
+        raise ValueError(f"image file does not exist: {path}")
+    if path.suffix.lower() not in CHAT_IMAGE_EXTENSIONS:
+        raise ValueError("reference image must be PNG, JPEG, WebP, or GIF")
+    if path.stat().st_size > MAX_CHAT_IMAGE_BYTES:
+        raise ValueError(f"reference image exceeds the {MAX_CHAT_IMAGE_BYTES // (1024 * 1024)} MiB limit")
+    if len(_CHAT_ATTACHMENTS) >= MAX_CHAT_IMAGES:
+        raise ValueError(f"at most {MAX_CHAT_IMAGES} reference images can be attached")
+    mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    if not mime.startswith("image/"):
+        raise ValueError("reference image has an unsupported MIME type")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    _CHAT_ATTACHMENTS.append({"name": path.name, "mime": mime, "data": encoded})
+    manager = _window_manager()
+    manager.voxtart_chat_attachments = ", ".join(chat_attachment_names())[:2048]
+    set_chat_input_focus(True)
+    _set_chat_status("Reference image attached — describe what to make")
+
+def _clear_chat_attachments() -> None:
+    _CHAT_ATTACHMENTS.clear()
+    try:
+        _window_manager().voxtart_chat_attachments = ""
+    except AttributeError:
+        pass
 
 def _set_chat_status(status: str) -> None:
     try:
@@ -715,8 +860,9 @@ def _chat_request(endpoint: str, model: str, api_key: str, history: list[dict[st
                     "role": "system",
                     "content": (
                         "You are the VOXTART voxel authoring assistant. "
-                        "Use the provided tools for scene changes. Keep creations bounded, "
-                        "grid-aligned, and explain the result briefly."
+                        "Use the provided MCP tools for scene changes. Keep creations bounded, "
+                        "grid-aligned, and explain the result briefly. When reference images "
+                        "are attached, use them as visual guidance rather than inventing hidden detail."
                     ),
                 },
                 *history,
@@ -946,22 +1092,24 @@ class VOXTART_OT_mcp_copy_config(bpy.types.Operator):
 
 class VOXTART_OT_chat_send(bpy.types.Operator):
     bl_idname = "voxtart.chat_send"
-    bl_label = "Send to VOXTART Assistant"
-    bl_description = "Send the prompt to the configured OpenAI-compatible LLM endpoint"
+    bl_label = "Send to Local VOXTART Model"
+    bl_description = "Send the prompt and optional reference images through the local MCP tool bridge"
 
     def execute(self, _context):
         manager = _window_manager()
         prompt = manager.voxtart_chat_prompt.strip()
-        if not prompt:
-            self.report({'ERROR'}, "Enter a prompt first")
+        if not prompt and not _CHAT_ATTACHMENTS:
+            self.report({'ERROR'}, "Enter a prompt or attach a reference image first")
             return {'CANCELLED'}
-        if not (_preferences() and _preferences().chat_enabled):
-            self.report({'ERROR'}, "Enable the optional chat panel in VOXTART Add-on Preferences")
-            return {'CANCELLED'}
-        _CHAT_HISTORY.append({"role": "user", "content": prompt})
-        _append_chat_transcript("You", prompt)
+        display_prompt = prompt or "Use the attached reference image as the starting point."
+        if _CHAT_ATTACHMENTS:
+            display_prompt = f"{display_prompt}  [{chat_attachment_label()}]"
+        _CHAT_HISTORY.append({"role": "user", "content": _chat_message_content(prompt)})
+        _append_chat_transcript("You", display_prompt)
         manager.voxtart_chat_prompt = ""
-        _set_chat_status("Requesting…")
+        _clear_chat_attachments()
+        set_chat_input_focus(False)
+        _set_chat_status("Requesting through local MCP…")
         try:
             _start_chat_request()
         except (RuntimeError, ValueError) as error:
@@ -971,17 +1119,38 @@ class VOXTART_OT_chat_send(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class VOXTART_OT_chat_attach_image(bpy.types.Operator, ImportHelper):
+    bl_idname = "voxtart.chat_attach_image"
+    bl_label = "Add Reference Image"
+    bl_description = "Attach one or more local images as a VOXTART model reference"
+    filter_glob: StringProperty(
+        default="*.png;*.jpg;*.jpeg;*.webp;*.gif",
+        options={"HIDDEN"},
+    )
+
+    def execute(self, _context):
+        try:
+            _attach_chat_image(self.filepath)
+        except (OSError, RuntimeError, TypeError, ValueError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Attached reference image: {Path(self.filepath).name}")
+        return {'FINISHED'}
+
+
 class VOXTART_OT_chat_clear(bpy.types.Operator):
     bl_idname = "voxtart.chat_clear"
     bl_label = "Clear Chat"
-    bl_description = "Clear the optional VOXTART chat transcript"
+    bl_description = "Clear the VOXTART local-model conversation and pending references"
 
     def execute(self, _context):
         _CHAT_HISTORY.clear()
+        _clear_chat_attachments()
         manager = _window_manager()
         manager.voxtart_chat_prompt = ""
         manager.voxtart_chat_transcript = ""
         manager.voxtart_chat_status = "Ready"
+        set_chat_input_focus(False)
         return {'FINISHED'}
 
 
@@ -1036,8 +1205,11 @@ class VOXTART_PT_chat_panel(bpy.types.Panel):
                 box.label(text=line[:240])
         layout.prop(manager, "voxtart_chat_prompt", text="Prompt")
         row = layout.row(align=True)
+        row.operator(VOXTART_OT_chat_attach_image.bl_idname, icon='IMAGE_DATA')
         row.operator(VOXTART_OT_chat_send.bl_idname, icon='PLAY')
         row.operator(VOXTART_OT_chat_clear.bl_idname, icon='TRASH')
+        if chat_attachment_label():
+            layout.label(text=chat_attachment_label(), icon='IMAGE_DATA')
 
 
 _CLASSES = (
@@ -1046,6 +1218,7 @@ _CLASSES = (
     VOXTART_OT_mcp_stop,
     VOXTART_OT_mcp_copy_config,
     VOXTART_OT_chat_send,
+    VOXTART_OT_chat_attach_image,
     VOXTART_OT_chat_clear,
     VOXTART_PT_mcp_panel,
     VOXTART_PT_chat_panel,
@@ -1064,13 +1237,26 @@ def register() -> None:
     bpy.types.WindowManager.voxtart_chat_status = StringProperty(
         name="Status", maxlen=512, default="Ready"
     )
+    bpy.types.WindowManager.voxtart_chat_focus = BoolProperty(
+        name="Chat input focused", default=False, options={"HIDDEN"}
+    )
+    bpy.types.WindowManager.voxtart_chat_attachments = StringProperty(
+        name="Reference images", maxlen=2048, default="", options={"HIDDEN"}
+    )
 
 
 def unregister() -> None:
     _BRIDGE.stop()
     global _CHAT_HISTORY
     _CHAT_HISTORY.clear()
-    for name in ("voxtart_chat_status", "voxtart_chat_transcript", "voxtart_chat_prompt"):
+    _clear_chat_attachments()
+    for name in (
+        "voxtart_chat_attachments",
+        "voxtart_chat_focus",
+        "voxtart_chat_status",
+        "voxtart_chat_transcript",
+        "voxtart_chat_prompt",
+    ):
         if hasattr(bpy.types.WindowManager, name):
             delattr(bpy.types.WindowManager, name)
     for cls in reversed(_CLASSES):

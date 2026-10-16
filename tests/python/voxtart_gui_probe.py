@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Drive the real Blender viewport and capture the VOXTART editor overlay."""
 
@@ -207,6 +207,77 @@ def _modal_click(point: tuple[float, float]) -> None:
         event.value = "RELEASE"
         editor.modal(bpy.context, event)
 
+def _modal_drag(points: list[tuple[float, float]]) -> None:
+    if len(points) < 2:
+        raise ValueError("drag probe requires at least two points")
+    editor = STATE["editor"]
+    with bpy.context.temp_override(
+        window=STATE["window"],
+        screen=STATE["screen"],
+        area=STATE["area"],
+        region=STATE["region"],
+    ):
+        press = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=points[0][0],
+            mouse_region_y=points[0][1],
+        )
+        editor.modal(bpy.context, press)
+        for point in points[1:]:
+            move = SimpleNamespace(
+                type="MOUSEMOVE",
+                value="NOTHING",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=point[0],
+                mouse_region_y=point[1],
+            )
+            editor.modal(bpy.context, move)
+        release = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="RELEASE",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=points[-1][0],
+            mouse_region_y=points[-1][1],
+        )
+        editor.modal(bpy.context, release)
+
+
+def _visible_paint_targets(editor, obj, area, region):
+    region_data = area.spaces.active.region_3d
+    ray_context = SimpleNamespace(region=region, region_data=region_data)
+    asset = operators._load_asset(obj)
+    targets = {}
+    for cell, palette_index in asset.voxels.items():
+        if palette_index != 0:
+            continue
+        local = voxel_editor.Vector(
+            tuple((cell[axis] + 0.5) * asset.grid_size for axis in range(3))
+        )
+        point = voxel_editor.view3d_utils.location_3d_to_region_2d(
+            region,
+            region_data,
+            obj.matrix_world @ local,
+        )
+        if point is None:
+            continue
+        hit = editor._ray_hit(
+            ray_context,
+            SimpleNamespace(
+                mouse_region_x=float(point.x),
+                mouse_region_y=float(point.y),
+            ),
+        )
+        if hit is not None and any(hit.normal) and asset.voxels.get(hit.cell) == 0:
+            targets.setdefault(hit.cell, (float(point.x), float(point.y)))
+    return [(point, cell) for cell, point in sorted(targets.items())]
 def _modal_key(event_type: str, *, ctrl: bool = False, shift: bool = False):
     event = SimpleNamespace(
         type=event_type,
@@ -245,6 +316,36 @@ def _check_left_click():
         added_cell = next(iter(added))
         if asset.voxels[added_cell] != 1:
             return _fail(f"Left click did not use the selected non-default palette: {asset.voxels[added_cell]!r}")
+        mesh_material_indices = {
+            int(polygon.material_index)
+            for polygon in getattr(STATE["obj"].data, "polygons", ())
+        }
+        if 1 not in mesh_material_indices:
+            return _fail(
+                f"Left click changed voxel data but not the displayed material: "
+                f"materials={mesh_material_indices!r}, palette={asset.palette!r}, "
+                f"voxel={asset.voxels.get(added_cell)!r}, "
+                f"slots={len(getattr(STATE['obj'].data, 'materials', ()))}"
+            )
+        palette_material = STATE["obj"].data.materials[1]
+        shader = getattr(getattr(palette_material, "node_tree", None), "nodes", {}).get(
+            "Principled BSDF"
+        )
+        base_color = shader.inputs.get("Base Color") if shader is not None else None
+        actual_color = (
+            tuple(float(value) for value in base_color.default_value)
+            if base_color is not None
+            else ()
+        )
+        expected_color = tuple(float(value) for value in asset.palette[1])
+        if (
+            len(actual_color) != len(expected_color)
+            or any(abs(actual - expected) > 1.0e-6 for actual, expected in zip(actual_color, expected_color))
+        ):
+            return _fail(
+                f"Palette material node did not use the selected color: "
+                f"actual={actual_color!r}, expected={expected_color!r}"
+            )
         if STATE["scene"].get(voxel_editor.FIRST_RUN_HINT_PROPERTY) is not False:
             return _fail("First-edit guidance did not close after a changed edit")
         editor = STATE["editor"]
@@ -279,7 +380,33 @@ def _finish_mouse_clicks():
             return _fail("Erase click removed the placed voxel instead of the hit voxel")
         editor = STATE["editor"]
         scene = STATE["scene"]
-        scene.voxtart_editor_mode = "PAINT"
+        toolbar_items = voxel_editor._editor_toolbar_layout(STATE["region"].height, scene)[1]
+        paint_item, paint_bounds = next(
+            (item, bounds)
+            for item, bounds in toolbar_items
+            if item[0] == "MODE" and item[1] == "PAINT"
+        )
+        paint_mode_event = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(paint_bounds[0] + paint_bounds[2]) * 0.5,
+            mouse_region_y=(paint_bounds[1] + paint_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=STATE["window"],
+            screen=STATE["screen"],
+            area=STATE["area"],
+            region=STATE["region"],
+        ):
+            paint_mode_result = editor.modal(bpy.context, paint_mode_event)
+        if (
+            "RUNNING_MODAL" not in paint_mode_result
+            or scene.voxtart_editor_mode != paint_item[1]
+        ):
+            return _fail("Color block toolbar click did not activate paint mode")
         scene.voxtart_editor_shape = "VOXEL"
         scene.voxtart_editor_radius = 1
         scene.voxtart_edit_palette_index = 1
@@ -291,9 +418,9 @@ def _finish_mouse_clicks():
             STATE["area"],
             STATE["region"],
         )
-        paint_point = next(
+        paint_target = next(
             (
-                point
+                (point, cell)
                 for point, cell in (
                     (paint_hits[0], paint_hits[2]),
                     (paint_hits[1], paint_hits[3]),
@@ -302,8 +429,37 @@ def _finish_mouse_clicks():
             ),
             None,
         )
-        if paint_point is None:
+        if paint_target is None:
             return _fail("Paint workflow could not find a visible default-color voxel")
+        paint_point, paint_cell = paint_target
+        hover_event = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=paint_point[0],
+            mouse_region_y=paint_point[1],
+        )
+        with bpy.context.temp_override(
+            window=STATE["window"],
+            screen=STATE["screen"],
+            area=STATE["area"],
+            region=STATE["region"],
+        ):
+            hover_result = editor.modal(bpy.context, hover_event)
+        if (
+            "RUNNING_MODAL" not in hover_result
+            or editor.last_hit is None
+            or editor.last_hit.cell != paint_cell
+            or paint_cell not in editor.preview_cells
+        ):
+            return _fail(
+                f"Voxel mouseover did not highlight the target cell: "
+                f"hit={getattr(editor.last_hit, 'cell', None)!r}, "
+                f"preview={editor.preview_cells!r}"
+            )
+        STATE["hover_highlight"] = True
         _modal_click(paint_point)
         painted_asset = operators._load_asset(STATE["obj"])
         painted_cells = [
@@ -311,6 +467,15 @@ def _finish_mouse_clicks():
             for cell, palette_index in before_paint_voxels.items()
             if painted_asset.voxels.get(cell) != palette_index
         ]
+        painted_mesh_materials = {
+            int(polygon.material_index)
+            for polygon in getattr(STATE["obj"].data, "polygons", ())
+        }
+        if 1 not in painted_mesh_materials:
+            return _fail(
+                f"Paint changed voxel data but not the displayed material: "
+                f"materials={painted_mesh_materials!r}"
+            )
         if len(painted_cells) != 1 or painted_asset.voxels.get(painted_cells[0]) != 1:
             return _fail(
                 f"Paint click did not apply the selected palette color: "
@@ -328,6 +493,65 @@ def _finish_mouse_clicks():
         redone_asset = operators._load_asset(STATE["obj"])
         if redone_asset.voxels.get(painted_cell) != 1:
             return _fail("Ctrl+Y did not restore the painted voxel color")
+        with bpy.context.temp_override(
+            window=STATE["window"],
+            screen=STATE["screen"],
+            area=STATE["area"],
+            region=STATE["region"],
+        ):
+            editor._activate_topbar_action(bpy.context, "UNDO")
+        toolbar_undone_asset = operators._load_asset(STATE["obj"])
+        if toolbar_undone_asset.voxels.get(painted_cell) != previous_palette_index:
+            return _fail("Undo button did not restore the prior voxel color")
+        with bpy.context.temp_override(
+            window=STATE["window"],
+            screen=STATE["screen"],
+            area=STATE["area"],
+            region=STATE["region"],
+        ):
+            editor._activate_topbar_action(bpy.context, "REDO")
+        toolbar_redone_asset = operators._load_asset(STATE["obj"])
+        if toolbar_redone_asset.voxels.get(painted_cell) != 1:
+            return _fail("Redo button did not restore the painted voxel color")
+        STATE["undo_redo_controls"] = True
+        scene.voxtart_editor_mode = "PAINT"
+        scene.voxtart_editor_shape = "VOXEL"
+        scene.voxtart_editor_radius = 1
+        scene.voxtart_edit_palette_index = 1
+        drag_targets = _visible_paint_targets(
+            editor,
+            STATE["obj"],
+            STATE["area"],
+            STATE["region"],
+        )
+        if len(drag_targets) < 2:
+            return _fail(f"Drag paint found too few visible target voxels: {drag_targets!r}")
+        drag_targets = drag_targets[: min(3, len(drag_targets))]
+        before_drag_voxels = dict(operators._load_asset(STATE["obj"]).voxels)
+        history_before_drag = editor.history_index
+        _modal_drag([point for point, _cell in drag_targets])
+        after_drag_asset = operators._load_asset(STATE["obj"])
+        drag_cells = [cell for _point, cell in drag_targets]
+        changed_drag_cells = [
+            cell
+            for cell, palette_index in before_drag_voxels.items()
+            if after_drag_asset.voxels.get(cell) != palette_index
+        ]
+        if (
+            any(after_drag_asset.voxels.get(cell) != 1 for cell in drag_cells)
+            or len(changed_drag_cells) < 2
+            or editor.transaction is not None
+            or editor.history_index != history_before_drag + 1
+        ):
+            return _fail(
+                f"Left drag did not paint one committed brush stroke: "
+                f"targets={drag_cells!r}, changed={changed_drag_cells!r}, "
+                f"history={history_before_drag}->{editor.history_index}"
+            )
+        STATE["drag_paint"] = True
+        if voxel_editor.visible_editor_toolbar_items(scene) is not voxel_editor.BEGINNER_TOOLBAR_ITEMS:
+            return _fail("Beginner toolbar expanded before the user asked for more tools")
+        STATE["beginner_toolbar_after_first_edit"] = True
         scene.voxtart_editor_mode = "SELECT"
         scene.voxtart_editor_shape = "VOXEL"
         _modal_click(paint_point)
@@ -359,15 +583,24 @@ def _finish_mouse_clicks():
         STATE["area"].tag_redraw()
         bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
         SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
-        with bpy.context.temp_override(
-            window=STATE["window"],
-            screen=STATE["screen"],
-            area=STATE["area"],
-            region=STATE["region"],
-        ):
-            screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
-            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
-            screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
+        saved_preview_cells = editor.preview_cells
+        saved_last_hit = editor.last_hit
+        saved_toolbar_hover = editor.toolbar_hover
+        try:
+            with bpy.context.temp_override(
+                window=STATE["window"],
+                screen=STATE["screen"],
+                area=STATE["area"],
+                region=STATE["region"],
+            ):
+                bpy.ops.view3d.view_selected(use_all_regions=False)
+                screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
+                bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
+                screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
+        finally:
+            editor.preview_cells = saved_preview_cells
+            editor.last_hit = saved_last_hit
+            editor.toolbar_hover = saved_toolbar_hover
         if "FINISHED" not in screenshot_result or not SCREENSHOT.is_file():
             return _fail(f"Could not capture GUI screenshot: {screenshot_result!r}")
         _write(
@@ -377,9 +610,11 @@ def _finish_mouse_clicks():
                 "draw_overlay_handle": editor._draw_handle is not None,
                 "draw_preview_handle": editor._preview_handle is not None,
                 "view_workflow": STATE.get("view_workflow", False),
-                "shell_toolbar": STATE.get("shell_toolbar", False),
+                "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
+                "shell_native_ui_blocked": STATE.get("shell_native_ui_blocked", False),
+                "chatbox_surface": STATE.get("chatbox_surface", False),
                 "shell_editor": STATE.get("shell_editor", False),
                 "shell_voxelize": STATE.get("shell_voxelize", False),
                 "shell_refresh": STATE.get("shell_refresh", False),
@@ -392,6 +627,7 @@ def _finish_mouse_clicks():
                 "hierarchy_roundtrip": STATE.get("hierarchy_roundtrip", False),
                 "kitbash_roundtrip": STATE.get("kitbash_roundtrip", False),
                 "character_editor_roundtrip": STATE.get("character_editor_roundtrip", False),
+                "character_native_ui_blocked": STATE.get("character_native_ui_blocked", False),
                 "mcp_roundtrip": STATE.get("mcp_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
                 "stack_roundtrip": STATE.get("stack_roundtrip", False),
@@ -414,9 +650,14 @@ def _finish_mouse_clicks():
                 "window_fullscreen": bool(
                     STATE["scene"].get(desktop_ui.DESKTOP_WINDOW_FULLSCREEN_PROPERTY)
                 ),
-                "more_tools_escape_hatch": STATE.get("more_tools_escape_hatch", False),
+                "native_ui_lock": STATE.get("native_ui_lock", False),
+                "advanced_tools_toggle": STATE.get("advanced_tools_toggle", False),
+                "beginner_toolbar_after_first_edit": STATE.get("beginner_toolbar_after_first_edit", False),
+                "grid_toggle": STATE.get("grid_toggle", False),
+                "options_menu": STATE.get("options_menu", False),
                 "region_info": STATE.get("region_info", []),
                 "details_toggle": STATE.get("details_toggle", False),
+                "help_toggle": STATE.get("help_toggle", False),
                 "native_region_props": {
                     name: bool(getattr(STATE["area"].spaces.active, name, False))
                     for name in (
@@ -424,15 +665,23 @@ def _finish_mouse_clicks():
                         "show_region_ui",
                         "show_region_header",
                         "show_region_footer",
+                        "show_region_tool_header",
                     )
                 },
+                "undo_redo_controls": STATE.get("undo_redo_controls", False),
                 "paint_undo_redo": STATE.get("paint_undo_redo", False),
+                "drag_paint": STATE.get("drag_paint", False),
                 "palette_non_default": STATE.get("palette_non_default", False),
+                "hover_highlight": STATE.get("hover_highlight", False),
+                "material_shading": STATE.get("material_shading", False),
                 "palette_selection": STATE.get("palette_selection", False),
+                "color_wheel": STATE.get("color_wheel", False),
+                "grid_shortcut": STATE.get("grid_shortcut", False),
+                "dock_drawers": STATE.get("dock_drawers", False),
+                "dock_snap": STATE.get("dock_snap", False),
                 "product_controls": STATE.get("product_controls", False),
                 "project_control": STATE.get("project_control", False),
-                "escape_project": STATE.get("escape_project", False),
-                "shape": scene.voxtart_editor_shape,
+                "escape_keeps_ui": STATE.get("escape_keeps_ui", False),
                 "preview_count": len(editor.preview_cells),
                 "area": [STATE["area"].width, STATE["area"].height],
                 "screenshot": str(SCREENSHOT),
@@ -536,6 +785,8 @@ def _probe():
         STATE["startup_editor"] = voxel_editor._ACTIVE_EDITOR is not None
         STATE["first_run_hint"] = bool(scene.get(voxel_editor.FIRST_RUN_HINT_PROPERTY))
         STATE["native_chrome_hidden"] = not bool(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
+        if scene.get(desktop_ui.DESKTOP_WINDOW_FULLSCREEN_PROPERTY):
+            return _fail("VOXTART startup hid the Windows title bar controls")
         if not STATE["native_chrome_hidden"]:
             return _fail("VOXTART startup left Blender chrome visible")
         if screen.show_statusbar or any(
@@ -545,9 +796,17 @@ def _probe():
                 "show_region_ui",
                 "show_region_header",
                 "show_region_footer",
+                "show_region_tool_header",
             )
         ):
             return _fail("VOXTART startup left a Blender native region visible")
+        shading = area.spaces.active.shading
+        if (
+            getattr(shading, "type", None) != "SOLID"
+            or getattr(shading, "color_type", None) != "MATERIAL"
+            or getattr(shading, "light", None) != "FLAT"
+        ):
+            return _fail("VOXTART startup did not enable flat palette material shading")
         if not STATE["startup_editor"]:
             return _fail("VOXTART startup did not open the voxel editor")
         if not STATE["first_run_hint"]:
@@ -573,7 +832,20 @@ def _probe():
             shell_state = desktop_shell._ACTIVE_STATE
             if shell_state is None:
                 return _fail("Desktop shell state was not created")
+            if desktop_shell._ACTIVE_HANDLE is None:
+                return _fail("Desktop shell did not install its draw overlay")
+            STATE["shell_draw_handle"] = True
             desktop_shell._draw_shell(shell_state, bpy.context)
+            chat_targets = {key: bounds for key, bounds in shell_state.targets if key.startswith("chat:")}
+            if not {"chat:image", "chat:field", "chat:send"}.issubset(chat_targets):
+                return _fail(f"Desktop shell chat bar targets are incomplete: {chat_targets!r}")
+            chat_panel = mcp.chat_layout(
+                float(region.width),
+                float(region.height),
+            )["panel"]
+            if abs((chat_panel[0] + chat_panel[2]) * 0.5 - float(region.width) * 0.5) > 1.0:
+                return _fail(f"Desktop shell chat bar is not centered: {chat_panel!r}")
+            STATE["chatbox_surface"] = True
             if any(key == "mode:CHARACTER" for key, _bounds in shell_state.targets):
                 return _fail("First-run shell exposed premature Character navigation")
             shell_toolbar_count = sum(key.startswith("tool:") for key, _bounds in shell_state.targets)
@@ -1038,6 +1310,11 @@ def _probe():
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "character:prepare" for key, _bounds in shell_state.targets):
                     return _fail("Character surface did not expose Prepare rig")
+                if any(key == "character:toolbox" for key, _bounds in shell_state.targets):
+                    return _fail("Character surface exposed a native Blender toolbox")
+                if desktop_ui.native_chrome_visible(scene):
+                    return _fail("Character surface exposed native Blender chrome")
+                STATE["character_native_ui_blocked"] = True
                 for selected in tuple(bpy.context.selected_objects):
                     selected.select_set(False)
                 native_object.select_set(True)
@@ -1686,6 +1963,11 @@ def _probe():
                     return _fail("Build surface did not expose Export mesh")
                 if not any(key == "build:editor" for key, _bounds in shell_state.targets):
                     return _fail("Build surface did not expose Open voxel editor")
+                if any(key == "build:toolbox" for key, _bounds in shell_state.targets):
+                    return _fail("Build surface exposed a native Blender toolbox")
+                if desktop_ui.native_chrome_visible(scene):
+                    return _fail("Build surface exposed native Blender chrome")
+                STATE["shell_native_ui_blocked"] = True
                 shell_operator._activate(bpy.context, "build:editor")
                 if voxel_editor._ACTIVE_EDITOR is None:
                     return _fail("Open voxel editor did not enter the editor")
@@ -1698,7 +1980,7 @@ def _probe():
         existing = bpy.data.objects.get("P0 GUI Asset")
         if existing is not None:
             bpy.data.objects.remove(existing, do_unlink=True)
-        palette_asset = VoxelAsset.box(2)
+        palette_asset = VoxelAsset.box(2, grid_size=0.25)
         palette_asset.add_palette_color((0.24, 0.58, 0.96, 1.0))
         palette_asset.add_palette_color((0.94, 0.24, 0.28, 1.0))
         obj = operators._create_asset_object(
@@ -1730,6 +2012,14 @@ def _probe():
         editor = voxel_editor._ACTIVE_EDITOR
         if editor is None:
             return _fail("Voxel editor did not become active")
+        shading = area.spaces.active.shading
+        if (
+            getattr(shading, "type", None) != "SOLID"
+            or getattr(shading, "color_type", None) != "MATERIAL"
+            or getattr(shading, "light", None) != "FLAT"
+        ):
+            return _fail("VOXTART editor did not enable flat palette material shading")
+        STATE["material_shading"] = True
         GUI_SAVE_PATH.parent.mkdir(parents=True, exist_ok=True)
         save_result = bpy.ops.wm.save_as_mainfile(filepath=str(GUI_SAVE_PATH))
         if "FINISHED" not in save_result or not GUI_SAVE_PATH.is_file():
@@ -1746,35 +2036,334 @@ def _probe():
         STATE["save_control"] = True
 
         if tuple(action for action, _bounds in voxel_editor._editor_topbar_action_bounds(region)) != (
+            "UNDO",
+            "REDO",
             "PROJECT",
             "SAVE",
-            "DETAILS",
-            "MORE_TOOLS",
+            "HELP",
+            "OPTIONS",
+            "DOCK_LEFT",
+            "DOCK_RIGHT",
         ):
-            return _fail("VOXTART editor did not expose product-native project controls")
+            return _fail("VOXTART editor did not expose the simple product controls")
         if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not False:
-            return _fail("VOXTART editor did not default to simple diagnostics")
+            return _fail("VOXTART editor did not default to simple edit info")
+        if scene.get(voxel_editor.EDITOR_HELP_PROPERTY) is not False:
+            return _fail("VOXTART editor did not default to closed help")
+        if scene.get(voxel_editor.EDITOR_OPTIONS_PROPERTY) is not False:
+            return _fail("VOXTART editor did not default to closed extra controls")
+        if scene.get(voxel_editor.EDITOR_DOCK_LEFT_PROPERTY) is not False:
+            return _fail("VOXTART editor did not default to a closed left panel drawer")
+        if scene.get(voxel_editor.EDITOR_DOCK_RIGHT_PROPERTY) is not True:
+            return _fail("VOXTART editor did not default to an open right panel drawer")
+        if scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not False:
+            return _fail("VOXTART editor did not default to a hidden grid")
+        seam_name = editor.obj.get(operators.SEAM_OVERLAY_PROPERTY)
+        seam_overlay = bpy.data.objects.get(seam_name) if isinstance(seam_name, str) else None
+        if seam_overlay is None or seam_overlay.hide_viewport:
+            return _fail("VOXTART editor did not show voxel outlines in simple view")
+
         palette_panel, palette_entries = voxel_editor._editor_palette_layout(editor, region)
         if len(palette_entries) < 3 or len(palette_entries) != len(editor.asset.palette):
             return _fail("VOXTART editor did not expose its palette swatches")
-        editor._activate_palette(1)
-        if scene.voxtart_edit_palette_index != 1:
-            return _fail("VOXTART editor palette swatch did not select a non-default color")
-        STATE["palette_selection"] = True
-        STATE["palette_non_default"] = True
+        palette_index, palette_bounds = palette_entries[1]
+        palette_event = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(palette_bounds[0] + palette_bounds[2]) * 0.5,
+            mouse_region_y=(palette_bounds[1] + palette_bounds[3]) * 0.5,
+        )
         with bpy.context.temp_override(
             window=window,
             screen=screen,
             area=area,
             region=region,
         ):
-            editor._activate_topbar_action(bpy.context, "DETAILS")
+            palette_result = editor.modal(bpy.context, palette_event)
+        if "RUNNING_MODAL" not in palette_result or scene.voxtart_edit_palette_index != palette_index:
+            return _fail("VOXTART editor palette swatch click did not select a non-default color")
+        STATE["palette_selection"] = True
+        STATE["palette_non_default"] = True
+        wheel_geometry = voxel_editor._editor_color_wheel_geometry(editor, region)
+        if wheel_geometry is None:
+            return _fail("VOXTART editor did not expose its color wheel")
+        before_wheel_color = tuple(editor.asset.palette[palette_index])
+        wheel_target = wheel_geometry["triangle"][0]
+        wheel_press = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=wheel_target[0],
+            mouse_region_y=wheel_target[1],
+        )
+        wheel_release = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="RELEASE",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=wheel_target[0],
+            mouse_region_y=wheel_target[1],
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            wheel_press_result = editor.modal(bpy.context, wheel_press)
+            editor.modal(bpy.context, wheel_release)
+        if (
+            "RUNNING_MODAL" not in wheel_press_result
+            or tuple(editor.asset.palette[palette_index]) == before_wheel_color
+            or editor.color_wheel_dragging
+        ):
+            return _fail("VOXTART editor color wheel did not update the active palette color")
+        STATE["color_wheel"] = True
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "DOCK_LEFT")
+            if scene.get(voxel_editor.EDITOR_DOCK_LEFT_PROPERTY) is not True:
+                return _fail("VOXTART editor Left drawer control did not open the left drawer")
+            dock_layout = voxel_editor._editor_dock_layout(editor, region)
+            if not {"LAYERS", "HISTORY"}.issubset(dock_layout["panels"]):
+                return _fail("VOXTART editor did not render the left layer and history panels")
+            editor._activate_topbar_action(bpy.context, "DOCK_RIGHT")
+            if voxel_editor._editor_palette_layout(editor, region)[1]:
+                return _fail("VOXTART editor Right drawer control did not hide the palette")
+            editor._activate_topbar_action(bpy.context, "DOCK_RIGHT")
+            if scene.get(voxel_editor.EDITOR_DOCK_RIGHT_PROPERTY) is not True:
+                return _fail("VOXTART editor Right drawer control did not reopen the palette")
+        dock_layout = voxel_editor._editor_dock_layout(editor, region)
+        layer_bounds = dock_layout["panels"]["LAYERS"]["bounds"]
+        header_x = (layer_bounds[0] + layer_bounds[2]) * 0.5
+        header_y = layer_bounds[3] - 18.0
+        dock_press = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=header_x,
+            mouse_region_y=header_y,
+        )
+        dock_move = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=float(region.width) - 40.0,
+            mouse_region_y=header_y,
+        )
+        dock_release = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="RELEASE",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=float(region.width) - 40.0,
+            mouse_region_y=header_y,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, dock_press)
+            editor.modal(bpy.context, dock_move)
+            dock_release_result = editor.modal(bpy.context, dock_release)
+        if (
+            "RUNNING_MODAL" not in dock_release_result
+            or editor.dock_panel_sides.get("LAYERS") != "RIGHT"
+        ):
+            return _fail("VOXTART editor panel drag did not snap Layers to the right drawer")
+        STATE["dock_drawers"] = True
+        STATE["dock_snap"] = True
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "HELP")
+            if scene.get(voxel_editor.EDITOR_HELP_PROPERTY) is not True:
+                return _fail("VOXTART editor Help control did not open the guide")
+            editor._activate_topbar_action(bpy.context, "HELP")
+            if scene.get(voxel_editor.EDITOR_HELP_PROPERTY) is not False:
+                return _fail("VOXTART editor Help control did not close the guide")
+        STATE["help_toggle"] = True
+        mcp.set_chat_input_focus(False)
+        grid_event = SimpleNamespace(
+            type="G",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=-1.0,
+            mouse_region_y=-1.0,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            grid_on_result = editor.modal(bpy.context, grid_event)
+            grid_on_visible = scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is True
+            grid_off_result = editor.modal(bpy.context, grid_event)
+            grid_off_hidden = scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is False
+        if "RUNNING_MODAL" not in grid_on_result or not grid_on_visible:
+            return _fail("VOXTART editor G shortcut did not show the grid")
+        if "RUNNING_MODAL" not in grid_off_result or not grid_off_hidden:
+            return _fail("VOXTART editor G shortcut did not hide the grid")
+        STATE["grid_shortcut"] = True
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "OPTIONS")
+            if scene.get(voxel_editor.EDITOR_OPTIONS_PROPERTY) is not True:
+                return _fail("VOXTART editor Options control did not open extra controls")
+            option_entries = dict(voxel_editor._editor_options_layout(region)[1])
+            grid_bounds = option_entries.get("OPTIONS_GRID")
+            if grid_bounds is None:
+                return _fail("VOXTART editor Options menu did not expose the grid toggle")
+            grid_event = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(grid_bounds[0] + grid_bounds[2]) * 0.5,
+                mouse_region_y=(grid_bounds[1] + grid_bounds[3]) * 0.5,
+            )
+            if voxel_editor._editor_topbar_action_at(bpy.context, grid_event) != "OPTIONS_GRID":
+                return _fail("VOXTART editor Options menu grid target was not clickable")
+            editor.modal(bpy.context, grid_event)
+            overlay = area.spaces.active.overlay
+            grid_interior, grid_border = voxel_editor._editor_grid_vertices(editor)
+            grid_vertices = (*grid_interior, *grid_border)
+            grid_min, grid_max, grid_size = voxel_editor._editor_canvas_bounds(editor)
+            grid_spans = tuple(
+                max(float(vertex[axis]) for vertex in grid_vertices)
+                - min(float(vertex[axis]) for vertex in grid_vertices)
+                for axis in range(3)
+            )
+            expected_grid_spans = tuple(
+                (grid_max[axis] - grid_min[axis]) * grid_size
+                for axis in range(3)
+            )
+            if (
+                scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not True
+                or len(grid_border) != 24
+                or not grid_interior
+                or any(span <= 0.0 for span in grid_spans)
+                or any(
+                    abs(grid_spans[axis] - expected_grid_spans[axis]) > 1.0e-9
+                    for axis in range(3)
+                )
+                or overlay.show_floor
+                or overlay.show_axis_x
+                or overlay.show_axis_y
+            ):
+                return _fail("VOXTART editor grid did not follow voxel-sized box spacing")
+            editor._activate_topbar_action(bpy.context, "OPTIONS")
+            option_entries = dict(voxel_editor._editor_options_layout(region)[1])
+            grid_bounds = option_entries.get("OPTIONS_GRID")
+            grid_event.mouse_region_x = (grid_bounds[0] + grid_bounds[2]) * 0.5
+            grid_event.mouse_region_y = (grid_bounds[1] + grid_bounds[3]) * 0.5
+            editor.modal(bpy.context, grid_event)
+            if (
+                scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not False
+                or overlay.show_floor
+                or overlay.show_axis_x
+                or overlay.show_axis_y
+            ):
+                return _fail("VOXTART editor grid toggle did not hide the viewport grid")
+            STATE["grid_toggle"] = True
+            editor._activate_topbar_action(bpy.context, "OPTIONS")
+            option_entries = dict(voxel_editor._editor_options_layout(region)[1])
+            if scene.get(voxel_editor.EDITOR_OPTIONS_PROPERTY) is not True:
+                return _fail("VOXTART editor Options menu did not reopen after the grid toggle")
+            STATE["grid_toggle"] = True
+            details_bounds = option_entries.get("OPTIONS_DETAILS")
+            if details_bounds is None:
+                return _fail("VOXTART editor Options menu did not expose edit info")
+            details_event = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(details_bounds[0] + details_bounds[2]) * 0.5,
+                mouse_region_y=(details_bounds[1] + details_bounds[3]) * 0.5,
+            )
+            if voxel_editor._editor_topbar_action_at(bpy.context, details_event) != "OPTIONS_DETAILS":
+                return _fail("VOXTART editor Options menu edit info target was not clickable")
+            editor.modal(bpy.context, details_event)
+            if scene.get(voxel_editor.EDITOR_OPTIONS_PROPERTY) is not False:
+                return _fail("VOXTART editor edit info did not close extra controls")
             if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not True:
-                return _fail("VOXTART editor Details control did not reveal diagnostics")
+                return _fail("VOXTART editor edit info did not reveal diagnostics")
+            if seam_overlay.hide_viewport:
+                return _fail("VOXTART editor edit info hid the voxel outlines")
             editor._activate_topbar_action(bpy.context, "DETAILS")
             if scene.get(voxel_editor.EDITOR_DETAILS_PROPERTY) is not False:
-                return _fail("VOXTART editor Details control did not hide diagnostics")
+                return _fail("VOXTART editor edit info did not hide diagnostics")
+            if seam_overlay.hide_viewport:
+                return _fail("VOXTART editor edit info hid the voxel outlines")
+            overlay = area.spaces.active.overlay
+            editor._activate_topbar_action(bpy.context, "GRID")
+            if (
+                scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not True
+                or overlay.show_floor
+                or overlay.show_axis_x
+                or overlay.show_axis_y
+            ):
+                return _fail("VOXTART grid did not reopen from the simple editor")
+            editor._activate_topbar_action(bpy.context, "MORE_TOOLS")
+            if (
+                desktop_ui.native_chrome_visible(scene)
+                or overlay.show_floor
+                or overlay.show_axis_x
+                or overlay.show_axis_y
+                or voxel_editor.visible_editor_toolbar_items(scene)
+                is not voxel_editor.EDITOR_TOOLBAR_ITEMS
+            ):
+                return _fail("VOXTART advanced tools did not preserve its hidden native canvas")
+            editor._activate_topbar_action(bpy.context, "MORE_TOOLS")
+            if (
+                desktop_ui.native_chrome_visible(scene)
+                or overlay.show_floor
+                or overlay.show_axis_x
+                or overlay.show_axis_y
+                or voxel_editor.visible_editor_toolbar_items(scene)
+                is not voxel_editor.BEGINNER_TOOLBAR_ITEMS
+            ):
+                return _fail("VOXTART simple tools did not preserve its hidden native canvas")
+            editor._activate_topbar_action(bpy.context, "GRID")
+            if (
+                scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not False
+                or overlay.show_floor
+                or overlay.show_axis_x
+                or overlay.show_axis_y
+            ):
+                return _fail("VOXTART grid did not close after advanced tools testing")
         STATE["details_toggle"] = True
+        STATE["options_menu"] = True
         STATE["product_controls"] = True
         with bpy.context.temp_override(
             window=window,
@@ -1799,6 +2388,7 @@ def _probe():
         if editor is None:
             return _fail("Project control returned without an active voxel editor")
         STATE["project_control"] = True
+        mcp.set_chat_input_focus(False)
         escape_event = SimpleNamespace(
             type="ESC",
             value="PRESS",
@@ -1814,36 +2404,54 @@ def _probe():
             area=area,
             region=region,
         ):
-            editor.modal(bpy.context, escape_event)
-        if desktop_shell._ACTIVE_STATE is None:
-            return _fail("Escape did not return to the VOXTART project surface")
-        desktop_shell.VOXTART_OT_desktop_shell._finish(None, bpy.context)
+            escape_result = editor.modal(bpy.context, escape_event)
+        if (
+            "RUNNING_MODAL" not in escape_result
+            or desktop_shell._ACTIVE_STATE is not None
+            or voxel_editor._ACTIVE_EDITOR is not editor
+            or editor.status != "VOXTART stays open"
+        ):
+            return _fail("Escape closed or replaced the VOXTART editor UI")
+        STATE["escape_keeps_ui"] = True
         with bpy.context.temp_override(
             window=window,
             screen=screen,
             area=area,
             region=region,
         ):
-            result = bpy.ops.voxtart.voxel_editor("INVOKE_DEFAULT")
-            if "RUNNING_MODAL" not in result:
-                return _fail(f"Escape transition did not reopen the voxel editor: {result!r}")
-        editor = voxel_editor._ACTIVE_EDITOR
-        if editor is None:
-            return _fail("Escape transition returned without an active voxel editor")
-        STATE["escape_project"] = True
-        with bpy.context.temp_override(
-            window=window,
-            screen=screen,
-            area=area,
-            region=region,
-        ):
-            editor._activate_topbar_action(bpy.context, "MORE_TOOLS")
-            if not desktop_ui.native_chrome_visible(scene):
-                return _fail("More tools did not reveal Blender controls")
-            editor._activate_topbar_action(bpy.context, "MORE_TOOLS")
+            editor._activate_topbar_action(bpy.context, "OPTIONS")
+            option_entries = dict(voxel_editor._editor_options_layout(region)[1])
+            more_bounds = option_entries.get("OPTIONS_MORE_TOOLS")
+            if more_bounds is None:
+                return _fail("VOXTART editor Options menu did not expose More tools")
+            more_event = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(more_bounds[0] + more_bounds[2]) * 0.5,
+                mouse_region_y=(more_bounds[1] + more_bounds[3]) * 0.5,
+            )
+            if voxel_editor._editor_topbar_action_at(bpy.context, more_event) != "OPTIONS_MORE_TOOLS":
+                return _fail("VOXTART editor Options menu More tools target was not clickable")
+            editor.modal(bpy.context, more_event)
             if desktop_ui.native_chrome_visible(scene):
-                return _fail("More tools did not hide Blender controls again")
-        STATE["more_tools_escape_hatch"] = True
+                return _fail("More tools exposed Blender's native chrome")
+            if voxel_editor.visible_editor_toolbar_items(scene) is not voxel_editor.EDITOR_TOOLBAR_ITEMS:
+                return _fail("More tools did not reveal the advanced editor toolbar")
+            editor._activate_topbar_action(bpy.context, "OPTIONS")
+            option_entries = dict(voxel_editor._editor_options_layout(region)[1])
+            more_bounds = option_entries.get("OPTIONS_MORE_TOOLS")
+            more_event.mouse_region_x = (more_bounds[0] + more_bounds[2]) * 0.5
+            more_event.mouse_region_y = (more_bounds[1] + more_bounds[3]) * 0.5
+            editor.modal(bpy.context, more_event)
+            if desktop_ui.native_chrome_visible(scene):
+                return _fail("More tools exposed Blender's native chrome")
+            if voxel_editor.visible_editor_toolbar_items(scene) is not voxel_editor.BEGINNER_TOOLBAR_ITEMS:
+                return _fail("More tools did not restore the beginner editor toolbar")
+        STATE["advanced_tools_toggle"] = True
+        STATE["native_ui_lock"] = not desktop_ui.native_chrome_visible(scene)
         bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
         left_point, right_point, left_cell, right_cell = _viewport_hits(editor, obj, area, region)
         STATE.update(

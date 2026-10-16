@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic sparse-volume transforms inspired by voxel conversion tools.
 
@@ -86,6 +86,7 @@ def _result(
         voxels=dict(voxels),
         sockets=list(sockets),
         provenance=provenance,
+        palette_materials=asset.get_palette_materials(),
     )
 
 

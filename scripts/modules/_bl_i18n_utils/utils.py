@@ -1684,7 +1684,9 @@ class I18n:
         else:
             print("Creating python file {} containing translations.".format(dst))
             txt = [
+                # REUSE-IgnoreStart
                 "# SPDX-License-Identifier: GPL-2.0-or-later",
+                # REUSE-IgnoreEnd
                 "",
                 self.settings.PARSER_PY_MARKER_BEGIN,
                 "",

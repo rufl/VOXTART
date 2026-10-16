@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """VOXTART-owned desktop landing panel and startup workspace controls."""
 
@@ -9,6 +9,7 @@ from . import operators
 from .operators import ASSET_PROPERTY
 from .voxel import VoxelAsset
 from .voxel_editor import (
+    EDITOR_GRID_PROPERTY,
     EDITOR_MODE_PROPERTY,
     EDITOR_SHAPE_PROPERTY,
     EDITOR_WORKSPACE_PROPERTY,
@@ -47,6 +48,23 @@ def _clear_factory_scene() -> bool:
     for obj in objects:
         bpy.data.objects.remove(obj, do_unlink=True)
     return True
+
+def _hide_scene_helpers() -> None:
+    """Keep new block worlds free of unused cameras and lights."""
+
+    if bpy.data.filepath:
+        return
+    for obj in tuple(bpy.data.objects):
+        if obj.type not in {"CAMERA", "LIGHT"}:
+            continue
+        try:
+            obj.hide_set(True)
+        except (AttributeError, RuntimeError, TypeError):
+            pass
+        try:
+            obj.hide_viewport = True
+        except (AttributeError, RuntimeError, TypeError):
+            pass
 
 
 def _default_pyramid_asset() -> VoxelAsset:
@@ -110,23 +128,70 @@ def _ensure_default_pyramid(context):
 
 
 def native_chrome_visible(scene=None) -> bool:
+    """Return whether Blender-owned chrome is visible to the user."""
+
+    return False
+
+def is_native_ui_shortcut(event) -> bool:
+    """Identify Blender shortcuts that could reopen hidden native surfaces."""
+
+    if getattr(event, "value", None) != "PRESS":
+        return False
+    event_type = str(getattr(event, "type", ""))
+    if event_type in {"F3", "F4", "F11"}:
+        return True
+    if event_type == "SPACE" and (
+        bool(getattr(event, "shift", False))
+        or bool(getattr(event, "ctrl", False))
+    ):
+        return True
+    return bool(getattr(event, "shift", False)) and event_type.startswith("F")
+
+
+def grid_visible(scene=None) -> bool:
     scene = scene or getattr(bpy.context, "scene", None)
-    return bool(scene is not None and scene.get(DESKTOP_NATIVE_CHROME_PROPERTY, False))
+    return bool(scene is not None and scene.get(EDITOR_GRID_PROPERTY, False))
 
 
-def set_native_chrome_visibility(visible: bool) -> None:
-    """Show or hide Blender's native chrome around the VOXTART surface."""
+def _set_grid_overlay_visibility(scene=None) -> None:
+    scene = scene or getattr(bpy.context, "scene", None)
+    show_native_grid = bool(native_chrome_visible(scene) and not grid_visible(scene))
+    for window in tuple(bpy.context.window_manager.windows):
+        screen = window.screen
+        if screen is None:
+            continue
+        for area in tuple(screen.areas):
+            if area.type != "VIEW_3D":
+                continue
+            try:
+                overlay = area.spaces.active.overlay
+                overlay.show_floor = show_native_grid
+                overlay.show_axis_x = show_native_grid
+                overlay.show_axis_y = show_native_grid
+                area.tag_redraw()
+            except (AttributeError, RuntimeError, TypeError):
+                pass
 
-    visible = bool(visible)
+
+def set_grid_visibility(visible: bool, scene=None) -> None:
+    scene = scene or getattr(bpy.context, "scene", None)
+    if scene is not None:
+        scene[EDITOR_GRID_PROPERTY] = bool(visible)
+    _set_grid_overlay_visibility(scene)
+
+
+def set_native_chrome_visibility(_visible: bool = False) -> None:
+    """Keep Blender's native chrome hidden behind the VOXTART surface."""
+
     scene = getattr(bpy.context, "scene", None)
     if scene is not None:
-        scene[DESKTOP_NATIVE_CHROME_PROPERTY] = visible
+        scene[DESKTOP_NATIVE_CHROME_PROPERTY] = False
     for window in tuple(bpy.context.window_manager.windows):
         screen = window.screen
         if screen is None:
             continue
         try:
-            screen.show_statusbar = visible
+            screen.show_statusbar = False
         except (AttributeError, RuntimeError, TypeError):
             pass
         for area in tuple(screen.areas):
@@ -141,28 +206,23 @@ def set_native_chrome_visibility(visible: bool) -> None:
                 "show_region_tool_header",
             ):
                 try:
-                    setattr(space, property_name, visible)
+                    setattr(space, property_name, False)
                 except (AttributeError, RuntimeError, TypeError):
                     pass
-            try:
-                space.show_region_hud = False
-            except (AttributeError, RuntimeError, TypeError):
-                pass
-            try:
-                space.show_region_asset_shelf = False
-            except (AttributeError, RuntimeError, TypeError):
-                pass
-            try:
-                space.show_gizmo = visible
-                space.overlay.show_floor = visible
-                space.overlay.show_axis_x = visible
-                space.overlay.show_axis_y = visible
-            except (AttributeError, RuntimeError, TypeError):
-                pass
+            for property_name, value in (
+                ("show_region_hud", False),
+                ("show_region_asset_shelf", False),
+                ("show_gizmo", False),
+            ):
+                try:
+                    setattr(space, property_name, value)
+                except (AttributeError, RuntimeError, TypeError):
+                    pass
             try:
                 area.tag_redraw()
             except (AttributeError, RuntimeError, TypeError):
                 pass
+    _set_grid_overlay_visibility(scene)
 
 
 def _frame_object_in_viewports(obj) -> None:
@@ -195,58 +255,12 @@ def _frame_object_in_viewports(obj) -> None:
             except (AttributeError, RuntimeError, TypeError):
                 pass
 
-def enter_window_fullscreen() -> bool:
-    """Hide the host window chrome for the product surface."""
-
-    if bpy.app.background:
-        return False
-    scene = getattr(bpy.context, "scene", None)
-    if scene is not None and scene.get(DESKTOP_WINDOW_FULLSCREEN_PROPERTY):
-        return True
-    for window in tuple(bpy.context.window_manager.windows):
-        screen = window.screen
-        if screen is None:
-            continue
-        area = next((item for item in screen.areas if item.type == "VIEW_3D"), None)
-        if area is None:
-            continue
-        region = next((item for item in area.regions if item.type == "WINDOW"), None)
-        if region is None:
-            continue
-        try:
-            with bpy.context.temp_override(
-                window=window,
-                screen=screen,
-                area=area,
-                region=region,
-            ):
-                result = bpy.ops.wm.window_fullscreen_toggle()
-        except (AttributeError, RuntimeError, TypeError):
-            return False
-        if "FINISHED" in result:
-            if scene is not None:
-                scene[DESKTOP_WINDOW_FULLSCREEN_PROPERTY] = True
-            return True
-        return False
-    return False
 
 
-def open_default_editor() -> bool:
-    """Open the starter pyramid directly in the voxel editor."""
-
-    if bpy.app.background:
+def _open_editor_for_object(obj) -> bool:
+    if bpy.app.background or obj is None or ASSET_PROPERTY not in obj:
         return False
-    starter = next(
-        (
-            obj
-            for obj in bpy.data.objects
-            if bool(obj.get(DEFAULT_PYRAMID_PROPERTY)) and ASSET_PROPERTY in obj
-        ),
-        None,
-    )
-    if starter is None:
-        return False
-    _activate_object(starter)
+    _activate_object(obj)
     set_native_chrome_visibility(False)
     for window in tuple(bpy.context.window_manager.windows):
         screen = window.screen
@@ -270,11 +284,42 @@ def open_default_editor() -> bool:
                 result = {"CANCELLED"}
             running = "RUNNING_MODAL" in result
             if running:
-                enter_window_fullscreen()
                 set_native_chrome_visibility(False)
-                _frame_object_in_viewports(starter)
+                _frame_object_in_viewports(obj)
             return running
     return False
+
+
+def _find_asset_object():
+    active = getattr(bpy.context, "active_object", None)
+    if active is not None and ASSET_PROPERTY in active:
+        return active
+    return next(
+        (obj for obj in bpy.data.objects if ASSET_PROPERTY in obj),
+        None,
+    )
+
+
+def open_default_editor() -> bool:
+    """Open the starter pyramid directly in the voxel editor."""
+
+    if bpy.app.background:
+        return False
+    starter = next(
+        (
+            obj
+            for obj in bpy.data.objects
+            if bool(obj.get(DEFAULT_PYRAMID_PROPERTY)) and ASSET_PROPERTY in obj
+        ),
+        None,
+    )
+    return _open_editor_for_object(starter)
+
+
+def open_asset_editor() -> bool:
+    """Open the active or first loaded VOXTART asset in the voxel editor."""
+
+    return _open_editor_for_object(_find_asset_object())
 
 
 class VOXTART_PT_desktop_home(bpy.types.Panel):
@@ -297,44 +342,53 @@ class VOXTART_PT_desktop_home(bpy.types.Panel):
 
         intro = layout.box()
         intro.label(text="What do you want to make?", icon="INFO")
-        intro.label(text=f"Active: {active.name}" if active else "Start with a new block toy or open a model.")
+        intro.label(text=f"Working on: {active.name}" if active else "Start with blocks or open something.")
 
         make = layout.box()
-        make.label(text="Make something", icon="CUBE")
-        new_asset = make.operator("voxtart.add_voxel_cube", text="Make a block toy", icon="CUBE")
+        make.label(text="Make blocks", icon="CUBE")
+        new_asset = make.operator("voxtart.add_voxel_cube", text="Make blocks", icon="CUBE")
         new_asset.size = scene.voxtart_cube_size
         new_asset.grid_size = scene.voxtart_grid_size
         make.label(text="Start with a tiny block world.")
 
         open_box = layout.box()
-        open_box.label(text="Open something", icon="FILE_FOLDER")
-        open_box.operator("voxtart.import_asset", text="Open a VOXTART file", icon="IMPORT")
-        open_box.operator("voxtart.import_voxel_format", text="Open a VOX or QB file", icon="FILE_3D")
+        open_box.label(text="Open or translate", icon="FILE_FOLDER")
+        open_box.operator("voxtart.import_asset", text="Open a block model", icon="IMPORT")
+        open_box.operator("voxtart.import_voxel_format", text="Open a voxel file", icon="FILE_3D")
         open_box.operator("voxtart.import_blockbench", text="Open a Blockbench model", icon="MESH_CUBE")
-
+        image_reconstruct = open_box.operator(
+            "voxtart.reconstruct_image",
+            text="Turn an image into blocks",
+            icon="IMAGE_DATA",
+        )
+        image_reconstruct.pixels_per_voxel = getattr(
+            scene,
+            "voxtart_reconstruction_pixels_per_voxel",
+            2,
+        )
         character = layout.box()
-        character.label(text="Character tools", icon="ARMATURE_DATA")
+        character.label(text="Make a character", icon="ARMATURE_DATA")
         character.label(
             text="Select a mesh to enable character actions." if not has_mesh else "Use the active mesh as your character base.",
             icon="INFO" if not has_mesh else "CHECKMARK",
         )
         character_controls = character.column()
         character_controls.enabled = has_mesh
-        character_controls.operator("voxtart.prepare_character", text="Prepare a block character", icon="ARMATURE_DATA")
-        character_controls.operator("voxtart.character_rebuild", text="Rebuild the character", icon="FILE_REFRESH")
-        character_controls.operator("voxtart.export_game_rig", text="Save it for a game", icon="EXPORT")
+        character_controls.operator("voxtart.prepare_character", text="Make a character", icon="ARMATURE_DATA")
+        character_controls.operator("voxtart.character_rebuild", text="Build it again", icon="FILE_REFRESH")
+        character_controls.operator("voxtart.export_game_rig", text="Save for a game", icon="EXPORT")
 
         more = layout.box()
-        more.label(text="More block tools", icon="MODIFIER")
+        more.label(text="More ways to build", icon="MODIFIER")
         more.label(
-            text="Voxelize the active mesh first." if not has_mesh else (
-                "Select a VOXTART asset for asset-only tools." if not has_asset else "Active asset ready."
+            text="Turn a shape into blocks first." if not has_mesh else (
+                "Pick a block model for block-only tools." if not has_asset else "Your block model is ready."
             ),
             icon="INFO" if not has_asset else "CHECKMARK",
         )
         voxelize_row = more.row()
         voxelize_row.enabled = has_mesh
-        voxelize = voxelize_row.operator("voxtart.voxelize_active", text="Turn a 3D shape into blocks", icon="MOD_REMESH")
+        voxelize = voxelize_row.operator("voxtart.voxelize_active", text="Turn a shape into blocks", icon="MOD_REMESH")
         voxelize.grid_size = scene.voxtart_grid_size
         voxelize.mode = scene.voxtart_voxelizer_mode
         voxelize.shell_thickness = scene.voxtart_voxelizer_shell_thickness
@@ -345,10 +399,53 @@ class VOXTART_PT_desktop_home(bpy.types.Panel):
         asset_tools.operator("voxtart.tiler_convert", text="Turn pixels into blocks", icon="TEXTURE")
 
         footer = layout.box()
-        footer.label(text="Need more control?", icon="PREFERENCES")
-        footer.label(text="Use More tools when you need Blender controls.")
+        footer.label(text="Need more choices?", icon="PREFERENCES")
+        footer.label(text="Use More tools if you need extra controls.")
 
 _CLASSES = (VOXTART_PT_desktop_home,)
+
+
+def configure_palette_color_management(scene) -> None:
+    """Use the sRGB picker space for an unmodified palette viewport."""
+
+    view_settings = getattr(scene, "view_settings", None)
+    if view_settings is not None:
+        for property_name, value in (
+            ("view_transform", "Standard"),
+            ("look", "None"),
+            ("exposure", 0.0),
+            ("gamma", 1.0),
+        ):
+            try:
+                setattr(view_settings, property_name, value)
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pass
+    display_settings = getattr(scene, "display_settings", None)
+    if display_settings is not None:
+        try:
+            display_settings.display_device = "sRGB"
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
+
+
+def configure_viewport_shading(space) -> None:
+    """Show palette material colors without studio-light or cavity drift."""
+
+    shading = getattr(space, "shading", None)
+    if shading is None:
+        return
+    for property_name, value in (
+        ("type", "SOLID"),
+        ("color_type", "MATERIAL"),
+        ("light", "FLAT"),
+        ("show_shadows", False),
+        ("show_cavity", False),
+        ("show_specular_highlight", False),
+    ):
+        try:
+            setattr(shading, property_name, value)
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            pass
 
 
 def configure_workspace() -> None:
@@ -356,7 +453,13 @@ def configure_workspace() -> None:
 
     version = ".".join(str(value) for value in bpy.app.version[:3])
     _clear_factory_scene()
+    _hide_scene_helpers()
     scene = bpy.context.scene
+    configure_palette_color_management(scene)
+    # Keep the Windows title bar and its minimize, maximize, and close controls.
+    scene[DESKTOP_WINDOW_FULLSCREEN_PROPERTY] = False
+    if EDITOR_GRID_PROPERTY not in scene:
+        scene[EDITOR_GRID_PROPERTY] = False
     starter = _ensure_default_pyramid(bpy.context)
     try:
         from .palette_ui import _ensure_palette
@@ -398,7 +501,7 @@ def configure_workspace() -> None:
                 space.overlay.show_axis_y = False
             except (AttributeError, RuntimeError, TypeError):
                 pass
-            space.shading.type = "MATERIAL"
+            configure_viewport_shading(space)
 
         if len(screen.areas) <= 1 or not view_areas:
             scene[DESKTOP_FULLSCREEN_PROPERTY] = True
@@ -453,11 +556,15 @@ __all__ = [
     "DESKTOP_VERSION_PROPERTY",
     "FIRST_RUN_HINT_PROPERTY",
     "VOXTART_PT_desktop_home",
-    "configure_workspace",
-    "enter_window_fullscreen",
+    "configure_palette_color_management",
+    "configure_viewport_shading",
     "native_chrome_visible",
+    "is_native_ui_shortcut",
+    "grid_visible",
     "open_default_editor",
+    "open_asset_editor",
     "register",
     "set_native_chrome_visibility",
+    "set_grid_visibility",
     "unregister",
 ]

@@ -1,0 +1,21 @@
+VoxTart corresponding source code offer
+========================================
+
+This distribution contains the VoxTart additions and a branded Blender
+5.2.2 runtime. Under the GNU General Public License, version 3 or any later
+version, the corresponding source for the distributed work is available from
+the following sources:
+
+1. VoxTart source, launcher source, build scripts, tests, license notices,
+   and the pinned Blender checkout:
+   https://github.com/rufl/VOXTART
+
+2. The unmodified upstream Blender 5.2.2 source archive:
+   https://download.blender.org/source/blender-5.2.2.tar.xz
+   Commit: d13f752e3b9c4f8c261cda552b1021f8bcc0382c
+
+The exact upstream baseline, library revision, and release checksums are
+recorded in UPSTREAM.lock. The source tree includes the tools used to build
+the VoxTart launcher and to apply its native branding. The source offer is
+intended to remain available for at least three years after distribution of
+the corresponding binary.

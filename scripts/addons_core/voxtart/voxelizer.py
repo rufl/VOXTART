@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic postprocessing for mesh-to-voxel conversion."""
 
@@ -95,6 +95,7 @@ def apply_voxelizer_mode(
         ),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
     result.provenance.update({
         "voxelizer_mode": normalized_mode,

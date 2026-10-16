@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """VOXTART voxel-first authoring tools.
 
@@ -12,6 +12,7 @@ This is intentionally a prototype boundary for the later native data-block.
 bl_info = {
     "name": "VOXTART",
     "author": "VOXTART contributors",
+    "license": "GPL-3.0-or-later",
     "version": (0, 18, 0),
     "blender": (5, 2, 0),
     "description": "Goxel-inspired voxel authoring with dynamic mesh voxelization, pixel tiling and proportional spritesheet projection, calibrated image-to-voxel reconstruction, Bloformer volume deformation, portable VOX/QB/Blockbench/Minecraft formats, layered SpriteStack/PSD/ORA/KRA imports rendered as voxels, stack manifests, categorized Zoo Gallery asset browsing, favorites, thumbnails, surface/grid/vertex placement, brush scattering, path distribution, transform randomization, collision and material overrides, blob gallery kitbashing, socketed voxel character editing, V-Optimizer-style greedy/marching mesh cleanup, lasso blobs, skeleton retargeting, game-rig extraction, action baking, palettes, layers, and optional MCP plugins",

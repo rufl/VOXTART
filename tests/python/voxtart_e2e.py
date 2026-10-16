@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Run VOXTART's complete Windows end-to-end regression matrix.
 
@@ -50,7 +50,7 @@ LAUNCHER_PROBE = TEST_ROOT / "voxtart_launcher_probe.py"
 PERSISTENCE_PROBE = TEST_ROOT / "voxtart_persistence_probe.py"
 GUI_PROBE = TEST_ROOT / "voxtart_gui_probe.py"
 PACKAGE_ASSEMBLER = ROOT / "tools" / "assemble_voxtart_package.py"
-REGRESSION_BASELINE = {"core_tests": 109, "blender_tests": 29, "e2e_tests": 7}
+REGRESSION_BASELINE = {"core_tests": 112, "blender_tests": 33, "e2e_tests": 7}
 
 
 def _blender_background_command(*, factory_startup: bool) -> list[str]:
@@ -141,14 +141,27 @@ def _run_launcher_probe() -> None:
     with tempfile.TemporaryDirectory(prefix="voxtart-e2e-") as directory:
         config_path = Path(directory) / "config"
         marker = Path(directory) / "launcher_probe.json"
+        config_path.mkdir()
         environment = os.environ.copy()
         environment["VOXTART_CONFIG"] = str(config_path)
+        environment["BLENDER_USER_CONFIG"] = str(config_path)
         environment["VOXTART_E2E_PROBE_OUTPUT"] = str(marker)
+        _run(
+            "legacy splash preference fixture",
+            [
+                str(BLENDER),
+                "--background",
+                "--python-expr",
+                "import bpy; bpy.context.preferences.view.show_splash=True; bpy.ops.wm.save_userpref()",
+            ],
+            timeout=180,
+            env=environment,
+        )
         command = (
-            f"call .\\run_voxtart.cmd --background --factory-startup --python {LAUNCHER_PROBE}"
+            f"call .\\run_voxtart.cmd --background --python {LAUNCHER_PROBE}"
         )
         _run(
-            "launcher clean-start smoke",
+            "launcher splash migration smoke",
             ["cmd.exe", "/d", "/s", "/c", command],
             timeout=180,
             env=environment,
@@ -157,12 +170,15 @@ def _run_launcher_probe() -> None:
             raise RuntimeError("Launcher exited successfully without writing its probe marker")
         if not (config_path / "userpref.blend").is_file():
             raise RuntimeError("Launcher did not initialize isolated user preferences")
+        if not (config_path / "voxtart-splash-disabled-v1").is_file():
+            raise RuntimeError("Launcher did not persist the native splash migration marker")
         payload = json.loads(marker.read_text(encoding="utf-8"))
         if (
             payload.get("background") is not True
             or payload.get("voxtart_registered") is not True
             or payload.get("workspace") != "EDIT"
             or payload.get("editor_mode") != "ADD"
+            or payload.get("show_splash") is not False
         ):
             raise RuntimeError(f"Launcher probe reported an invalid payload: {payload!r}")
         print("VOXTART_LAUNCHER_PROBE " + json.dumps(payload, sort_keys=True))
@@ -199,6 +215,25 @@ def _run_package_probe() -> None:
         ]
         if missing:
             raise RuntimeError("Package assembly omitted required paths: " + ", ".join(missing))
+        license_text = (package_root / "LICENSES" / "GPL-3.0-or-later.txt").read_text(
+            encoding="utf-8"
+        )
+        notices_text = (package_root / "LICENSES" / "VOXTART-NOTICES.txt").read_text(
+            encoding="utf-8"
+        )
+        source_offer_text = (package_root / "SOURCE-CODE-OFFER.txt").read_text(
+            encoding="utf-8"
+        )
+        assets_license = (package_root / "LICENSES" / "VOXTART-ASSETS-CC0.txt").read_text(
+            encoding="utf-8"
+        )
+        if (
+            not license_text.startswith("                    GNU GENERAL PUBLIC LICENSE")
+            or "GPL-3.0-or-later" not in notices_text
+            or "https://github.com/rufl/VOXTART" not in source_offer_text
+            or "CC0 1.0 Universal" not in assets_license
+        ):
+            raise RuntimeError("Package legal files do not contain the expected GPL/source/asset notices")
 
         config_path = directory_path / "config"
         marker = directory_path / "package_probe.json"
@@ -206,7 +241,7 @@ def _run_package_probe() -> None:
         environment["VOXTART_CONFIG"] = str(config_path)
         environment["VOXTART_E2E_PROBE_OUTPUT"] = str(marker)
         command = (
-            r"call .\run_voxtart.cmd --background --factory-startup "
+            r"call .\run_voxtart.cmd --background "
             r"--python tests\python\voxtart_launcher_probe.py"
         )
         _run(
@@ -218,12 +253,17 @@ def _run_package_probe() -> None:
         )
         if not marker.is_file():
             raise RuntimeError("Packaged launcher exited without writing its probe marker")
+        if not (config_path / "userpref.blend").is_file():
+            raise RuntimeError("Packaged launcher did not initialize isolated user preferences")
+        if not (config_path / "voxtart-splash-disabled-v1").is_file():
+            raise RuntimeError("Packaged launcher did not persist the native splash migration marker")
         payload = json.loads(marker.read_text(encoding="utf-8"))
         if (
             payload.get("background") is not True
             or payload.get("voxtart_registered") is not True
             or payload.get("workspace") != "EDIT"
             or payload.get("editor_mode") != "ADD"
+            or payload.get("show_splash") is not False
         ):
             raise RuntimeError(f"Packaged launcher probe reported an invalid payload: {payload!r}")
         print("VOXTART_PACKAGE_PROBE " + json.dumps(payload, sort_keys=True))
@@ -307,6 +347,41 @@ def _window_titles() -> set[str]:
     return titles
 
 
+def _window_has_standard_controls(title_fragment: str) -> bool:
+    if os.name != "nt":
+        return False
+    user32 = ctypes.windll.user32
+    get_style = user32.GetWindowLongW
+    get_style.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    get_style.restype = ctypes.c_long
+    required = (
+        0x00C00000  # WS_CAPTION
+        | 0x00080000  # WS_SYSMENU
+        | 0x00020000  # WS_MINIMIZEBOX
+        | 0x00010000  # WS_MAXIMIZEBOX
+    )
+    found = False
+    callback_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_long)
+
+    def collect(hwnd, _parameter):
+        nonlocal found
+        if not user32.IsWindowVisible(hwnd):
+            return True
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buffer = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, buffer, length + 1)
+        if title_fragment not in buffer.value:
+            return True
+        found = (int(get_style(hwnd, -16)) & required) == required
+        return not found
+
+    callback = callback_type(collect)
+    user32.EnumWindows(callback, 0)
+    return found
+
+
 def _validate_png(path: Path) -> tuple[int, int]:
     data = path.read_bytes()
     if len(data) < 32 or data[:8] != b"\x89PNG\r\n\x1a\n":
@@ -338,7 +413,7 @@ def _run_gui_probe() -> None:
         environment["VOXTART_GUI_STACK_PATH"] = str(directory_path / "gui_roundtrip.sstack.json")
         environment["VOXTART_GUI_GALLERY_PATH"] = str(directory_path / "gui_gallery")
         environment["VOXTART_GUI_GAME_RIG_PATH"] = str(directory_path / "gui_game_rig.glb")
-        command = [str(LAUNCHER), "--factory-startup", "--python", str(GUI_PROBE)]
+        command = [str(LAUNCHER), "--python", str(GUI_PROBE)]
         print("\n=== visible VoxTart GUI smoke ===")
         print("$ " + subprocess.list2cmdline(command))
         process = subprocess.Popen(
@@ -349,11 +424,15 @@ def _run_gui_probe() -> None:
             stderr=subprocess.DEVNULL,
         )
         window_seen = False
+        window_controls_seen = False
         deadline = time.monotonic() + 180.0
         try:
             while process.poll() is None:
                 window_seen = window_seen or any(
                     "VoxTart" in title for title in _window_titles()
+                )
+                window_controls_seen = (
+                    window_controls_seen or _window_has_standard_controls("VoxTart")
                 )
                 if time.monotonic() >= deadline:
                     raise RuntimeError("Visible VoxTart GUI probe timed out")
@@ -378,6 +457,8 @@ def _run_gui_probe() -> None:
             or payload.get("starter_pyramid") != 56
             or payload.get("starter_palette", 0) < 4
             or payload.get("shell_make") is not True
+            or payload.get("shell_native_ui_blocked") is not True
+            or payload.get("chatbox_surface") is not True
             or payload.get("shell_editor") is not True
             or payload.get("shell_voxelize") is not True
             or payload.get("shell_refresh") is not True
@@ -392,6 +473,7 @@ def _run_gui_probe() -> None:
             or payload.get("stack_roundtrip") is not True
             or payload.get("native_vox_roundtrip") is not True
             or payload.get("character_prepare") is not True
+            or payload.get("character_native_ui_blocked") is not True
             or payload.get("character_extract") is not True
             or payload.get("character_export") is not True
             or payload.get("character_bake") is not True
@@ -400,27 +482,40 @@ def _run_gui_probe() -> None:
             or payload.get("first_run_hint") is not True
             or payload.get("native_chrome_hidden") is not True
             or payload.get("area_types") != ["VIEW_3D"]
-            or payload.get("window_fullscreen") is not True
+            or payload.get("window_fullscreen") is not False
             or any(payload.get("native_region_props", {}).values())
-            or payload.get("more_tools_escape_hatch") is not True
+            or payload.get("native_ui_lock") is not True
+            or payload.get("advanced_tools_toggle") is not True
+            or payload.get("beginner_toolbar_after_first_edit") is not True
+            or payload.get("options_menu") is not True
+            or payload.get("grid_toggle") is not True
             or payload.get("product_controls") is not True
             or payload.get("details_toggle") is not True
-            or payload.get("escape_project") is not True
+            or payload.get("help_toggle") is not True
+            or payload.get("escape_keeps_ui") is not True
             or payload.get("palette_selection") is not True
+            or payload.get("color_wheel") is not True
+            or payload.get("grid_shortcut") is not True
+            or payload.get("dock_drawers") is not True
+            or payload.get("dock_snap") is not True
+            or payload.get("material_shading") is not True
             or payload.get("paint_undo_redo") is not True
-            or payload.get("palette_non_default") is not True
+            or payload.get("drag_paint") is not True
+            or payload.get("undo_redo_controls") is not True
             or payload.get("selection_workflow") is not True
             or payload.get("project_control") is not True
             or not str(payload.get("first_edit_feedback", "")).startswith("Added ")
             or payload.get("operator_running_modal") is not True
             or payload.get("draw_overlay_handle") is not True
             or payload.get("draw_preview_handle") is not True
-            or payload.get("view_workflow") is not True
+            or payload.get("shell_draw_handle") is not True
             or payload.get("preview_count", 0) <= 0
         ):
             raise RuntimeError(f"Visible GUI probe reported an invalid payload: {payload!r}")
         if not window_seen:
             raise RuntimeError("Visible GUI probe never exposed a VoxTart window title")
+        if not window_controls_seen:
+            raise RuntimeError("Visible GUI probe window lacks standard title bar controls")
         dimensions = _validate_png(screenshot)
         artifact_root = os.environ.get("VOXTART_E2E_ARTIFACT_DIR")
         if artifact_root:

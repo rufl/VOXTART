@@ -1,6 +1,6 @@
 @echo off
 rem SPDX-FileCopyrightText: 2026 VOXTART contributors
-rem SPDX-License-Identifier: MIT
+rem SPDX-License-Identifier: GPL-3.0-or-later
 
 setlocal
 set "VOXTART_ROOT=%~dp0"
@@ -50,15 +50,16 @@ if errorlevel 1 (
 )
 popd
 
-if not exist "%VOXTART_CONFIG%\userpref.blend" (
-    if not exist "%VOXTART_CONFIG%" mkdir "%VOXTART_CONFIG%"
-    "%VOXTART_BLENDER%" --background --python "%VOXTART_PREFS_INIT%"
-    if errorlevel 1 (
-        echo Could not initialize VOXTART Blender preferences.
-        exit /b 1
-    )
+if exist "%VOXTART_CONFIG%\userpref.blend" if exist "%VOXTART_CONFIG%\voxtart-splash-disabled-v1" goto preferences_ready
+if not exist "%VOXTART_CONFIG%" mkdir "%VOXTART_CONFIG%"
+"%VOXTART_BLENDER%" --background --python "%VOXTART_PREFS_INIT%"
+if errorlevel 1 (
+    echo Could not initialize VOXTART Blender preferences.
+    popd
+    exit /b 1
 )
 
+:preferences_ready
 pushd "%VOXTART_ROOT%"
 "%VOXTART_LAUNCHER%" %*
 set "VOXTART_EXIT=%ERRORLEVEL%"

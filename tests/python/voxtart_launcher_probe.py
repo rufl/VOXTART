@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Probe executed through ``run_voxtart.cmd`` by the E2E runner."""
 
@@ -29,6 +29,7 @@ payload = {
     "workspace": str(scene.voxtart_editor_workspace),
     "editor_mode": str(scene.voxtart_editor_mode),
     "blender_version": list(bpy.app.version),
+    "show_splash": bool(bpy.context.preferences.view.show_splash),
 }
 output_path = os.environ.get("VOXTART_E2E_PROBE_OUTPUT")
 if not output_path:

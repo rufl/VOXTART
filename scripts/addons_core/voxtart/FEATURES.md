@@ -1,5 +1,5 @@
-<!-- SPDX-FileCopyrightText: 2026 Blender Authors -->
-<!-- SPDX-License-Identifier: GPL-2.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 VOXTART contributors -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 
 # VOXTART
 
@@ -22,32 +22,56 @@ run_voxtart.cmd
 
 The launcher starts a clean bundled Blender runtime, enables VOXTART
 automatically, hides the auxiliary Blender editors behind a full-screen 3D
-viewport, and configures the active workspace as **VOXTART**. The short VoxStart
+viewport, and configures the active workspace as **VOXTART**. The short VoxTart
 splash then opens the voxel editor directly on the starter asset instead of
 making a new user choose a project shell first.
 The default editor surface hides Blender's header, native toolbar, sidebar,
-gizmos, grid, axes, footer, and status bar. VOXTART supplies its own compact
-top bar with **Project**, **Save**, **Details**, and **More tools** controls.
-**More tools** is the explicit escape hatch for Blender's native controls;
-**Details** reveals technical hit, layer, selection, and shortcut diagnostics
-only when needed.
-The top bar also identifies the active **EDIT** or **SCENE** workspace with a
+gizmos, grid, axes, footer, and status bar. VOXTART supplies its own friendly
+top bar with **Undo**, **Redo**, **Home**, **Save**, **Help**, **More**, and
+**Left**/**Right** drawer toggles; the last two keep workspace panels available
+without consuming the canvas when they are closed. **Undo** and **Redo** explain
+their `Ctrl+Z` and `Ctrl+Y` shortcuts; **More** opens a small menu: **Grid**
+draws a bounded 3D box around the active asset, with one line per voxel
+interval, and `G` toggles it directly (`Shift+G` keeps the Select- or Scene-mode
+move transform); **Hints** shows helpful
+**Advanced tools** expands VOXTART's own tool strip. The left and right drawers
+contain draggable **Layers**, **History**, and **Colors** panels; dragging a
+panel across the canvas snaps it to the nearest drawer and keeps its ordering.
+Blender's native chrome remains hidden throughout the product surface. The
+editor starts with four
+simple tools — **Add block**, **Erase block**, **Color block**, and
+**Select blocks** — and keeps them visible after the first edit instead of
+expanding the toolbar automatically. Custom POST_PIXEL controls follow the
+Windows display scale, capped at 135%, so labels, buttons, and palette swatches
+stay comfortable on high-DPI displays while narrow regions scale down their
+layout to remain inside the viewport.
+The top bar identifies the active **MAKE** or **PLACE** workspace with a
 color-coded pill and the `Tab` shortcut.
+The visual theme uses restrained near-black chrome, cool slate panels, blue
+focus states, and green, amber, or red only for semantic feedback.
+
+The custom overlays use the bundled Blender **Inter** font when the packaged
+runtime exposes it, then fall back to Blender's default font without breaking
+startup. Blender lists Inter under the SIL Open Font License 1.1; no new binary
+font asset is added to VOXTART. Controls use original procedural line icons and
+the existing CC0 icon artwork, while hover tips pair a plain-language action,
+one short explanation, and its shortcut in a wrapped, high-contrast card.
 Each new unsaved project opens with an editable light-yellow stepped pyramid:
 6x6 voxels on the base, followed by 4x4 and 2x2 layers. It is selected and
 framed with breathing room in the viewport so the user can immediately place,
 erase, paint, or select voxels with the VOXTART editor.
 The starter asset also seeds a compact eight-color palette with the light-yellow swatch selected, so the visible strip is useful before any palette setup.
-The first editor session shows a small **Try this** card with plain-language
-mouse instructions, a visible **Colors** strip, and only the beginner actions:
-**Add block**, **Erase block**, **Color block**, and **Select blocks**. The card
-disappears after the first changed edit, which also reports the action and its
-block count with an undo reminder.
+The first editor session shows a **Start here** card with three plain-language
+steps, a visible **Colors** strip, and only the beginner actions: **Add block**,
+**Erase block**, **Color block**, and **Select blocks**. The card disappears
+after the first changed edit, which also reports the action and its block count
+with an undo reminder. The top-bar **Help** guide can reopen the same basics
+later, including how to orbit, undo, and redo a change.
 The editor top bar, color strip, toolbar, and first-run card share rounded
 panels and accent borders so the editing surface reads as one focused product
 workspace.
 The desktop shell remains available as a secondary project surface through the
-editor's **Project** control. It uses a project-editor layout: project tab and
+editor's **Home** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,
 and a compact status bar at the bottom. When opened before the first edit, it
 defaults to **Build**, keeps only the starter-focused project category, and
@@ -68,7 +92,8 @@ The P1 authoring loop is intentionally complete before advanced workflows:
    `Ctrl+Y` undo and redo the committed stroke.
 5. **Save** writes the Blender project, and reopening it restores the asset,
    palette indices, recovery state, and clipboard state.
-6. **Project** or `Esc` returns to the VOXTART project surface.
+6. The **Home** control opens the VOXTART project surface; `Esc` cancels
+   transient editor work but never closes or replaces the VOXTART UI.
 
 
 ### Build pipeline
@@ -107,16 +132,18 @@ refreshing, painting, optimizing, exporting, and character work after the
 first-run path; hovering a control shows its label and available shortcut.
 On Windows, the host window is branded **VoxTart** and uses the voxel-cake
 icon at `assets/voxtart.ico`.
-The launcher suppresses Blender's native splash through an isolated preferences
-directory, then displays the custom **VoxStart 0.0.1-dogfood-(build)** splash
-with the transparent-background icon before opening the voxel editor.
+The launcher migrates both new and existing isolated preference directories
+to disable Blender's native splash, then displays the custom **VoxTart
+preview build** splash with the transparent-background icon before
+opening the voxel editor.
 The splash card uses rounded visual hierarchy, a clear product eyebrow, a
 focused making tagline, and an explicit editor-preparation status strip.
 The handoff invalidates the splash draw state and forces a redraw so the editor
 does not inherit a stale startup frame.
-The packaged `VoxTart.exe` launcher embeds the same transparent icon and keeps
-the Blender host window hidden until its native title is already **VoxTart**,
-so the Blender version title is never exposed during startup.
+The packaged `VoxTart.exe` launcher embeds the same transparent icon and
+reveals a maximized window with the native **VoxTart** title bar. Standard
+minimize, maximize, and close controls remain available while Blender's
+internal editor chrome stays hidden.
 The launcher also runs `tools/brand_voxtart_runtime.py` before startup, patching
 the bundled PE title format and native icon resource before Blender can create
 its first window.
@@ -130,12 +157,38 @@ VOXTART does not bundle third-party art libraries or claim ownership of
 imported models, palettes, textures, or animation files. Verify the source
 license before redistributing an exported asset.
 
+## Licensing and source
+
+The VOXTART add-on, launcher, tools, and release probes are licensed under
+**GNU GPL-3.0-or-later**, matching the GPL-compliant Blender distribution.
+The full text is in `LICENSE` beside this add-on and in
+`doc/license/GPL3-license.txt`.
+
+Packaged releases include `VOXTART-NOTICES.txt`,
+`SOURCE-CODE-OFFER.txt`, and the complete GPL text under `LICENSES/`.
+The bundled Blender runtime retains its own `license/license.md`,
+`copyright.txt`, third-party notices, and source baseline in `UPSTREAM.lock`.
+
 ## Authoring tools
 
 ### Asset model and palette
 
 - `VoxelAsset` stores integer grid cells, a normalized RGBA palette, grid
   spacing, named sockets, and provenance.
+- Each palette swatch stores a MagicaVoxel-style material preset: `DIFFUSE`,
+  `METAL`, `GLASS`, `EMISSIVE`, or `CUSTOM`. Presets drive Principled Base Color,
+- In the VOXTART sidebar, open **Color Picker**, choose a swatch, and click
+  **Edit Material**. In the voxel editor, the palette panel also exposes a
+  Krita-style hue ring and HSV triangle; click or drag the wheel to edit the
+  active swatch directly. Glass uses blended transparency; emissive colors use
+  the Principled emission inputs.
+- VOXTART viewport shading uses the palette material color directly with flat
+  lighting, so voxel colors remain faithful to the Color Picker without studio
+  light, cavity, or specular modulation. Render/export materials retain their
+  configured Principled behavior.
+- Material settings are serialized with the asset in `palette_materials`, so
+  `.voxel.json`/Blender custom-property persistence and palette remapping retain
+  the selected material per swatch.
 - Stable JSON serialization supports scene custom properties and portable
   files.
 - Palette tools accept HEX/TXT, GIMP GPL, JASC PAL, JSON, and Adobe ASE
@@ -165,24 +218,27 @@ The editor keeps Blender's middle-mouse orbit, pan, and wheel zoom behavior
 available while adding a compact voxel workflow:
 
 - `Tab` switches between **Edit** and **Scene** workspaces;
-- the first-run toolbar uses readable **Add block**, **Erase block**, **Color
-  block**, and **Select blocks** labels before showing their shortcut letters;
 - a visible **Colors** strip selects the active palette swatch without opening
-  Blender's sidebar;
-- advanced brushes and selection categories appear after the first changed edit;
-- the default overlay stays lightweight: the asset, block count, active tool
-  context, one short guidance card, palette, and a color-coded status chip;
-- **Details** reveals hit, layer, selection, and shortcut diagnostics in a
-  compact inspector card on demand;
-- `Esc` returns to the VOXTART project surface rather than exposing a raw
-  Blender workspace;
+  Blender's sidebar; the adjacent hue ring and HSV triangle let artists tune
+  that swatch by click-dragging;
+- **More** keeps Hints and Advanced tools one click away without crowding the top bar;
+- `G` toggles the bounded grid directly, while **Grid** in **More** exposes the
+  same control;
+- **Grid** can be turned on to show a bounded 3D box around the active asset,
+  with one line per voxel interval at the asset's grid spacing;
+- **Hints** reveals a small, optional block and layer summary;
+- the default overlay stays lightweight: the asset, block count, beginner
+  tools, palette, and a short guidance card;
+- `Esc` cancels transient editor work but never closes or replaces the VOXTART
+  UI or exposes a raw Blender workspace;
 - the compact VOXTART toolbar keeps project tools one click away; Blender's
-  native toolbar, sidebar, gizmos, grid, and axes stay hidden until **More
-  tools** is selected;
-- the full Adobe-style vertical toolbar groups advanced brush and selection
-  tools, highlights the active tool, and exposes a tooltip on hover;
-- the VOXTART sidebar exposes a Color Picker, active-layer controls, session
-  History, and a Scene Hierarchy inspector after native controls are revealed.
+  native toolbar, sidebar, gizmos, infinite floor grid, and status bar stay hidden;
+- **Grid** draws the bounded voxel-spaced box instead of exposing Blender's
+  infinite floor grid;
+- the full VOXTART vertical toolbar groups advanced brush and selection tools,
+  highlights the active tool, and exposes a tooltip on hover;
+- the VOXTART product panels expose palette, layer, history, and scene controls
+  without revealing Blender's native panels.
 - In **Add** or **Attach**, **left click places** on a voxel face and **right
   click erases** the hit voxel; dragging paints continuously. When the ray
   misses the asset, Add/Attach places on the ground grid plane so the first
@@ -194,9 +250,11 @@ available while adding a compact voxel workflow:
 - `G/R/M` move, rotate, or mirror selected voxels; `Shift+D` duplicates a
   selection; arrows/PageUp/PageDown adjust the transform and `Enter` commits;
 - drag strokes mutate the active layer in memory, redraw at most 60 Hz, and
-  rebuild the Blender mesh once on release;
+  rebuild the mesh immediately on the first click and once more on release;
 - a low-contrast, viewport-only wire seam traces occupied voxel edges so
   adjacent cells remain visually legible without changing the rendered asset;
+- the editor spaces grid lines at the asset voxel size and highlights the
+  current mouseover target with an always-visible translucent cell and outline;
 - `1/2/3` toggles X/Y/Z mirroring and the viewport draws the mirror guides;
 - translucent brush previews, hovered-face outlines, hit normals, active mode,
   selection counts, active-layer lock state, and stroke change counts remain
@@ -210,7 +268,7 @@ available while adding a compact voxel workflow:
 - `Ctrl+D` clears the current selection;
 - `Ctrl+Z` and `Ctrl+Shift+Z`/`Ctrl+Y` restore per-stroke editor history;
 - `[` and `]` change brush radius, `H` toggles hollow stamping, and `Esc`
-  cancels an unfinished stroke or returns to the VOXTART project surface.
+  cancels an unfinished stroke; it never exits the VOXTART editor UI.
 
 The editor writes through `VoxelEditTransaction`, so protected cells,
 active-layer ownership, sparse storage, and deterministic mesh rebuilds remain
@@ -227,11 +285,11 @@ objects can use greedy blocks or smooth rounded marching surfaces independently.
 The **View & Cameras** panel supports multiple scene cameras. Each camera can
 be made the render camera, focused in the main viewport, soloed while the
 others are disabled in the viewport, or restored with **Show All**. Camera
-viewport and render visibility remain separate Blender object properties.
-Open the editor directly from the VOXTART launcher, from the shell's **Open
-voxel editor** action, or from the global `Alt+Shift+Q` shortcut. Use
-**Details** for diagnostic hit/layer information and **More tools** when
-opening Blender's native sidebar is intentional.
+viewport and render visibility remain separate scene object properties.
+Open the editor directly from the VOXTART launcher, from the shell's **Edit
+blocks** action, or from the global `Alt+Shift+Q` shortcut. Use **Hints** to
+show the optional block/layer summary, while **Advanced tools** expands the
+VOXTART tool strip. Blender's native sidebar and menus remain unavailable.
 
 ### Dynamic voxelizer
 
@@ -320,12 +378,14 @@ and the **Convert Tile to New Voxel Asset** action. The deterministic API is
 `generate_seamless_texture`, `generate_seamless_tile`, and
 `generate_seamless_voxel_asset`.
 
-Pixel scale is not an independent tiler setting. The panel uses the current
-editor `voxtart_grid_size`, and the operation requires it to match the active
-asset `grid_size`. Therefore one source texture pixel always occupies one
-voxel cell and exactly that many scene units. Atlas UV rectangles and reported
-world extents are derived from source pixel dimensions, so changing scale
-cannot silently stretch or compress a tile.
+The panel uses the current editor `voxtart_grid_size` as the final block size
+and requires it to match the active asset `grid_size`. **Pixels / Block**
+controls source density separately: the default `2` groups each 2x2 source
+pixel neighborhood into one editable voxel using its dominant opaque color.
+This keeps pixel-art edges hard while cutting the editable cell count by about
+4x; set it to `1` when exact one-pixel topology is required. Mesh UV projection
+continues to use the original texture pixels, so reducing edit density does
+not blur or resample the material.
 
 ### Calibrated multi-view reconstruction
 
@@ -361,7 +421,7 @@ calibration contract without changing the authoritative voxel core.
 ### Image and palette intake
 
 `voxtart.image_intake` converts calibrated RGBA rows into indexed source views
-without resampling:
+without filtering by default:
 
 - source dimensions and nearest-neighbor pixel identity are retained;
 - fully transparent pixels can become background through an alpha threshold;
@@ -372,6 +432,9 @@ without resampling:
 - bounded palettes map overflow colors to the nearest stable entry;
 - each indexed image records dimensions, background settings, palette size, and
   an SHA-256 digest for reconstruction provenance;
+- `IndexedImage.coarsen(pixels_per_voxel=2)` is the explicit middle path for
+  pixel art: each block uses the dominant indexed color in its source
+  neighborhood, reducing cell count without anti-aliasing the artwork;
 - `IndexedImage.to_view` applies axis, facing, origin, integer depth, and
   priority calibration before calling `voxtart.reconstruct`.
 
@@ -664,8 +727,15 @@ layer exposes:
 Transport errors are returned as JSON-RPC errors and expected tool failures as
 `isError` tool results.
 
-The bridge is opt-in and localhost-only. The MCP panel owns start/stop and
-the bearer-token handoff; scene mutations stay disabled until the user enables
+The VOXTART surface includes a centered bottom **Ask VOXTART** prompt bar.
+It sends prompts to the configured local OpenAI-compatible model endpoint with
+the same bounded MCP tools used by external clients, so a model can inspect,
+create, and edit VOXTART assets. **Image** attaches up to four local PNG, JPEG,
+WebP, or GIF references as standard multimodal data URLs; an image-only send
+uses the reference as the starting point for a voxel request.
+
+The bridge is opt-in and localhost-only. The MCP panel owns start/stop and the
+bearer-token handoff; scene mutations stay disabled until the user enables
 **Allow LLM scene edits**. The release probe verifies that boundary, a bounded
 tool round-trip, and temporary server cleanup.
 
@@ -700,7 +770,7 @@ clipboard in a second process. The GUI probe invokes the real operator in a
 containing the editor overlay and brush preview. Use `--skip-launcher` only
 when the compiled Windows launcher is unavailable.
 
-The current local regression baseline is 109 deterministic core tests, 29
+The current local regression baseline is 112 deterministic core tests, 33
 Blender-native tests, and 7 additional end-to-end Blender tests. The E2E
 performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
@@ -717,7 +787,7 @@ read access to repository contents.
 All reusable GitHub Actions are pinned to immutable commit revisions, and
 checkout steps disable credential persistence after fetching source.
 The three direct suite entrypoints also enforce their collected-test contracts:
-109 core tests, 29 Blender-native tests, and 7 headless editor tests. A suite
+112 core tests, 33 Blender-native tests, and 7 headless editor tests. A suite
 that silently loses coverage now fails its own process before CI can publish a
 false-positive pass.
 

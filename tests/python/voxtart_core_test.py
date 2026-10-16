@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2026 Blender Authors
+# SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """System-Python regression suite for Blender-independent VOXTART features.
 
@@ -45,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 109
+EXPECTED_TESTS = 112
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -158,6 +158,35 @@ class VoxelCoreTest(unittest.TestCase):
         self.assertEqual(restored.voxels, asset.voxels)
         self.assertEqual(restored.provenance, {"test": "true"})
         self.assertEqual(len(voxel.VoxelAsset.box(2).voxels), 8)
+
+    def test_palette_materials_round_trip_and_append(self):
+        asset = make_asset({(0, 0, 0): 0})
+        asset.set_palette_material(0, voxel.PaletteMaterial.from_preset("GLASS"))
+        asset.set_palette_material(
+            1,
+            voxel.PaletteMaterial(
+                kind="CUSTOM",
+                alpha=0.7,
+                metallic=0.8,
+                roughness=0.15,
+                transmission=0.2,
+                emission_strength=2.5,
+                ior=1.6,
+            ),
+        )
+        payload = asset.to_dict()
+        self.assertEqual(payload["palette_materials"][0]["kind"], "GLASS")
+        self.assertEqual(asset.provenance, {"test": "true"})
+        restored = voxel.VoxelAsset.from_dict(payload)
+        self.assertEqual(restored.get_palette_materials(), asset.get_palette_materials())
+        self.assertEqual(restored.provenance, asset.provenance)
+        new_index = asset.add_palette_color((0.5, 0.5, 0.5, 1.0))
+        self.assertEqual(new_index, 4)
+        self.assertEqual(asset.get_palette_materials()[-1], voxel.PaletteMaterial())
+        with self.assertRaises(ValueError):
+            voxel.PaletteMaterial(metallic=1.1)
+        with self.assertRaises(ValueError):
+            voxel.PaletteMaterial.from_preset("UNKNOWN")
 
     def test_typed_part_assignments_round_trip_with_asset(self):
         asset = make_asset({(0, 0, 0): 0, (1, 0, 0): 1})
@@ -525,6 +554,45 @@ class TilerTest(unittest.TestCase):
         self.assertEqual(converted_report.world_size, (0.5, 0.5, 0.5))
         self.assertEqual(converted.provenance["workflow"], "pixel_tiler")
 
+    def test_pixel_grouping_keeps_pixel_art_crisp_and_coarse(self):
+        red = (1.0, 0.0, 0.0, 1.0)
+        green = (0.0, 1.0, 0.0, 1.0)
+        blue = (0.0, 0.0, 1.0, 1.0)
+        tile = tiler.Tile(
+            pixels=tiler.PixelTexture(
+                4,
+                2,
+                (
+                    red,
+                    red,
+                    (0.0, 0.0, 0.0, 0.0),
+                    blue,
+                    red,
+                    green,
+                    (0.0, 0.0, 0.0, 0.0),
+                    blue,
+                ),
+            ),
+            index=0,
+            atlas_size=(4, 2),
+            origin=(0, 0),
+        )
+        settings = tiler.TilerSettings(pixel_scale=0.5, pixels_per_voxel=2)
+        projection = tiler.project_tile(tile, (0, 0, 0), settings)
+        self.assertEqual(projection.dimensions, (2, 1, 1))
+        self.assertEqual(projection.world_size, (1.0, 0.5, 0.5))
+        self.assertEqual(len(projection.cells), 2)
+        self.assertEqual(projection.cells[(0, 0, 0)], red)
+        self.assertEqual(projection.cells[(1, 0, 0)], blue)
+        converted, report = tiler.tile_to_voxel_asset(
+            tile,
+            settings,
+            palette=[red, green, blue],
+        )
+        self.assertEqual(len(converted.voxels), 2)
+        self.assertEqual(report.projected, 2)
+        self.assertEqual(converted.provenance["pixels_per_voxel"], "2")
+
     def test_seamless_generation_and_voxel_conversion(self):
         color_a = (0.1, 0.2, 0.3, 1.0)
         color_b = (0.8, 0.7, 0.6, 1.0)
@@ -702,6 +770,13 @@ class TilerTest(unittest.TestCase):
             tiler.TilerSettings(pixel_scale=1.0, rotation=90.5)
         with self.assertRaises(ValueError):
             tiler.TilerSettings(pixel_scale=1.0, mode="PAINT")
+        with self.assertRaises(ValueError):
+            tiler.TilerSettings(pixel_scale=1.0, pixels_per_voxel=0)
+        with self.assertRaises(ValueError):
+            tiler.TilerSettings(
+                pixel_scale=1.0,
+                pixels_per_voxel=tiler.MAX_PIXELS_PER_VOXEL + 1,
+            )
         with self.assertRaises(ValueError):
             tiler.tile_to_voxel_asset(
                 tiler.extract_tile(self._atlas(), 2, 2, 0),
@@ -3774,6 +3849,36 @@ class ImageIntakeTest(unittest.TestCase):
                 (0.0, 0.0, 1.0, 1.0),
             ),
         )
+
+    def test_indexed_image_coarsen_reduces_cells_without_blurring(self):
+        frame = image_intake.ImageFrame.from_rows(
+            "macro",
+            [
+                [
+                    (1.0, 0.0, 0.0, 1.0),
+                    (1.0, 0.0, 0.0, 1.0),
+                    (0.0, 0.0, 0.0, 0.0),
+                    (0.0, 0.0, 1.0, 1.0),
+                ],
+                [
+                    (1.0, 0.0, 0.0, 1.0),
+                    (0.0, 1.0, 0.0, 1.0),
+                    (0.0, 0.0, 0.0, 0.0),
+                    (0.0, 0.0, 1.0, 1.0),
+                ],
+            ],
+        )
+        indexed = image_intake.index_image(frame)
+        coarse = indexed.coarsen(2)
+        self.assertEqual(coarse.pixels, ((0, 1),))
+        self.assertEqual((coarse.width, coarse.height), (2, 1))
+        self.assertEqual(coarse.pixels_per_voxel, 2)
+        self.assertEqual(coarse.source_digest, frame.source_digest)
+        self.assertEqual(coarse.provenance()["pixels_per_voxel"], "2")
+        with self.assertRaises(ValueError):
+            indexed.coarsen(0)
+        with self.assertRaises(ValueError):
+            indexed.coarsen(image_intake.MAX_PIXELS_PER_VOXEL + 1)
 
     def test_background_modes_remove_only_configured_pixels(self):
         frame = image_intake.ImageFrame.from_rows(

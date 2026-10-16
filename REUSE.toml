@@ -1,0 +1,37 @@
+version = 1
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Blender Authors; 2026 VOXTART contributors"
+SPDX-License-Identifier = "LicenseRef-Blender-Project"
+
+[[annotations]]
+path = ["VoxTart.exe", "run_voxtart.cmd", "UPSTREAM.lock", "VOXTART_M0_INVENTORY.txt", "VOXTART-NOTICES.txt", "VOXTART-SOURCE-CODE-OFFER.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 VOXTART contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["assets/voxtart_icon.svg", "assets/voxtart_icon_16.png", "assets/voxtart_icon_32.png", "assets/voxtart_icon_48.png", "assets/voxtart_icon_256.png", "assets/voxtart.ico"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 VOXTART contributors"
+SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["assets/nodes/**", "assets/brushes/**", "assets/blender_assets.cats.txt"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Blender Authors"
+SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["LICENSE", "scripts/addons_core/voxtart/LICENSE"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2007 Free Software Foundation, Inc."
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = "assets/LICENSE"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 VOXTART contributors"
+SPDX-License-Identifier = "CC0-1.0"

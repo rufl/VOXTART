@@ -1,0 +1,8 @@
+Blender Project Upstream Licensing Reference
+
+This identifier applies only to files inherited from or distributed with the
+Blender upstream tree whose file-level licensing metadata is not embedded in
+the file. Those files retain their upstream copyright, attribution, and
+license obligations. See release/license/license.md, release/license/spdx,
+and each upstream component's license and README files for the authoritative
+terms. This notice does not relicense third-party components.

@@ -1,6 +1,6 @@
 @echo off
 rem SPDX-FileCopyrightText: 2026 VOXTART contributors
-rem SPDX-License-Identifier: MIT
+rem SPDX-License-Identifier: GPL-3.0-or-later
 
 setlocal
 set "VOXTART_ROOT=%~dp0.."

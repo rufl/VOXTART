@@ -23,8 +23,8 @@
   licenses which are compatible with the GNU GPL 3 or later.
 
   The license of each individual Blender source file can be found in the first
-  few lines after "SPDX-License-Identifier:". The license text of every such
-  license can be found in license/.
+  few lines after its license marker. The license text of every such license
+  can be found in license/.
 
   The complete overview of copyright and licenses of third-party libraries used
   by Blender can be found in license/license.md.

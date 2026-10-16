@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2026 Blender Authors
+# SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender-native VOXTART registration and UI contract tests.
 
@@ -31,9 +31,9 @@ if str(SOURCE_ROOT) not in sys.path:
 import voxtart as addon  # noqa: E402
 from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, lasso_blob, mcp, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
-from voxtart.character_editor import CharacterRecipe  # noqa: E402
+from voxtart.character_editor import CharacterPart, CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
-EXPECTED_TESTS = 29
+EXPECTED_TESTS = 33
 
 
 def _gallery_entry(name, blob_id, normal):
@@ -114,6 +114,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(tuple(scene.voxtart_bloformer_center), (0, 0, 0))
         self.assertEqual(scene.voxtart_bloformer_radius, 3)
         self.assertEqual(scene.voxtart_bloformer_axis, "Z")
+        self.assertEqual(scene.voxtart_reconstruction_pixels_per_voxel, 2)
 
     def test_registration_exposes_operator_panel_and_menu(self):
         self.assertIs(getattr(bpy.types, "VOXTART_OT_bloformer"), bloformer_ui.VOXTART_OT_bloformer)
@@ -168,6 +169,166 @@ class BlenderRegistrationTest(unittest.TestCase):
             mcp._coerce_int(1.5, "palette_index")
         with self.assertRaises(mcp.MCPToolError):
             mcp._coerce_float(float("inf"), "grid_size")
+    def test_local_chat_surface_and_reference_image_contract(self):
+        manager = bpy.context.window_manager
+        mcp._CHAT_HISTORY.clear()
+        mcp._clear_chat_attachments()
+        manager.voxtart_chat_prompt = ""
+        manager.voxtart_chat_transcript = ""
+        manager.voxtart_chat_status = "Ready"
+        mcp.set_chat_input_focus(True)
+        self.assertTrue(
+            mcp.handle_chat_text_event(
+                SimpleNamespace(type="A", value="PRESS", ascii="b")
+            )
+        )
+        self.assertEqual(manager.voxtart_chat_prompt, "b")
+        self.assertTrue(
+            mcp.handle_chat_text_event(
+                SimpleNamespace(type="BACK_SPACE", value="PRESS", ascii="")
+            )
+        )
+        self.assertEqual(manager.voxtart_chat_prompt, "")
+        layout = mcp.chat_layout(1200.0, 800.0)
+        self.assertAlmostEqual((layout["panel"][0] + layout["panel"][2]) * 0.5, 600.0)
+        self.assertTrue(mcp.chat_model_label().startswith("LOCAL MCP"))
+        temporary_path = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+                temporary_path = Path(handle.name)
+                handle.write(b"reference-image")
+            mcp._attach_chat_image(str(temporary_path))
+            self.assertEqual(mcp.chat_attachment_names(), (temporary_path.name,))
+            content = mcp._chat_message_content("Make this into blocks")
+            self.assertIsInstance(content, list)
+            self.assertEqual(content[0]["text"], "Make this into blocks")
+            self.assertTrue(
+                content[1]["image_url"]["url"].startswith("data:image/png;base64,")
+            )
+            self.assertIn("Image:", mcp.chat_attachment_label())
+        finally:
+            mcp._clear_chat_attachments()
+            mcp.set_chat_input_focus(False)
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+    def test_empty_asset_panels_explain_disabled_actions(self):
+        from voxtart import formats_ui, goxel_ui, minecraft_ui
+
+        before_active = bpy.context.view_layer.objects.active
+        before_selected = tuple(bpy.context.selected_objects)
+        labels = []
+        operator_states = []
+
+        class _LayoutProbe:
+            def __init__(self, enabled=True, states=None):
+                self.enabled = enabled
+                self._states = operator_states if states is None else states
+
+            def label(self, *, text="", **_kwargs):
+                labels.append(str(text))
+
+            def prop(self, *_args, **_kwargs):
+                return None
+
+            def prop_search(self, *_args, **_kwargs):
+                return None
+
+            def operator(self, operator_id, **kwargs):
+                self._states.append((str(operator_id), str(kwargs.get("text", "")), self.enabled))
+                return SimpleNamespace()
+
+            def separator(self):
+                return None
+
+            def box(self):
+                return _LayoutProbe(self.enabled, self._states)
+
+            def row(self, **_kwargs):
+                return _LayoutProbe(self.enabled, self._states)
+
+            def column(self, **_kwargs):
+                return _LayoutProbe(self.enabled, self._states)
+
+            def grid_flow(self, **_kwargs):
+                return _LayoutProbe(self.enabled, self._states)
+        try:
+            for selected in before_selected:
+                selected.select_set(False)
+            bpy.context.view_layer.objects.active = None
+            panel = SimpleNamespace(layout=_LayoutProbe())
+            bloformer_ui.VOXTART_PT_bloformer.draw(panel, bpy.context)
+            formats_ui.VOXTART_PT_voxel_formats.draw(panel, bpy.context)
+            goxel_ui.VOXTART_PT_goxel_tool_shelf.draw(panel, bpy.context)
+            minecraft_ui.VOXTART_PT_blockbench_minecraft.draw(panel, bpy.context)
+            animation.VOXTART_PT_animation_panel.draw(panel, bpy.context)
+            camera_reports = []
+
+            class _CameraOperatorProbe:
+                def report(self, _levels, message):
+                    camera_reports.append(str(message))
+
+            camera_result = viewport_workflow_ui.VOXTART_OT_camera_show_all.execute(
+                _CameraOperatorProbe(),
+                SimpleNamespace(scene=SimpleNamespace(objects=())),
+            )
+            self.assertEqual(camera_result, {"CANCELLED"})
+            self.assertIn("No cameras exist", camera_reports[0])
+            gallery_reports = []
+
+            class _GallerySceneProbe:
+                objects = ()
+
+                def __init__(self):
+                    self.data = {}
+
+                def __contains__(self, key):
+                    return key in self.data
+
+                def get(self, key, default=None):
+                    return self.data.get(key, default)
+
+                def __setitem__(self, key, value):
+                    self.data[key] = value
+
+            class _GalleryOperatorProbe:
+                def report(self, _levels, message):
+                    gallery_reports.append(str(message))
+
+            gallery_scene = _GallerySceneProbe()
+            gallery_context = SimpleNamespace(scene=gallery_scene)
+            gallery_result = blob_gallery_ui.VOXTART_OT_zoo_clear_placements.execute(
+                _GalleryOperatorProbe(),
+                gallery_context,
+            )
+            self.assertEqual(gallery_result, {"CANCELLED"})
+            self.assertIn("No Zoo-placed assets", gallery_reports[0])
+            sync_result = blob_gallery_ui.VOXTART_OT_zoo_sync_placements.execute(
+                _GalleryOperatorProbe(),
+                gallery_context,
+            )
+            self.assertEqual(sync_result, {"CANCELLED"})
+            self.assertIn("No Zoo placements", gallery_reports[1])
+        finally:
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            for selected in before_selected:
+                if selected.name in bpy.data.objects:
+                    selected.select_set(True)
+            bpy.context.view_layer.objects.active = before_active
+
+        self.assertIn("Select a VOXTART blob to enable deformation.", labels)
+        self.assertIn("Select a VOXTART asset to enable export.", labels)
+        self.assertIn(
+            "Choose source armature, action, target armature to enable retargeting.",
+            labels,
+        )
+        self.assertIn("Select a VOXTART asset for edit and pick tools.", labels)
+        disabled_ids = {operator_id for operator_id, _text, enabled in operator_states if not enabled}
+        self.assertIn("voxtart.bloformer", disabled_ids)
+        self.assertIn("voxtart.export_voxel_format", disabled_ids)
+        self.assertIn("voxtart.export_blockbench", disabled_ids)
+        self.assertIn("voxtart.export_minecraft", disabled_ids)
+
 
     def test_voxel_editor_registration_and_defaults(self):
         self.assertIs(
@@ -267,6 +428,70 @@ class BlenderRegistrationTest(unittest.TestCase):
         scene = bpy.context.scene
         self.assertEqual(scene.voxtart_scene_hierarchy_search, "")
         self.assertFalse(scene.voxtart_scene_hierarchy_include_unplaced)
+        assembly_property = scene_hierarchy_ui.ASSEMBLY_PROPERTY
+        had_assembly = assembly_property in scene
+        previous_assembly = scene.get(assembly_property)
+        try:
+            scene[assembly_property] = "{not-json"
+            with self.assertRaises(ValueError):
+                scene_hierarchy_ui._scene_hierarchy_records(bpy.context)
+        finally:
+            if had_assembly:
+                scene[assembly_property] = previous_assembly
+            elif assembly_property in scene:
+                del scene[assembly_property]
+        from voxtart import layers_ui, stacking_ui
+
+        before_active = bpy.context.view_layer.objects.active
+        before_selected = tuple(bpy.context.selected_objects)
+        invalid_stack = bpy.data.objects.new("VOXTART Invalid Stack UI Test", None)
+        scene.collection.objects.link(invalid_stack)
+        try:
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            invalid_stack.select_set(True)
+            bpy.context.view_layer.objects.active = invalid_stack
+            invalid_stack[stacking_ui.STACK_PROPERTY] = "{not-json"
+            labels = []
+
+            class _PanelLayout:
+                def label(self, *, text="", **_kwargs):
+                    labels.append(str(text))
+
+                def prop(self, *_args, **_kwargs):
+                    return None
+
+                def box(self):
+                    return self
+
+                def operator(self, *_args, **_kwargs):
+                    return SimpleNamespace()
+
+                def separator(self):
+                    return None
+
+            panel = SimpleNamespace(layout=_PanelLayout())
+            stacking_ui.VOXTART_PT_stack_panel.draw(panel, bpy.context)
+            self.assertTrue(any("Saved stack data is invalid" in text for text in labels))
+
+            invalid_stack[operators.ASSET_PROPERTY] = "{not-json"
+            layers_ui._update_layer_opacity(scene, None)
+            self.assertIn(layers_ui.LAYER_ERROR_PROPERTY, scene)
+            self.assertIn("Layer update failed", scene[layers_ui.LAYER_ERROR_PROPERTY])
+        finally:
+            if layers_ui.LAYER_ERROR_PROPERTY in scene:
+                del scene[layers_ui.LAYER_ERROR_PROPERTY]
+            bpy.data.objects.remove(invalid_stack, do_unlink=True)
+            for selected in tuple(bpy.context.selected_objects):
+                selected.select_set(False)
+            for selected in before_selected:
+                if selected.name in bpy.data.objects:
+                    selected.select_set(True)
+            bpy.context.view_layer.objects.active = (
+                before_active
+                if before_active is not None and before_active.name in bpy.data.objects
+                else None
+            )
 
 
     def test_character_editor_registration_and_defaults(self):
@@ -359,6 +584,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(scene.voxtart_tiler_generated_repeat_x, 2)
         self.assertEqual(scene.voxtart_tiler_generated_repeat_y, 2)
         self.assertAlmostEqual(scene.voxtart_grid_size, 1.0)
+        self.assertEqual(scene.voxtart_tiler_pixels_per_voxel, 2)
 
     def test_character_editor_rebuild_assigns_and_clears(self):
         scene = bpy.context.scene
@@ -434,6 +660,46 @@ class BlenderRegistrationTest(unittest.TestCase):
                         for obj in bpy.data.objects
                     )
                 )
+                invalid_root_recipe = CharacterRecipe(
+                    parts=[CharacterPart("ROOT", "native_root")],
+                    settings={"root_location": [0, 1]},
+                ).encode()
+                scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY] = invalid_root_recipe
+                with self.assertRaises(RuntimeError):
+                    bpy.ops.voxtart.character_rebuild()
+                self.assertEqual(scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY], invalid_root_recipe)
+
+                scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY] = "{not-json"
+                labels = []
+
+                class _CharacterLayoutProbe:
+                    def label(self, *, text="", **_kwargs):
+                        labels.append(str(text))
+
+                    def prop(self, *_args, **_kwargs):
+                        return None
+
+                    def row(self, **_kwargs):
+                        return self
+
+                    def box(self):
+                        return self
+
+                    def operator(self, *_args, **_kwargs):
+                        return SimpleNamespace()
+
+                original_gallery_entries = character_editor_ui._gallery_entries
+                character_editor_ui._gallery_entries = lambda _context: ((), ())
+                try:
+                    panel = SimpleNamespace(layout=_CharacterLayoutProbe())
+                    character_editor_ui.VOXTART_PT_character_editor.draw(panel, bpy.context)
+                finally:
+                    character_editor_ui._gallery_entries = original_gallery_entries
+                self.assertTrue(any("saved character recipe is invalid" in text for text in labels))
+                with self.assertRaises(RuntimeError):
+                    bpy.ops.voxtart.character_rebuild()
+                self.assertEqual(scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY], "{not-json")
+                self.assertEqual(bpy.ops.voxtart.character_clear(), {"FINISHED"})
         finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
             scene.voxtart_blob_gallery_path = previous_gallery_path
@@ -484,8 +750,155 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertGreater(marching_report["target_faces"], 0)
             self.assertTrue(all(len(polygon.vertices) == 3 for polygon in obj.data.polygons))
             self.assertEqual(obj[operators.ASSET_PROPERTY], source_payload)
+            obj[optimizer_ui.OPTIMIZER_REPORT_PROPERTY] = "{not-json"
+            with self.assertRaises(ValueError):
+                optimizer_ui._report_from_object(obj)
         finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+
+    def test_palette_material_operator_persists_and_configures_nodes(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        asset = VoxelAsset.box(1)
+        asset.add_palette_color((0.1, 0.4, 1.0, 1.0))
+        obj = operators._create_asset_object(bpy.context, "Material Controls", asset)
+        try:
+            self.assertEqual(
+                bpy.ops.voxtart.palette_material(index=0, preset="EMISSIVE"),
+                {"FINISHED"},
+            )
+            self.assertEqual(
+                bpy.ops.voxtart.palette_material(index=1, preset="GLASS"),
+                {"FINISHED"},
+            )
+            loaded = operators._load_asset(obj)
+            self.assertEqual(loaded.get_palette_materials()[0].kind, "EMISSIVE")
+            self.assertEqual(loaded.get_palette_materials()[1].kind, "GLASS")
+            emissive_shader = obj.data.materials[0].node_tree.nodes["Principled BSDF"]
+            glass_shader = obj.data.materials[1].node_tree.nodes["Principled BSDF"]
+            self.assertEqual(emissive_shader.inputs["Emission Strength"].default_value, 5.0)
+            self.assertEqual(glass_shader.inputs["Transmission Weight"].default_value, 1.0)
+            self.assertAlmostEqual(glass_shader.inputs["Alpha"].default_value, 0.35, places=5)
+            self.assertEqual(obj.data.materials[1].surface_render_method, "BLENDED")
+            self.assertIn('"palette_materials"', obj[operators.ASSET_PROPERTY])
+        finally:
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+
+    def test_viewport_palette_colors_use_flat_material_display(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        palette = (
+            (0.071, 0.237, 0.513, 1.0),
+            (0.823, 0.417, 0.129, 1.0),
+        )
+        asset = VoxelAsset(grid_size=1.0, palette=list(palette))
+        asset.set_voxel((0, 0, 0), 0)
+        obj = operators._create_asset_object(bpy.context, "Viewport Palette Fidelity", asset)
+        scene = bpy.context.scene
+        previous_color_management = (
+            scene.view_settings.view_transform,
+            scene.view_settings.look,
+            scene.view_settings.exposure,
+            scene.view_settings.gamma,
+            scene.display_settings.display_device,
+        )
+        try:
+            self.assertEqual(palette_ui._color_hex((0.5, 0.5, 0.5, 1.0)), "#BCBCBC")
+            desktop_ui.configure_palette_color_management(scene)
+            self.assertEqual(scene.view_settings.view_transform, "Standard")
+            self.assertEqual(scene.view_settings.look, "None")
+            self.assertEqual(scene.view_settings.exposure, 0.0)
+            self.assertEqual(scene.view_settings.gamma, 1.0)
+            self.assertEqual(scene.display_settings.display_device, "sRGB")
+            shading = SimpleNamespace(
+                type="MATERIAL",
+                color_type="MATERIAL",
+                light="STUDIO",
+                show_shadows=True,
+                show_cavity=True,
+                show_specular_highlight=True,
+            )
+            desktop_ui.configure_viewport_shading(SimpleNamespace(shading=shading))
+            self.assertEqual(shading.type, "SOLID")
+            self.assertEqual(shading.color_type, "MATERIAL")
+            self.assertEqual(shading.light, "FLAT")
+            for index, color in enumerate(palette):
+                material = obj.data.materials[index]
+                for actual, expected in zip(tuple(material.diffuse_color), color):
+                    self.assertAlmostEqual(actual, expected, places=6)
+                shader = material.node_tree.nodes["Principled BSDF"]
+                for actual, expected in zip(tuple(shader.inputs["Base Color"].default_value), color):
+                    self.assertAlmostEqual(actual, expected, places=6)
+            wheel_asset = VoxelAsset(
+                grid_size=1.0,
+                palette=[(0.2, 0.3, 0.4, 1.0), (0.8, 0.2, 0.1, 1.0)],
+            )
+            wheel_scene = SimpleNamespace(
+                voxtart_edit_palette_index=0,
+                voxtart_palette_index=0,
+            )
+            sync_calls = []
+            wheel_editor = SimpleNamespace(
+                asset=wheel_asset,
+                layer_asset=wheel_asset,
+                scene=wheel_scene,
+                status="",
+                _sync=lambda *args, **kwargs: sync_calls.append((args, kwargs)),
+            )
+            region = SimpleNamespace(width=900, height=700)
+            wheel_context = SimpleNamespace(region=region)
+            dock_layout = voxel_editor._editor_dock_layout(wheel_editor, region)
+            self.assertEqual(dock_layout["panels"]["PALETTE"]["side"], "RIGHT")
+            self.assertNotIn("LAYERS", dock_layout["panels"])
+            dock_header = dock_layout["panels"]["PALETTE"]["bounds"]
+            dock_hit = voxel_editor._editor_dock_hit(
+                wheel_editor,
+                wheel_context,
+                SimpleNamespace(
+                    mouse_region_x=(dock_header[0] + dock_header[2]) * 0.5,
+                    mouse_region_y=dock_header[3] - 12.0,
+                ),
+            )
+            self.assertEqual(dock_hit[:2], ("PALETTE", "HEADER"))
+            geometry = voxel_editor._editor_color_wheel_geometry(wheel_editor, region)
+            self.assertIsNotNone(geometry)
+            center_x, center_y = geometry["center"]
+            ring_radius = (geometry["outer_radius"] + geometry["inner_radius"]) * 0.5
+            hue_hit = voxel_editor._editor_color_wheel_hit(
+                wheel_editor,
+                wheel_context,
+                SimpleNamespace(
+                    mouse_region_x=center_x + ring_radius,
+                    mouse_region_y=center_y,
+                ),
+            )
+            self.assertEqual(hue_hit[0], "HUE")
+            sv_hit = voxel_editor._editor_color_wheel_hit(
+                wheel_editor,
+                wheel_context,
+                SimpleNamespace(
+                    mouse_region_x=geometry["triangle"][0][0],
+                    mouse_region_y=geometry["triangle"][0][1],
+                ),
+            )
+            self.assertEqual(sv_hit[0], "SV")
+            before_wheel_color = tuple(wheel_asset.palette[0])
+            voxel_editor._set_editor_color_from_wheel(
+                wheel_editor,
+                wheel_context,
+                ("HUE", 0.5),
+            )
+            self.assertNotEqual(tuple(wheel_asset.palette[0]), before_wheel_color)
+            self.assertEqual(wheel_scene.voxtart_palette_index, 0)
+            self.assertTrue(sync_calls)
+        finally:
+            (
+                scene.view_settings.view_transform,
+                scene.view_settings.look,
+                scene.view_settings.exposure,
+                scene.view_settings.gamma,
+                scene.display_settings.display_device,
+            ) = previous_color_management
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+
 
     def test_voxel_authoring_operators_persist_reports(self):
         before_names = {obj.name for obj in bpy.data.objects}
@@ -560,6 +973,14 @@ class BlenderRegistrationTest(unittest.TestCase):
                 _cancel_stroke = voxel_editor.VOXTART_OT_voxel_editor._cancel_stroke
                 _modal = voxel_editor.VOXTART_OT_voxel_editor.modal
 
+            obj[voxel_editor.EDITOR_SELECTION_PROPERTY] = "not-json"
+            invalid_selection = EditorHarness()
+            invalid_selection.obj = obj
+            invalid_selection.scene = scene
+            invalid_selection._load_state(bpy.context)
+            self.assertEqual(invalid_selection.selection, ())
+            self.assertNotIn(voxel_editor.EDITOR_SELECTION_PROPERTY, obj)
+            self.assertIn("Invalid editor selection discarded", invalid_selection.status)
             editor = EditorHarness()
             editor.obj = obj
             editor.scene = scene
@@ -838,6 +1259,26 @@ class BlenderRegistrationTest(unittest.TestCase):
             scene.voxtart_palette_enforce = True
             palette_ui._set_palette(scene, colors, name="Picker Test")
             self.assertEqual(
+                bpy.ops.voxtart.add_palette_color(color=colors[1]),
+                {"FINISHED"},
+            )
+            self.assertEqual(scene.voxtart_palette_index, 1)
+            self.assertEqual(scene.voxtart_edit_palette_index, 1)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [1],
+            )
+            self.assertEqual(
+                bpy.ops.voxtart.quick_palette_step(delta=1),
+                {"FINISHED"},
+            )
+            self.assertEqual(scene.voxtart_palette_index, 2)
+            self.assertEqual(scene.voxtart_edit_palette_index, 2)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [2],
+            )
+            self.assertEqual(
                 bpy.ops.voxtart.palette_select(index=1),
                 {"FINISHED"},
             )
@@ -859,6 +1300,14 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertEqual(reordered.palette, [colors[1], colors[2], colors[0]])
             self.assertEqual(reordered.voxels[(0, 0, 0)], 2)
             self.assertEqual(reordered.voxels[(1, 0, 0)], 0)
+            self.assertEqual(scene.voxtart_palette_index, 2)
+            self.assertEqual(scene.voxtart_edit_palette_index, 2)
+            self.assertEqual(scene.voxtart_palette_anchor, 2)
+            self.assertEqual(scene.voxtart_palette_hover_index, 2)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [0, 2],
+            )
             self.assertEqual(
                 bpy.ops.voxtart.palette_select(index=2),
                 {"FINISHED"},
@@ -876,11 +1325,23 @@ class BlenderRegistrationTest(unittest.TestCase):
                 {"FINISHED"},
             )
             self.assertEqual(len(scene.voxtart_palette_colors), 6)
+            self.assertEqual(scene.voxtart_palette_index, 0)
+            self.assertEqual(scene.voxtart_edit_palette_index, 0)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [0, 2, 4],
+            )
             self.assertEqual(
                 bpy.ops.voxtart.palette_compact(),
                 {"FINISHED"},
             )
             self.assertEqual(len(scene.voxtart_palette_colors), 2)
+            self.assertEqual(scene.voxtart_palette_index, 0)
+            self.assertEqual(scene.voxtart_edit_palette_index, 0)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [0, 1],
+            )
             self.assertEqual(
                 bpy.ops.voxtart.palette_gradient(
                     start=(0.0, 0.0, 0.0, 1.0),
@@ -892,6 +1353,58 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertEqual(len(scene.voxtart_palette_colors), 3)
             self.assertEqual(tuple(scene.voxtart_palette_colors[0].color), (0.0, 0.0, 0.0, 1.0))
             self.assertEqual(tuple(scene.voxtart_palette_colors[-1].color), (1.0, 1.0, 1.0, 1.0))
+            self.assertEqual(scene.voxtart_palette_index, 0)
+            self.assertEqual(scene.voxtart_edit_palette_index, 0)
+            self.assertEqual(scene.voxtart_palette_anchor, 0)
+            self.assertEqual(scene.voxtart_palette_hover_index, 0)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [0],
+            )
+            added_color = (0.2, 0.4, 0.9, 1.0)
+            self.assertEqual(
+                bpy.ops.voxtart.palette_add(color=added_color),
+                {"FINISHED"},
+            )
+            self.assertEqual(scene.voxtart_palette_index, 3)
+            self.assertEqual(scene.voxtart_edit_palette_index, 3)
+            self.assertEqual(scene.voxtart_palette_anchor, 3)
+            self.assertEqual(scene.voxtart_palette_hover_index, 3)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [3],
+            )
+            self.assertEqual(
+                bpy.ops.voxtart.palette_remove(index=3),
+                {"FINISHED"},
+            )
+            expected_remove_index = palette_ui.nearest_palette_index(
+                added_color,
+                [
+                    (0.0, 0.0, 0.0, 1.0),
+                    (0.5, 0.5, 0.5, 1.0),
+                    (1.0, 1.0, 1.0, 1.0),
+                ],
+            )
+            self.assertEqual(scene.voxtart_palette_index, expected_remove_index)
+            self.assertEqual(scene.voxtart_edit_palette_index, expected_remove_index)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [expected_remove_index],
+            )
+            self.assertEqual(
+                bpy.ops.voxtart.palette_add(color=added_color),
+                {"FINISHED"},
+            )
+            self.assertEqual(scene.voxtart_palette_index, 3)
+            self.assertEqual(scene.voxtart_edit_palette_index, 3)
+            self.assertEqual(scene.voxtart_palette_anchor, 3)
+            self.assertEqual(
+                [index for index, item in enumerate(scene.voxtart_palette_colors) if item.selected],
+                [3],
+            )
+            updated = operators._load_asset(obj)
+            self.assertEqual(tuple(round(channel, 6) for channel in updated.palette[3]), added_color)
         finally:
             scene.voxtart_palette_enforce = previous_enforce
             scene.voxtart_palette_name = previous_name
@@ -1022,6 +1535,9 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertEqual(len(loaded.voxels), 12 ** 3)
             self.assertEqual(len(loaded_stack.layers), 2)
             self.assertEqual(loaded_stack.layers[1].voxels[(0, 0, 0)], 1)
+            obj[operators.LAYER_STACK_PROPERTY] = "{not-json"
+            with self.assertRaises(ValueError):
+                operators._load_layer_stack(obj, loaded)
             self.assertEqual(loaded.voxels[(0, 0, 0)], 1)
         finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
@@ -1105,6 +1621,13 @@ class BlenderRegistrationTest(unittest.TestCase):
             overlay_name = obj[reconstruct_ui.RECONSTRUCTION_OVERLAY_PROPERTY]
             self.assertIn(overlay_name, bpy.data.objects)
             self.assertTrue(bpy.data.objects[overlay_name].hide_viewport)
+            obj[reconstruct_ui.RECONSTRUCTION_REPORT_PROPERTY] = "{not-json"
+            with self.assertRaises(ValueError):
+                reconstruct_ui._report_from_object(obj)
+            obj[reconstruct_ui.RECONSTRUCTION_REPORT_PROPERTY] = json.dumps(report)
+            obj[reconstruct_ui.RECONSTRUCTION_CANDIDATES_PROPERTY] = "{not-json"
+            with self.assertRaises(ValueError):
+                reconstruct_ui._candidate_review_from_object(obj)
         finally:
             if image is not None and image.name in bpy.data.images:
                 bpy.data.images.remove(image)
@@ -1274,6 +1797,7 @@ class BlenderRegistrationTest(unittest.TestCase):
             "voxtart_tiler_flip_y",
             "voxtart_tiler_mode",
             "voxtart_tiler_alpha_threshold",
+            "voxtart_tiler_pixels_per_voxel",
             "voxtart_tiler_anchor",
         )
         previous_tiler = {name: getattr(scene, name) for name in tiler_fields}
@@ -1293,6 +1817,7 @@ class BlenderRegistrationTest(unittest.TestCase):
             scene.voxtart_tiler_flip_y = False
             scene.voxtart_tiler_mode = "STAMP"
             scene.voxtart_tiler_alpha_threshold = 0.05
+            scene.voxtart_tiler_pixels_per_voxel = 1
             scene.voxtart_tiler_anchor = (3, 0, 0)
 
             base_obj = operators._create_asset_object(
@@ -1345,6 +1870,7 @@ class BlenderRegistrationTest(unittest.TestCase):
             cleared_stack = operators._load_layer_stack(base_obj, operators._load_asset(base_obj))
             self.assertFalse(any(layer.name == "VOXTART Dither" for layer in cleared_stack.layers))
             self.assertEqual(set(operators._load_asset(base_obj).voxels), occupancy)
+            self.assertEqual(bpy.ops.voxtart.clear_dither(), {"CANCELLED"})
         finally:
             for name, value in previous_tiler.items():
                 setattr(scene, name, value)
@@ -1401,6 +1927,12 @@ class BlenderRegistrationTest(unittest.TestCase):
         scene = bpy.context.scene
         starter = bpy.data.objects.get(desktop_ui.DEFAULT_PYRAMID_OBJECT_NAME)
         self.assertIsNotNone(starter)
+        self.assertFalse(
+            any(
+                obj.type in {"CAMERA", "LIGHT"} and not obj.hide_viewport
+                for obj in bpy.data.objects
+            )
+        )
         self.assertIs(bpy.context.active_object, starter)
         asset = operators._load_asset(starter)
         self.assertEqual(len(asset.voxels), 56)
@@ -1442,13 +1974,14 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(desktop_branding.WINDOW_TITLE, "VoxTart")
         self.assertTrue(desktop_branding.ICON_PATH.is_file())
         self.assertFalse(desktop_branding.apply())
-        self.assertEqual(desktop_splash.SPLASH_TITLE, "VoxStart")
-        self.assertEqual(desktop_splash.SPLASH_VERSION, "0.0.1-dogfood-(build)")
+        self.assertEqual(desktop_splash.SPLASH_TITLE, "VoxTart")
+        self.assertEqual(desktop_splash.SPLASH_VERSION, "A friendly voxel editor")
         self.assertTrue(desktop_splash.ICON_IMAGE_PATH.is_file())
         self.assertFalse(desktop_splash.show())
         self.assertGreater(len(bpy.context.scene.voxtart_palette_colors), 0)
         self.assertTrue(scene.get(desktop_ui.DESKTOP_FULLSCREEN_PROPERTY))
         self.assertFalse(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
+        self.assertFalse(scene.get(desktop_ui.DESKTOP_WINDOW_FULLSCREEN_PROPERTY))
         self.assertFalse(bpy.context.screen.show_statusbar)
         view_areas = tuple(
             area
@@ -1460,6 +1993,24 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertFalse(any(getattr(area.spaces.active, "show_region_toolbar", False) for area in view_areas))
             self.assertFalse(any(area.spaces.active.show_region_header for area in view_areas))
             self.assertFalse(any(area.spaces.active.show_region_footer for area in view_areas))
+        desktop_ui.set_native_chrome_visibility(True)
+        self.assertFalse(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
+        self.assertFalse(desktop_ui.native_chrome_visible(scene))
+        self.assertTrue(
+            desktop_ui.is_native_ui_shortcut(
+                SimpleNamespace(type="F3", value="PRESS", shift=False, ctrl=False)
+            )
+        )
+        self.assertTrue(
+            desktop_ui.is_native_ui_shortcut(
+                SimpleNamespace(type="SPACE", value="PRESS", shift=True, ctrl=False)
+            )
+        )
+        self.assertFalse(
+            desktop_ui.is_native_ui_shortcut(
+                SimpleNamespace(type="SPACE", value="PRESS", shift=False, ctrl=False)
+            )
+        )
 
     def test_operator_property_contract_and_error_path(self):
         declared = set(getattr(bloformer_ui.VOXTART_OT_bloformer, "__annotations__", ()))

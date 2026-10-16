@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender UI for assembling socketed voxel character parts."""
 
@@ -52,14 +52,23 @@ def _gallery_entries(context):
     )
 
 
+def _new_recipe(scene: bpy.types.Scene) -> CharacterRecipe:
+    return CharacterRecipe(
+        name=str(
+            getattr(scene, "voxtart_character_name", "VOXTART Character")
+            or "VOXTART Character"
+        )
+    )
+
+
 def _load_recipe(scene: bpy.types.Scene) -> CharacterRecipe:
     encoded = scene.get(CHARACTER_RECIPE_PROPERTY, "")
     if not encoded:
-        return CharacterRecipe(name=str(getattr(scene, "voxtart_character_name", "VOXTART Character") or "VOXTART Character"))
+        return _new_recipe(scene)
     try:
         return CharacterRecipe.decode(encoded)
-    except (TypeError, ValueError):
-        return CharacterRecipe(name=str(getattr(scene, "voxtart_character_name", "VOXTART Character") or "VOXTART Character"))
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"saved character recipe is invalid: {error}") from error
 
 
 def _save_recipe(scene: bpy.types.Scene, recipe: CharacterRecipe) -> None:
@@ -84,11 +93,13 @@ def _scene_name(scene: bpy.types.Scene, recipe: CharacterRecipe) -> str:
 
 def _root_location(recipe: CharacterRecipe, context: bpy.types.Context) -> tuple[float, float, float]:
     raw = recipe.settings.get("root_location")
-    if isinstance(raw, (list, tuple)) and len(raw) == 3:
+    if raw is not None:
+        if not isinstance(raw, (list, tuple)) or len(raw) != 3:
+            raise ValueError("saved character root location must contain three coordinates")
         try:
             return tuple(float(value) for value in raw)
-        except (TypeError, ValueError):
-            pass
+        except (TypeError, ValueError) as error:
+            raise ValueError("saved character root location contains invalid coordinates") from error
     location = tuple(float(value) for value in context.scene.cursor.location)
     recipe.settings["root_location"] = list(location)
     return location
@@ -246,11 +257,11 @@ class VOXTART_OT_character_rebuild(bpy.types.Operator):
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
-        recipe = _load_recipe(context.scene)
-        if not recipe.parts:
-            self.report({'ERROR'}, "assign at least one character part first")
-            return {'CANCELLED'}
         try:
+            recipe = _load_recipe(context.scene)
+            if not recipe.parts:
+                self.report({'ERROR'}, "assign at least one character part first")
+                return {'CANCELLED'}
             _scene_name(context.scene, recipe)
             _rebuild_character(context, recipe)
             _save_recipe(context.scene, recipe)
@@ -271,14 +282,14 @@ class VOXTART_OT_character_remove_part(bpy.types.Operator):
 
     def execute(self, context):
         scene = context.scene
-        recipe = _load_recipe(scene)
-        if self.slot == "ROOT":
-            self.report({'ERROR'}, "use Clear Character to remove the root and its children")
-            return {'CANCELLED'}
-        if not recipe.remove(self.slot):
-            self.report({'ERROR'}, f"slot {self.slot} is empty")
-            return {'CANCELLED'}
         try:
+            recipe = _load_recipe(scene)
+            if self.slot == "ROOT":
+                self.report({'ERROR'}, "use Clear Character to remove the root and its children")
+                return {'CANCELLED'}
+            if not recipe.remove(self.slot):
+                self.report({'ERROR'}, f"slot {self.slot} is empty")
+                return {'CANCELLED'}
             _rebuild_character(context, recipe)
             _save_recipe(scene, recipe)
         except (OSError, TypeError, ValueError, RuntimeError) as error:
@@ -315,6 +326,11 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         scene = context.scene
+        try:
+            recipe = _load_recipe(scene)
+        except (TypeError, ValueError) as error:
+            recipe = _new_recipe(scene)
+            layout.label(text=str(error), icon="ERROR")
         layout.prop(scene, "voxtart_character_name", text="Name")
         layout.prop(scene, CHARACTER_SLOT_PROPERTY, text="Target Slot")
         layout.prop(scene, "voxtart_character_search", text="Part Search")
@@ -330,6 +346,8 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
             entries, errors = _gallery_entries(context)
         except (OSError, TypeError, ValueError, RuntimeError) as error:
             entries, errors = (), (str(error),)
+        if errors:
+            layout.label(text=f"Skipped {len(errors)} invalid asset(s)", icon="ERROR")
         layout.label(text=f"Gallery parts: {len(entries)}", icon="ASSET_MANAGER")
         for entry in entries[:16]:
             row = layout.row(align=True)
@@ -341,8 +359,6 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
             assign.slot = scene.voxtart_character_slot
             assign.blob_id = entry.blob_id
             row.label(text=f"{len(entry.asset.voxels)}v / {len(entry.joints)}j")
-        if errors:
-            layout.label(text=f"Skipped {len(errors)} invalid asset(s)", icon="ERROR")
 
         box = layout.box()
         box.label(text=f"Assigned parts ({len(recipe.parts)}/{len(CHARACTER_SLOTS)})", icon="OUTLINER_OB_MESH")

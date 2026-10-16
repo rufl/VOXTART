@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic, missing-only symmetry for voxel candidates."""
 
@@ -60,6 +60,7 @@ def apply_missing_only(
         part_assignments=dict(asset.part_assignments),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
     added: list[Cell] = []
     skipped: list[Cell] = []

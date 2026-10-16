@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Versioned sparse voxel data model used by the Blender adapter."""
 
@@ -16,6 +16,146 @@ from .provenance import sha256_json
 SCHEMA_VERSION = 1
 Cell = tuple[int, int, int]
 Color = tuple[float, float, float, float]
+
+PALETTE_MATERIALS_KEY = "palette_materials"
+PALETTE_MATERIAL_KINDS = ("DIFFUSE", "METAL", "GLASS", "EMISSIVE", "CUSTOM")
+
+
+def _finite_range(value: Any, name: str, minimum: float, maximum: float) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as error:
+        raise ValueError(f"{name} must be a finite number in [{minimum}, {maximum}]") from error
+    if not math.isfinite(result) or not minimum <= result <= maximum:
+        raise ValueError(f"{name} must be a finite number in [{minimum}, {maximum}]")
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class PaletteMaterial:
+    """Per-palette physically based material controls."""
+
+    kind: str = "DIFFUSE"
+    alpha: float = 1.0
+    metallic: float = 0.0
+    roughness: float = 0.5
+    transmission: float = 0.0
+    emission_strength: float = 0.0
+    ior: float = 1.45
+
+    def __post_init__(self) -> None:
+        kind = str(self.kind).upper()
+        if kind not in PALETTE_MATERIAL_KINDS:
+            raise ValueError(f"unsupported palette material kind: {self.kind!r}")
+        object.__setattr__(self, "kind", kind)
+        for name, minimum, maximum in (
+            ("alpha", 0.0, 1.0),
+            ("metallic", 0.0, 1.0),
+            ("roughness", 0.0, 1.0),
+            ("transmission", 0.0, 1.0),
+            ("emission_strength", 0.0, 1000.0),
+            ("ior", 1.0, 3.0),
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _finite_range(getattr(self, name), name, minimum, maximum),
+            )
+
+    @classmethod
+    def from_preset(cls, kind: str) -> "PaletteMaterial":
+        normalized = str(kind).upper()
+        if normalized == "DIFFUSE":
+            return cls()
+        if normalized == "METAL":
+            return cls(kind=normalized, metallic=1.0, roughness=0.22)
+        if normalized == "GLASS":
+            return cls(
+                kind=normalized,
+                alpha=0.35,
+                roughness=0.05,
+                transmission=1.0,
+                ior=1.45,
+            )
+        if normalized == "EMISSIVE":
+            return cls(kind=normalized, emission_strength=5.0)
+        if normalized == "CUSTOM":
+            return cls(kind=normalized)
+        raise ValueError(f"unsupported palette material preset: {kind!r}")
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "PaletteMaterial":
+        if not isinstance(data, Mapping):
+            raise ValueError(f"palette material must be an object: {data!r}")
+        return cls(
+            kind=data.get("kind", "DIFFUSE"),
+            alpha=data.get("alpha", 1.0),
+            metallic=data.get("metallic", 0.0),
+            roughness=data.get("roughness", 0.5),
+            transmission=data.get("transmission", 0.0),
+            emission_strength=data.get("emission_strength", 0.0),
+            ior=data.get("ior", 1.45),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "alpha": self.alpha,
+            "metallic": self.metallic,
+            "roughness": self.roughness,
+            "transmission": self.transmission,
+            "emission_strength": self.emission_strength,
+            "ior": self.ior,
+        }
+
+
+def _normalize_palette_materials(value: Any, count: int) -> list[PaletteMaterial]:
+    if value is None:
+        raw = ()
+    elif isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except json.JSONDecodeError as error:
+            raise ValueError("palette materials must be valid JSON") from error
+    else:
+        raw = value
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("palette materials must be a list")
+    materials = [
+        item if isinstance(item, PaletteMaterial) else PaletteMaterial.from_dict(item)
+        for item in raw
+    ]
+    if len(materials) > count:
+        raise ValueError("palette materials cannot exceed the palette size")
+    materials.extend(PaletteMaterial() for _ in range(count - len(materials)))
+    return materials
+
+
+def remap_palette_materials(
+    materials: Iterable[PaletteMaterial],
+    target_count: int,
+    index_map: Mapping[int, int] | None = None,
+) -> list[PaletteMaterial]:
+    if isinstance(target_count, bool) or not isinstance(target_count, int) or target_count < 0:
+        raise ValueError("target palette material count must be a non-negative integer")
+    source = list(materials)
+    target = [PaletteMaterial() for _ in range(target_count)]
+    if index_map is None:
+        for index in range(min(len(source), target_count)):
+            target[index] = source[index]
+        return target
+    for source_index, target_index in index_map.items():
+        if (
+            isinstance(source_index, bool)
+            or not isinstance(source_index, int)
+            or isinstance(target_index, bool)
+            or not isinstance(target_index, int)
+            or not 0 <= source_index < len(source)
+            or not 0 <= target_index < target_count
+        ):
+            continue
+        target[target_index] = source[source_index]
+    return target
 
 
 def _cell(value: Iterable[int]) -> Cell:
@@ -80,6 +220,7 @@ class VoxelAsset:
     sockets: list[VoxelSocket] = field(default_factory=list)
     provenance: dict[str, str] = field(default_factory=dict)
     schema_version: int = SCHEMA_VERSION
+    palette_materials: list[PaletteMaterial] | None = None
 
     @staticmethod
     def _normalize_part_assignments(value: Any) -> dict[Cell, str]:
@@ -123,11 +264,11 @@ class VoxelAsset:
             raise ValueError("grid_size must be a finite positive number") from error
         if not math.isfinite(grid_size) or grid_size <= 0.0:
             raise ValueError("grid_size must be a finite positive number")
-        self.grid_size = grid_size
         self.palette = [_color(color) for color in self.palette]
         if not self.palette:
             raise ValueError("voxel assets require at least one palette entry")
         self.voxels = {_cell(cell): self._palette_index(index) for cell, index in self.voxels.items()}
+        self.palette_materials = _normalize_palette_materials(self.palette_materials, len(self.palette))
         provenance = {str(key): str(value) for key, value in self.provenance.items()}
         assignments = self._normalize_part_assignments(self.part_assignments)
         encoded_assignments = provenance.get("part_assignments")
@@ -150,11 +291,27 @@ class VoxelAsset:
             raise ValueError(f"palette index out of range: {index!r}")
         return index
 
+    def get_palette_materials(self) -> list[PaletteMaterial]:
+        return list(self.palette_materials or ())
+
+    def set_palette_materials(self, materials: Iterable[PaletteMaterial | Mapping[str, Any]]) -> None:
+        self.palette_materials = _normalize_palette_materials(list(materials), len(self.palette))
+
+    def set_palette_material(self, index: int, material: PaletteMaterial | Mapping[str, Any]) -> None:
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(self.palette):
+            raise IndexError(f"palette material index out of range: {index!r}")
+        materials = self.get_palette_materials()
+        materials[index] = (
+            material if isinstance(material, PaletteMaterial) else PaletteMaterial.from_dict(material)
+        )
+        self.set_palette_materials(materials)
+
     def add_palette_color(self, color: Iterable[float]) -> int:
         """Append a palette entry and return its stable palette index."""
 
         normalized = _color(color)
         self.palette.append(normalized)
+        self.palette_materials = _normalize_palette_materials(self.palette_materials, len(self.palette))
         return len(self.palette) - 1
 
     def set_voxel(self, cell: Iterable[int], palette_index: int = 0) -> None:
@@ -218,6 +375,9 @@ class VoxelAsset:
             "schema_version": self.schema_version,
             "grid_size": self.grid_size,
             "palette": [list(color) for color in self.palette],
+            "palette_materials": [
+                material.to_dict() for material in self.get_palette_materials()
+            ],
             "voxels": [[*cell, palette_index] for cell, palette_index in self.iter_voxels()],
             "part_assignments": [
                 [*cell, label] for cell, label in sorted(self.part_assignments.items())
@@ -245,6 +405,7 @@ class VoxelAsset:
             if isinstance(palette_index, bool) or not isinstance(palette_index, int):
                 raise ValueError(f"voxel palette index must be an integer: {palette_index!r}")
             voxels[_cell(item[:3])] = palette_index
+        provenance = dict(data.get("provenance", {}))
         sockets = []
         for item in data.get("sockets", []):
             sockets.append(VoxelSocket(
@@ -256,9 +417,10 @@ class VoxelAsset:
         return cls(
             grid_size=data["grid_size"],
             palette=data["palette"],
+            palette_materials=data.get("palette_materials"),
             voxels=voxels,
             part_assignments=data.get("part_assignments"),
             sockets=sockets,
-            provenance=data.get("provenance", {}),
+            provenance=provenance,
             schema_version=SCHEMA_VERSION,
         )

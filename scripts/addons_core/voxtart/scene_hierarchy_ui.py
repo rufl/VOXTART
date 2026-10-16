@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender scene window for browsing and selecting placed VOXTART assets."""
 
@@ -34,8 +34,8 @@ def _load_scene_assembly(scene: bpy.types.Scene) -> SceneAssembly:
         return SceneAssembly()
     try:
         return SceneAssembly.decode(raw)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return SceneAssembly()
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(f"saved scene assembly is invalid: {error}") from error
 
 
 def _collection_path(scene: bpy.types.Scene, target) -> tuple[str, ...]:

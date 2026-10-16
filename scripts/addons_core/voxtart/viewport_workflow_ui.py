@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender-native tool, viewport, and multi-camera workflow panels."""
 
@@ -309,9 +309,13 @@ class VOXTART_OT_camera_show_all(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        for item in context.scene.objects:
-            if item.type == "CAMERA":
-                item.hide_viewport = False
+        cameras = tuple(item for item in context.scene.objects if item.type == "CAMERA")
+        if not cameras:
+            self.report({"ERROR"}, "No cameras exist in the current scene")
+            return {"CANCELLED"}
+        for item in cameras:
+            item.hide_viewport = False
+        self.report({"INFO"}, f"Showed {len(cameras)} camera(s)")
         return {"FINISHED"}
 
 

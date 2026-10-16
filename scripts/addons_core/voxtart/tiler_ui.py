@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Blender adapter for the deterministic VOXTART pixel tiler."""
 
@@ -22,13 +22,14 @@ from bpy.props import (
 from . import operators
 from .palette import scene_palette
 from .tiler import (
+    MAX_PIXELS_PER_VOXEL,
     MAX_SEAMLESS_REPEAT,
     SEAMLESS_PATTERNS,
     TILER_AXES,
     TILER_MODES,
     TILER_ROTATIONS,
-    PixelTexture,
     TilerSettings,
+    PixelTexture,
     apply_tile,
     extract_tile,
     generate_seamless_tile,
@@ -73,6 +74,7 @@ def _scene_settings(scene: bpy.types.Scene) -> TilerSettings:
         flip_y=bool(scene.voxtart_tiler_flip_y),
         mode=scene.voxtart_tiler_mode,
         alpha_threshold=float(scene.voxtart_tiler_alpha_threshold),
+        pixels_per_voxel=int(scene.voxtart_tiler_pixels_per_voxel),
     )
 
 
@@ -300,6 +302,7 @@ def _stamp_active(context: bpy.types.Context):
         voxels=dict(stack.active.voxels),
         sockets=list(asset.sockets),
         provenance=dict(asset.provenance),
+        palette_materials=asset.get_palette_materials(),
     )
     report = apply_tile(
         editable,
@@ -309,10 +312,12 @@ def _stamp_active(context: bpy.types.Context):
     )
     stack.active.voxels = dict(editable.voxels)
     asset.palette = list(editable.palette)
+    asset.palette_materials = editable.get_palette_materials()
     asset.provenance.update({
         "tiler_texture": _scene_source_name(context.scene),
         "tiler_pixel_scale": f"{settings.pixel_scale:g}",
         "tiler_tile_index": str(tile.index),
+        "tiler_pixels_per_voxel": str(settings.pixels_per_voxel),
     })
     operators._replace_asset_mesh(obj, asset, layer_stack=stack)
     obj["voxtart_tiler_report"] = json.dumps(_report_dict(report), sort_keys=True)
@@ -419,8 +424,12 @@ class VOXTART_PT_tiler(bpy.types.Panel):
             row = layout.row(align=True)
             row.prop(scene, "voxtart_tiler_tile_index", text="Tile")
         layout.prop(scene, "voxtart_tiler_mode", text="Mode")
-        layout.prop(scene, "voxtart_grid_size", text="Pixel Scale")
-        layout.label(text="One source pixel = one voxel = Pixel Scale scene units", icon="INFO")
+        layout.prop(scene, "voxtart_grid_size", text="Block Size")
+        layout.prop(scene, "voxtart_tiler_pixels_per_voxel", text="Pixels / Block")
+        layout.label(
+            text=f"{scene.voxtart_tiler_pixels_per_voxel}×{scene.voxtart_tiler_pixels_per_voxel} source pixels → 1 block",
+            icon="INFO",
+        )
         row = layout.row(align=True)
         row.prop(scene, "voxtart_tiler_axis", text="Plane")
         row.prop(scene, "voxtart_tiler_side", text="Side")
@@ -526,6 +535,13 @@ def register():
     bpy.types.Scene.voxtart_tiler_alpha_threshold = FloatProperty(
         name="Tile Alpha Threshold", min=0.0, max=1.0, default=0.05
     )
+    bpy.types.Scene.voxtart_tiler_pixels_per_voxel = IntProperty(
+        name="Pixels per Block",
+        description="Group this many source pixels into one editable voxel",
+        min=1,
+        max=MAX_PIXELS_PER_VOXEL,
+        default=2,
+    )
     bpy.types.Scene.voxtart_tiler_anchor = IntVectorProperty(
         name="Tile Anchor", size=3, default=(0, 0, 0), min=-4096, max=4096
     )
@@ -544,6 +560,7 @@ def unregister():
         "voxtart_tiler_source",
         "voxtart_tiler_anchor",
         "voxtart_tiler_alpha_threshold",
+        "voxtart_tiler_pixels_per_voxel",
         "voxtart_tiler_mode",
         "voxtart_tiler_flip_y",
         "voxtart_tiler_flip_x",

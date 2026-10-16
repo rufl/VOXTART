@@ -1,6 +1,6 @@
-# SPDX-FileCopyrightText: 2026 Blender Authors
+# SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: GPL-2.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Run the system-Python VOXTART suite and print line coverage.
 

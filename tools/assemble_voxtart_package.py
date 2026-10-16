@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Assemble a runnable VOXTART package tree for release smoke tests.
 
@@ -34,6 +34,12 @@ ASSET_FILES = (
     "voxtart_icon_32.png",
     "voxtart_icon_48.png",
     "voxtart_icon_256.png",
+)
+LICENSE_FILES = (
+    (Path("LICENSES") / "GPL-3.0-or-later.txt", Path("doc/license/GPL3-license.txt")),
+    (Path("LICENSES") / "VOXTART-NOTICES.txt", Path("VOXTART-NOTICES.txt")),
+    (Path("LICENSES") / "VOXTART-ASSETS-CC0.txt", Path("assets/LICENSE")),
+    (Path("SOURCE-CODE-OFFER.txt"), Path("VOXTART-SOURCE-CODE-OFFER.txt")),
 )
 
 
@@ -119,6 +125,8 @@ def assemble(
         _copy_file(source_root / "tools" / name, output / "tools" / name)
     for name in ASSET_FILES:
         _copy_file(source_root / "assets" / name, output / "assets" / name)
+    for target_relative, source_relative in LICENSE_FILES:
+        _copy_file(source_root / source_relative, output / target_relative)
     shutil.copytree(
         source_root / "scripts" / "addons_core" / "voxtart",
         output / "scripts" / "addons_core" / "voxtart",
@@ -140,6 +148,10 @@ def assemble(
         "required_paths": [
             "VoxTart.exe",
             "run_voxtart.cmd",
+            "LICENSES/GPL-3.0-or-later.txt",
+            "LICENSES/VOXTART-NOTICES.txt",
+            "LICENSES/VOXTART-ASSETS-CC0.txt",
+            "SOURCE-CODE-OFFER.txt",
             "tools/brand_voxtart_runtime.py",
             "tools/voxtart_desktop_start.py",
             "tools/voxtart_preferences_init.py",

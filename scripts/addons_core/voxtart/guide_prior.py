@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic guide-volume refinement for sprite reconstruction."""
 
@@ -241,6 +241,7 @@ def apply_guide_prior(
         part_assignments=dict(result.asset.part_assignments),
         sockets=list(result.asset.sockets),
         provenance=dict(result.asset.provenance),
+        palette_materials=result.asset.get_palette_materials(),
     )
     added: list[Cell] = []
     rejected: list[Cell] = []
@@ -251,7 +252,7 @@ def apply_guide_prior(
         try:
             return asset.palette.index(color)
         except ValueError:
-            asset.palette.append(color)
+            asset.add_palette_color(color)
             return len(asset.palette) - 1
 
     for cell, palette_index in guide.iter_voxels():

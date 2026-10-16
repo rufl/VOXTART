@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 VOXTART contributors
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 """Deterministic RGBA image intake for orthographic voxel reconstruction."""
 
@@ -17,6 +17,7 @@ from .reconstruct import OrthographicView, Pixel
 
 
 BackgroundMode = Literal["ALPHA", "NONE", "CORNER", "EXPLICIT"]
+MAX_PIXELS_PER_VOXEL = 64
 DEFAULT_EMPTY_PALETTE_COLOR: Color = (0.0, 0.0, 0.0, 1.0)
 
 
@@ -143,7 +144,7 @@ class IndexedImage:
     source_digest: str
     background_color: Color | None
     settings: PaletteIntakeSettings
-
+    pixels_per_voxel: int = 1
     def __post_init__(self) -> None:
         name = str(self.name).strip()
         if not name:
@@ -165,6 +166,15 @@ class IndexedImage:
         object.__setattr__(self, "pixels", rows)
         object.__setattr__(self, "palette", normalized_palette)
         object.__setattr__(self, "background_color", None if self.background_color is None else _color(self.background_color))
+        if (
+            isinstance(self.pixels_per_voxel, bool)
+            or not isinstance(self.pixels_per_voxel, int)
+            or not 1 <= self.pixels_per_voxel <= MAX_PIXELS_PER_VOXEL
+        ):
+            raise ValueError(
+                f"pixels_per_voxel must be between 1 and {MAX_PIXELS_PER_VOXEL}"
+            )
+        object.__setattr__(self, "pixels_per_voxel", int(self.pixels_per_voxel))
 
     @property
     def width(self) -> int:
@@ -173,6 +183,58 @@ class IndexedImage:
     @property
     def height(self) -> int:
         return len(self.pixels)
+
+    def coarsen(self, pixels_per_voxel: int = 1) -> "IndexedImage":
+        """Group neighboring source pixels into crisp macro-pixels."""
+
+        if (
+            isinstance(pixels_per_voxel, bool)
+            or not isinstance(pixels_per_voxel, int)
+            or not 1 <= pixels_per_voxel <= MAX_PIXELS_PER_VOXEL
+        ):
+            raise ValueError(
+                f"pixels_per_voxel must be between 1 and {MAX_PIXELS_PER_VOXEL}"
+            )
+        if pixels_per_voxel == 1:
+            return self
+        grouped_width = (self.width + pixels_per_voxel - 1) // pixels_per_voxel
+        grouped_height = (self.height + pixels_per_voxel - 1) // pixels_per_voxel
+        grouped_rows: list[tuple[Pixel, ...]] = []
+        for group_y in range(grouped_height):
+            row: list[Pixel] = []
+            for group_x in range(grouped_width):
+                counts: dict[int, int] = {}
+                for source_y in range(
+                    group_y * pixels_per_voxel,
+                    min(self.height, (group_y + 1) * pixels_per_voxel),
+                ):
+                    for source_x in range(
+                        group_x * pixels_per_voxel,
+                        min(self.width, (group_x + 1) * pixels_per_voxel),
+                    ):
+                        pixel = self.pixels[source_y][source_x]
+                        if pixel is not None:
+                            counts[pixel] = counts.get(pixel, 0) + 1
+                if not counts:
+                    row.append(None)
+                    continue
+                best_pixel = next(iter(counts))
+                best_count = counts[best_pixel]
+                for pixel, count in counts.items():
+                    if count > best_count:
+                        best_pixel = pixel
+                        best_count = count
+                row.append(best_pixel)
+            grouped_rows.append(tuple(row))
+        return IndexedImage(
+            name=self.name,
+            pixels=tuple(grouped_rows),
+            palette=self.palette,
+            source_digest=self.source_digest,
+            background_color=self.background_color,
+            settings=self.settings,
+            pixels_per_voxel=pixels_per_voxel,
+        )
 
     def source_identity(
         self,
@@ -230,6 +292,7 @@ class IndexedImage:
             "alpha_threshold": f"{self.settings.alpha_threshold:.6f}",
             "background_tolerance": f"{self.settings.background_tolerance:.6f}",
             "palette_size": str(len(self.palette)),
+            "pixels_per_voxel": str(self.pixels_per_voxel),
         }
 
 
@@ -340,6 +403,7 @@ def index_image(
 
 __all__ = [
     "BackgroundMode",
+    "MAX_PIXELS_PER_VOXEL",
     "DEFAULT_EMPTY_PALETTE_COLOR",
     "ImageFrame",
     "IndexedImage",
