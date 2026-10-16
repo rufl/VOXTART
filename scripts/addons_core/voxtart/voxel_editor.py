@@ -101,6 +101,8 @@ EDITOR_DOCK_PANEL_GAP = 8.0
 EDITOR_DOCK_PANELS = ("PALETTE", "LAYERS", "HISTORY")
 EDITOR_VIEW_HUD_WIDTH = 190.0
 EDITOR_VIEW_HUD_HEIGHT = 154.0
+EDITOR_TOOL_OPTIONS_WIDTH = 286.0
+EDITOR_TOOL_OPTIONS_HEIGHT = 190.0
 
 
 _EDITOR_MENU_GROUPS = (
@@ -385,6 +387,7 @@ def _editor_cursor(editor, event=None) -> str:
         or getattr(editor, "dock_hover", None) is not None
         or getattr(editor, "dock_dragging", None) is not None
         or getattr(editor, "view_hud_hover", None) is not None
+        or getattr(editor, "tool_options_hover", None) is not None
     ):
         return "HAND"
     if getattr(event, "alt", False):
@@ -396,7 +399,6 @@ def _editor_cursor(editor, event=None) -> str:
         "PAINT": "PAINT_BRUSH",
         "SELECT": "CROSSHAIR",
     }.get(_editor_input_mode(editor), "CROSSHAIR")
-
 
 def _editor_view_hud_layout(editor, region):
     scale = ui_style.ui_scale()
@@ -557,6 +559,121 @@ def _editor_toolbar_item_at(editor, context, event):
     for item, bounds in _editor_toolbar_layout(region.height, editor.scene)[1]:
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
             return item
+    return None
+
+def _editor_tool_options_layout(editor, region):
+    scale = ui_style.ui_scale()
+    width = float(getattr(region, "width", 0.0))
+    height = float(getattr(region, "height", 0.0))
+    mode = _editor_input_mode(editor)
+    shape = _scene_shape(editor.scene)
+    mode_item = next(
+        (item for item in EDITOR_MODE_ITEMS if item[0] == mode),
+        (mode, mode.title(), "Choose an editing mode"),
+    )
+    shape_item = next(
+        (item for item in EDITOR_SHAPE_ITEMS if item[0] == shape),
+        (shape, shape.title(), "Choose a brush shape"),
+    )
+    if _scene_workspace(editor.scene) != "EDIT":
+        return {
+            "panel": (0.0, 0.0, 0.0, 0.0),
+            "entries": (),
+            "mode_item": mode_item,
+            "shape_item": shape_item,
+        }
+    toolbar_panel, _toolbar_entries = _editor_toolbar_layout(height, editor.scene)
+    dock_layout = _editor_dock_layout(editor, region)
+    left_panel_right = max(
+        (
+            panel["bounds"][2]
+            for panel in dock_layout["panels"].values()
+            if panel.get("side") == "LEFT"
+        ),
+        default=0.0,
+    )
+    right_panel_left = min(
+        (
+            panel["bounds"][0]
+            for panel in dock_layout["panels"].values()
+            if panel.get("side") == "RIGHT"
+        ),
+        default=width,
+    )
+    x0 = max(
+        8.0 * scale,
+        toolbar_panel[2] + 12.0 * scale,
+        left_panel_right + 12.0 * scale,
+    )
+    right_limit = min(width - 8.0 * scale, right_panel_left - 12.0 * scale)
+    available_width = max(0.0, right_limit - x0)
+    panel_width = min(EDITOR_TOOL_OPTIONS_WIDTH * scale, available_width)
+    if panel_width < 210.0 * scale:
+        panel_width = max(0.0, available_width)
+        x0 = max(8.0 * scale, right_limit - panel_width)
+    top = max(72.0 * scale, height - 60.0 * scale)
+    panel_height = min(
+        EDITOR_TOOL_OPTIONS_HEIGHT * scale,
+        max(168.0 * scale, height - 96.0 * scale),
+        max(0.0, top - 44.0 * scale),
+    )
+    y0 = max(44.0 * scale, top - panel_height)
+    x1 = min(right_limit, x0 + panel_width)
+    panel = (x0, y0, x1, top)
+    entries = []
+
+    def add(action, label, left, bottom, right):
+        entries.append(
+            (
+                action,
+                label,
+                (left * scale, bottom * scale, right * scale, (bottom + 22.0) * scale),
+            )
+        )
+
+    panel_width_units = max(210.0, (x1 - x0) / max(scale, 0.001))
+    panel_x_units = x0 / max(scale, 0.001)
+    panel_y_units = y0 / max(scale, 0.001)
+    add("TOOL_RADIUS_DOWN", "−", panel_x_units + 54.0, panel_y_units + 84.0, panel_x_units + 78.0)
+    add("TOOL_RADIUS_UP", "+", panel_x_units + 116.0, panel_y_units + 84.0, panel_x_units + 140.0)
+    add(
+        "TOOL_HOLLOW",
+        "Hollow",
+        panel_x_units + 152.0,
+        panel_y_units + 84.0,
+        panel_x_units + panel_width_units - 12.0,
+    )
+    add("TOOL_MIRROR_X", "X", panel_x_units + 66.0, panel_y_units + 52.0, panel_x_units + 104.0)
+    add("TOOL_MIRROR_Y", "Y", panel_x_units + 108.0, panel_y_units + 52.0, panel_x_units + 146.0)
+    add("TOOL_MIRROR_Z", "Z", panel_x_units + 150.0, panel_y_units + 52.0, panel_x_units + 188.0)
+    if shape == "CYLINDER":
+        add("TOOL_AXIS_X", "X", panel_x_units + 66.0, panel_y_units + 20.0, panel_x_units + 100.0)
+        add("TOOL_AXIS_Y", "Y", panel_x_units + 104.0, panel_y_units + 20.0, panel_x_units + 138.0)
+        add("TOOL_AXIS_Z", "Z", panel_x_units + 142.0, panel_y_units + 20.0, panel_x_units + 176.0)
+        add("TOOL_HEIGHT_DOWN", "−", panel_x_units + 218.0, panel_y_units + 20.0, panel_x_units + 240.0)
+        add("TOOL_HEIGHT_UP", "+", panel_x_units + 246.0, panel_y_units + 20.0, panel_x_units + 268.0)
+    elif shape == "FACE" or mode == "ATTACH":
+        add("TOOL_DEPTH_DOWN", "−", panel_x_units + 76.0, panel_y_units + 20.0, panel_x_units + 100.0)
+        add("TOOL_DEPTH_UP", "+", panel_x_units + 106.0, panel_y_units + 20.0, panel_x_units + 130.0)
+    return {
+        "panel": panel,
+        "entries": tuple(entries),
+        "mode_item": mode_item,
+        "shape_item": shape_item,
+    }
+
+
+def _editor_tool_options_action_at(context, event):
+    region = getattr(context, "region", None)
+    editor = _ACTIVE_EDITOR
+    if region is None or editor is None:
+        return None
+    layout = _editor_tool_options_layout(editor, region)
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    for action, _label, bounds in layout["entries"]:
+        if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
+            return action
     return None
 
 
@@ -2591,6 +2708,265 @@ def _draw_editor_toolbar(editor, context) -> None:
     finally:
         gpu.state.blend_set("NONE")
 
+def _draw_editor_tool_options(editor, context) -> None:
+    if gpu is None or batch_for_shader is None or _scene_workspace(context.scene) != "EDIT":
+        return
+    region = getattr(context, "region", None)
+    if region is None:
+        return
+    layout = _editor_tool_options_layout(editor, region)
+    x0, y0, x1, y1 = layout["panel"]
+    if x1 <= x0 or y1 <= y0:
+        return
+    scale = ui_style.ui_scale()
+    scene = context.scene
+    mode_item = layout["mode_item"]
+    shape_item = layout["shape_item"]
+    mode = _editor_input_mode(editor)
+    shape = _scene_shape(scene)
+    mode_colors = {
+        "ADD": (_THEME["success_fill"], _THEME["success"]),
+        "ATTACH": (_THEME["accent_soft"], _THEME["accent"]),
+        "ERASE": (_THEME["danger_fill"], _THEME["danger"]),
+        "PAINT": (_THEME["warning_fill"], _THEME["warning"]),
+        "SELECT": (_THEME["accent_soft"], _THEME["accent_hover"]),
+    }
+    mode_fill, mode_accent = mode_colors.get(
+        mode,
+        (_THEME["panel_raised"], _THEME["accent"]),
+    )
+    entries = {
+        action: (label, bounds)
+        for action, label, bounds in layout["entries"]
+    }
+    shortcuts = {
+        "ADD": "B",
+        "ATTACH": "T",
+        "ERASE": "E",
+        "PAINT": "P",
+        "SELECT": "S",
+    }
+    shape_shortcuts = {
+        "VOXEL": "V",
+        "LINE": "L",
+        "BOX": "O",
+        "SPHERE": "C",
+        "CYLINDER": "Y",
+        "FACE": "F",
+        "LASSO": "J",
+        "CIRCLE": "K",
+        "COLOR": "M",
+        "COMPONENT": "N",
+        "SURFACE": "R",
+    }
+
+    def active_action(action):
+        if action == "TOOL_HOLLOW":
+            return bool(scene.voxtart_editor_hollow)
+        if action.startswith("TOOL_MIRROR_"):
+            axis = action.rsplit("_", 1)[-1].lower()
+            return bool(getattr(scene, f"voxtart_editor_mirror_{axis}", False))
+        if action.startswith("TOOL_AXIS_"):
+            return str(scene.voxtart_editor_axis) == action.rsplit("_", 1)[-1]
+        return False
+
+    try:
+        gpu.state.blend_set("ALPHA")
+        _draw_editor_panel(
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            _THEME["panel"],
+            border=_THEME["border"],
+            radius=10.0 * scale,
+        )
+        _draw_editor_text(
+            "TOOL OPTIONS",
+            x0 + 12.0 * scale,
+            y1 - 19.0 * scale,
+            10.0,
+            _THEME["accent"],
+        )
+        active_label = f"{mode_item[1]} · {shape_item[1]}"
+        _draw_editor_text(
+            active_label,
+            x0 + 12.0 * scale,
+            y1 - 40.0 * scale,
+            13.0,
+            _THEME["text"],
+        )
+        shortcut_label = f"{shortcuts.get(mode, '')} · {shape_shortcuts.get(shape, '')}"
+        shortcut_width = _editor_text_width(shortcut_label, 10.0)
+        _draw_editor_text(
+            shortcut_label,
+            x1 - shortcut_width - 12.0 * scale,
+            y1 - 39.0 * scale,
+            10.0,
+            mode_accent,
+        )
+        description = (
+            mode_item[2]
+            if shape == "VOXEL"
+            else shape_item[2]
+        )
+        description_lines = ui_style.wrap_text(
+            description,
+            9.0,
+            max(120.0 * scale, x1 - x0 - 24.0 * scale),
+        )[:2]
+        for line_index, line in enumerate(description_lines):
+            _draw_editor_text(
+                line,
+                x0 + 12.0 * scale,
+                y1 - (58.0 + line_index * 12.0) * scale,
+                9.0,
+                _THEME["text_muted"],
+            )
+        _draw_editor_text(
+            "SIZE",
+            x0 + 12.0 * scale,
+            y0 + 91.0 * scale,
+            9.0,
+            _THEME["text_dim"],
+        )
+        radius_value = str(int(getattr(scene, "voxtart_editor_radius", 1)))
+        _radius_label, radius_bounds = entries["TOOL_RADIUS_DOWN"]
+        for action in ("TOOL_RADIUS_DOWN", "TOOL_RADIUS_UP", "TOOL_HOLLOW"):
+            label, bounds = entries[action]
+            bx0, by0, bx1, by1 = bounds
+            hovered = action == getattr(editor, "tool_options_hover", None)
+            active = active_action(action)
+            fill = _THEME["accent_fill"] if active else _THEME["panel_raised"]
+            if hovered:
+                fill = _THEME["panel_hover"]
+            border = mode_accent if active or hovered else _THEME["border_subtle"]
+            _draw_editor_panel(
+                bx0,
+                by0,
+                bx1 - bx0,
+                by1 - by0,
+                fill,
+                border=border,
+                radius=6.0 * scale,
+            )
+            _draw_editor_text(
+                label,
+                bx0 + 8.0 * scale,
+                by0 + 7.0 * scale,
+                11.0,
+                _THEME["text"],
+            )
+        _draw_editor_text(
+            radius_value,
+            radius_bounds[2] + 10.0 * scale,
+            y0 + 91.0 * scale,
+            11.0,
+            _THEME["text"],
+        )
+        _draw_editor_text(
+            "MIRROR",
+            x0 + 12.0 * scale,
+            y0 + 59.0 * scale,
+            9.0,
+            _THEME["text_dim"],
+        )
+        for action in ("TOOL_MIRROR_X", "TOOL_MIRROR_Y", "TOOL_MIRROR_Z"):
+            label, bounds = entries[action]
+            bx0, by0, bx1, by1 = bounds
+            hovered = action == getattr(editor, "tool_options_hover", None)
+            active = active_action(action)
+            fill = _THEME["accent_fill"] if active else _THEME["panel_raised"]
+            if hovered:
+                fill = _THEME["panel_hover"]
+            _draw_editor_panel(
+                bx0,
+                by0,
+                bx1 - bx0,
+                by1 - by0,
+                fill,
+                border=mode_accent if active or hovered else _THEME["border_subtle"],
+                radius=6.0 * scale,
+            )
+            _draw_editor_text(
+                label,
+                bx0 + 14.0 * scale,
+                by0 + 7.0 * scale,
+                10.0,
+                _THEME["text"],
+            )
+        detail_y = y0 + 20.0 * scale
+        if shape == "CYLINDER":
+            _draw_editor_text("AXIS", x0 + 12.0 * scale, detail_y + 7.0 * scale, 9.0, _THEME["text_dim"])
+            for action in ("TOOL_AXIS_X", "TOOL_AXIS_Y", "TOOL_AXIS_Z"):
+                label, bounds = entries[action]
+                bx0, by0, bx1, by1 = bounds
+                hovered = action == getattr(editor, "tool_options_hover", None)
+                active = active_action(action)
+                _draw_editor_panel(
+                    bx0,
+                    by0,
+                    bx1 - bx0,
+                    by1 - by0,
+                    _THEME["accent_fill"] if active else _THEME["panel_raised"],
+                    border=mode_accent if active or hovered else _THEME["border_subtle"],
+                    radius=6.0 * scale,
+                )
+                _draw_editor_text(label, bx0 + 12.0 * scale, by0 + 7.0 * scale, 10.0, _THEME["text"])
+            _draw_editor_text(
+                f"H {int(scene.voxtart_editor_height)}",
+                x0 + 192.0 * scale,
+                detail_y + 7.0 * scale,
+                9.0,
+                _THEME["text_muted"],
+            )
+            for action in ("TOOL_HEIGHT_DOWN", "TOOL_HEIGHT_UP"):
+                label, bounds = entries[action]
+                bx0, by0, bx1, by1 = bounds
+                hovered = action == getattr(editor, "tool_options_hover", None)
+                _draw_editor_panel(
+                    bx0,
+                    by0,
+                    bx1 - bx0,
+                    by1 - by0,
+                    _THEME["panel_hover"] if hovered else _THEME["panel_raised"],
+                    border=mode_accent if hovered else _THEME["border_subtle"],
+                    radius=6.0 * scale,
+                )
+                _draw_editor_text(label, bx0 + 7.0 * scale, by0 + 7.0 * scale, 10.0, _THEME["text"])
+        elif shape == "FACE" or mode == "ATTACH":
+            _draw_editor_text(
+                f"DEPTH {int(scene.voxtart_editor_depth)}",
+                x0 + 12.0 * scale,
+                detail_y + 7.0 * scale,
+                9.0,
+                _THEME["text_dim"],
+            )
+            for action in ("TOOL_DEPTH_DOWN", "TOOL_DEPTH_UP"):
+                label, bounds = entries[action]
+                bx0, by0, bx1, by1 = bounds
+                hovered = action == getattr(editor, "tool_options_hover", None)
+                _draw_editor_panel(
+                    bx0,
+                    by0,
+                    bx1 - bx0,
+                    by1 - by0,
+                    _THEME["panel_hover"] if hovered else _THEME["panel_raised"],
+                    border=mode_accent if hovered else _THEME["border_subtle"],
+                    radius=6.0 * scale,
+                )
+                _draw_editor_text(label, bx0 + 8.0 * scale, by0 + 7.0 * scale, 10.0, _THEME["text"])
+        else:
+            _draw_editor_text(
+                "V Voxel · L Line · O Box · C Sphere",
+                x0 + 12.0 * scale,
+                detail_y + 7.0 * scale,
+                9.0,
+                _THEME["text_muted"],
+            )
+    finally:
+        gpu.state.blend_set("NONE")
+
 
 def _toggle_view_projection(context) -> str | None:
     area = getattr(context, "area", None)
@@ -3127,6 +3503,7 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_palette(editor, context)
     _draw_editor_view_hud(editor, context)
     _draw_editor_toolbar(editor, context)
+    _draw_editor_tool_options(editor, context)
     _draw_editor_topbar_tooltip(editor, context)
     _draw_editor_chat_prompt(editor, context)
     context_label = f"{mode_label}  ·  {shape.title()} brush" if details else mode_label
@@ -4428,6 +4805,50 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self.status = status
         self.view_hud_hover = action
         _request_redraw(self, context, force=True)
+    def _activate_tool_options_action(self, context, action: str) -> None:
+        if not action.startswith("TOOL_"):
+            return
+        self._cancel_stroke(context)
+        scene = self.scene
+        if action == "TOOL_RADIUS_DOWN":
+            scene.voxtart_editor_radius = max(1, int(scene.voxtart_editor_radius) - 1)
+            self.status = f"Brush radius {scene.voxtart_editor_radius}"
+        elif action == "TOOL_RADIUS_UP":
+            scene.voxtart_editor_radius = min(EDITOR_MAX_RADIUS, int(scene.voxtart_editor_radius) + 1)
+            self.status = f"Brush radius {scene.voxtart_editor_radius}"
+        elif action == "TOOL_HOLLOW":
+            scene.voxtart_editor_hollow = not bool(scene.voxtart_editor_hollow)
+            self.status = f"Hollow {'on' if scene.voxtart_editor_hollow else 'off'}"
+        elif action.startswith("TOOL_MIRROR_"):
+            axis = action.rsplit("_", 1)[-1].lower()
+            property_name = f"voxtart_editor_mirror_{axis}"
+            value = not bool(getattr(scene, property_name))
+            setattr(scene, property_name, value)
+            mirrors = list(self.mirrors)
+            mirrors[("x", "y", "z").index(axis)] = value
+            self.mirrors = tuple(mirrors)
+            self.status = f"Mirror {axis.upper()} {'on' if value else 'off'}"
+        elif action.startswith("TOOL_AXIS_"):
+            axis = action.rsplit("_", 1)[-1]
+            scene.voxtart_editor_axis = axis
+            self.status = f"Brush axis {axis}"
+        elif action == "TOOL_HEIGHT_DOWN":
+            scene.voxtart_editor_height = max(1, int(scene.voxtart_editor_height) - 1)
+            self.status = f"Brush height {scene.voxtart_editor_height}"
+        elif action == "TOOL_HEIGHT_UP":
+            scene.voxtart_editor_height = min(128, int(scene.voxtart_editor_height) + 1)
+            self.status = f"Brush height {scene.voxtart_editor_height}"
+        elif action == "TOOL_DEPTH_DOWN":
+            scene.voxtart_editor_depth = max(1, int(scene.voxtart_editor_depth) - 1)
+            self.status = f"Brush depth {scene.voxtart_editor_depth}"
+        elif action == "TOOL_DEPTH_UP":
+            scene.voxtart_editor_depth = min(128, int(scene.voxtart_editor_depth) + 1)
+            self.status = f"Brush depth {scene.voxtart_editor_depth}"
+        else:
+            return
+        self.preview_cells = ()
+        self.tool_options_hover = action
+        _request_redraw(self, context, force=True)
 
 
 
@@ -4436,6 +4857,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self.topbar_hover = None
         self.palette_hover = None
         self.view_hud_hover = None
+        self.tool_options_hover = None
         self.dock_hover = None
         self.dock_dragging = None
         try:
@@ -4540,6 +4962,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         if event.type == "MOUSEMOVE":
             self.chat_hover = _editor_chat_action_at(context, event)
             self.view_hud_hover = None
+            self.tool_options_hover = None
             if self.chat_hover is not None:
                 self.dock_hover = None
                 self.color_wheel_hover = None
@@ -4568,6 +4991,23 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.dock_hover = None
                 self.color_wheel_hover = None
                 self.topbar_hover = menu_hit
+                self.palette_hover = None
+                self.toolbar_hover = None
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
+            tool_options_hit = (
+                None
+                if bool(self.scene.get(EDITOR_MENU_PROPERTY))
+                or bool(self.scene.get(EDITOR_OPTIONS_PROPERTY))
+                else _editor_tool_options_action_at(context, event)
+            )
+            if tool_options_hit is not None:
+                self.tool_options_hover = tool_options_hit
+                self.dock_hover = None
+                self.color_wheel_hover = None
+                self.topbar_hover = None
                 self.palette_hover = None
                 self.toolbar_hover = None
                 self.last_hit = None
@@ -4637,6 +5077,17 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             if menu_action is not None:
                 if event.type == "LEFTMOUSE":
                     self._activate_topbar_action(context, menu_action)
+                return {"RUNNING_MODAL"}
+            tool_options_action = (
+                None
+                if bool(self.scene.get(EDITOR_MENU_PROPERTY))
+                or bool(self.scene.get(EDITOR_OPTIONS_PROPERTY))
+                else _editor_tool_options_action_at(context, event)
+            )
+            if tool_options_action is not None:
+                self.tool_options_hover = tool_options_action
+                if event.type == "LEFTMOUSE":
+                    self._activate_tool_options_action(context, tool_options_action)
                 return {"RUNNING_MODAL"}
             view_hud_action = (
                 None
@@ -4962,6 +5413,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self.palette_hover = None
             self.view_hud_hover = None
             self.color_wheel_hover = None
+            self.tool_options_hover = None
             self.color_wheel_dragging = False
             self.dock_hover = None
             self.dock_dragging = None

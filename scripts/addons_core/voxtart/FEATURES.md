@@ -78,6 +78,14 @@ the Colors drawer. Its isometric cube and direct buttons expose **Front**,
 **Right**, **Top**, **Frame**, and a projection toggle; `Numpad 1/3/7/5` and
 `Home` provide the same camera shortcuts without opening Blender's native UI.
 
+The editor also keeps a contextual **TOOL OPTIONS** card beside the tool shelf,
+following the brush-panel pattern used by dedicated voxel editors. It names the
+active mode and brush, shows the matching shortcuts, and exposes click targets
+for brush size, hollow stamping, mirror axes, face depth, and cylinder axis or
+height. These controls use the same scene settings as the keyboard workflow, so
+the compact beginner surface stays discoverable without revealing Blender's
+native sidebar.
+
 The desktop shell remains available as a secondary project surface through the
 editor's **Home** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,

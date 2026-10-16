@@ -635,6 +635,7 @@ def _finish_mouse_clicks():
                 "draw_preview_handle": editor._preview_handle is not None,
                 "view_workflow": STATE.get("view_workflow", False),
                 "viewport_hud": STATE.get("viewport_hud", False),
+                "tool_options": STATE.get("tool_options", False),
                 "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
@@ -2151,6 +2152,183 @@ def _probe():
                 return _fail(f"Could not capture Menu screenshot: {menu_screenshot_result!r}")
             editor._activate_topbar_action(bpy.context, "MENU")
         STATE["menu_surface"] = True
+        tool_layout = voxel_editor._editor_tool_options_layout(editor, region)
+        tool_entries = {
+            action: bounds
+            for action, _label, bounds in tool_layout["entries"]
+        }
+        toolbar_panel, _toolbar_entries = voxel_editor._editor_toolbar_layout(
+            region.height,
+            scene,
+        )
+        right_docks = tuple(
+            panel["bounds"][0]
+            for panel in voxel_editor._editor_dock_layout(editor, region)["panels"].values()
+            if panel.get("side") == "RIGHT"
+        )
+        if (
+            tool_layout["panel"][2] <= tool_layout["panel"][0]
+            or tool_layout["panel"][0] <= toolbar_panel[2]
+            or right_docks and tool_layout["panel"][2] >= min(right_docks)
+            or not {
+                "TOOL_RADIUS_DOWN",
+                "TOOL_RADIUS_UP",
+                "TOOL_HOLLOW",
+                "TOOL_MIRROR_X",
+                "TOOL_MIRROR_Y",
+                "TOOL_MIRROR_Z",
+            }.issubset(tool_entries)
+            or tool_layout["mode_item"][0] != "ADD"
+            or tool_layout["shape_item"][0] != "VOXEL"
+        ):
+            return _fail("VOXTART tool options card did not expose a compact edit context")
+
+        def _tool_event(action, event_type="LEFTMOUSE"):
+            bounds = tool_entries[action]
+            return SimpleNamespace(
+                type=event_type,
+                value="NOTHING" if event_type == "MOUSEMOVE" else "PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+            )
+
+        original_tool_state = (
+            scene.voxtart_editor_mode,
+            scene.voxtart_editor_shape,
+            int(scene.voxtart_editor_radius),
+            int(scene.voxtart_editor_depth),
+            int(scene.voxtart_editor_height),
+            bool(scene.voxtart_editor_hollow),
+            bool(scene.voxtart_editor_mirror_x),
+            bool(scene.voxtart_editor_mirror_y),
+            bool(scene.voxtart_editor_mirror_z),
+            scene.voxtart_editor_axis,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            tool_hover_result = editor.modal(
+                bpy.context,
+                _tool_event("TOOL_RADIUS_UP", "MOUSEMOVE"),
+            )
+        if (
+            "RUNNING_MODAL" not in tool_hover_result
+            or editor.tool_options_hover != "TOOL_RADIUS_UP"
+        ):
+            return _fail("VOXTART tool options card did not report hover feedback")
+        radius_before = int(scene.voxtart_editor_radius)
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, _tool_event("TOOL_RADIUS_UP"))
+        if (
+            int(scene.voxtart_editor_radius) != radius_before + 1
+            or editor.status != f"Brush radius {radius_before + 1}"
+        ):
+            return _fail("VOXTART tool options radius control did not update the brush")
+        for action in ("TOOL_HOLLOW", "TOOL_MIRROR_X"):
+            bounds = tool_entries[action]
+            event = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+            )
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                editor.modal(bpy.context, event)
+        if not scene.voxtart_editor_hollow or not scene.voxtart_editor_mirror_x:
+            return _fail("VOXTART tool options toggles did not update scene settings")
+
+        scene.voxtart_editor_shape = "FACE"
+        face_layout = voxel_editor._editor_tool_options_layout(editor, region)
+        face_entries = {
+            action: bounds
+            for action, _label, bounds in face_layout["entries"]
+        }
+        if "TOOL_DEPTH_UP" not in face_entries:
+            return _fail("VOXTART tool options did not expose face depth")
+        depth_before = int(scene.voxtart_editor_depth)
+        depth_bounds = face_entries["TOOL_DEPTH_UP"]
+        depth_event = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(depth_bounds[0] + depth_bounds[2]) * 0.5,
+            mouse_region_y=(depth_bounds[1] + depth_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, depth_event)
+        if int(scene.voxtart_editor_depth) != depth_before + 1:
+            return _fail("VOXTART tool options face depth control did not update")
+
+        scene.voxtart_editor_shape = "CYLINDER"
+        cylinder_layout = voxel_editor._editor_tool_options_layout(editor, region)
+        cylinder_entries = {
+            action: bounds
+            for action, _label, bounds in cylinder_layout["entries"]
+        }
+        if not {"TOOL_AXIS_Y", "TOOL_HEIGHT_UP"}.issubset(cylinder_entries):
+            return _fail("VOXTART tool options did not expose cylinder controls")
+        axis_bounds = cylinder_entries["TOOL_AXIS_Y"]
+        axis_event = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(axis_bounds[0] + axis_bounds[2]) * 0.5,
+            mouse_region_y=(axis_bounds[1] + axis_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, axis_event)
+        if scene.voxtart_editor_axis != "Y":
+            return _fail("VOXTART tool options cylinder axis control did not update")
+        scene.voxtart_editor_mode = original_tool_state[0]
+        scene.voxtart_editor_shape = original_tool_state[1]
+        scene.voxtart_editor_radius = original_tool_state[2]
+        scene.voxtart_editor_depth = original_tool_state[3]
+        scene.voxtart_editor_height = original_tool_state[4]
+        scene.voxtart_editor_hollow = original_tool_state[5]
+        scene.voxtart_editor_mirror_x = original_tool_state[6]
+        scene.voxtart_editor_mirror_y = original_tool_state[7]
+        scene.voxtart_editor_mirror_z = original_tool_state[8]
+        scene.voxtart_editor_axis = original_tool_state[9]
+        editor.mirrors = (
+            scene.voxtart_editor_mirror_x,
+            scene.voxtart_editor_mirror_y,
+            scene.voxtart_editor_mirror_z,
+        )
+        editor.tool_options_hover = None
+        STATE["tool_options"] = True
         hud_layout = voxel_editor._editor_view_hud_layout(editor, region)
         hud_entries = {
             action: bounds
