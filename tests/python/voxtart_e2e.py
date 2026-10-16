@@ -489,6 +489,7 @@ def _run_gui_probe() -> None:
             or payload.get("beginner_toolbar_after_first_edit") is not True
             or payload.get("options_menu") is not True
             or payload.get("menu_surface") is not True
+            or payload.get("viewport_hud") is not True
             or not Path(str(payload.get("menu_screenshot", ""))).is_file()
             or payload.get("grid_toggle") is not True
             or payload.get("product_controls") is not True
@@ -496,11 +497,16 @@ def _run_gui_probe() -> None:
             or payload.get("help_toggle") is not True
             or payload.get("escape_keeps_ui") is not True
             or payload.get("palette_selection") is not True
+            or payload.get("palette_favorite") is not True
             or payload.get("color_wheel") is not True
             or payload.get("grid_shortcut") is not True
             or payload.get("dock_drawers") is not True
             or payload.get("dock_snap") is not True
             or payload.get("material_shading") is not True
+            or payload.get("history_presentation") is not True
+            or not any(str(label).startswith("Added ") for label in payload.get("history_labels", []))
+            or not any(str(label).startswith("Erased ") for label in payload.get("history_labels", []))
+            or not any(str(label).startswith("Colored ") for label in payload.get("history_labels", []))
             or payload.get("paint_undo_redo") is not True
             or payload.get("drag_paint") is not True
             or payload.get("undo_redo_controls") is not True

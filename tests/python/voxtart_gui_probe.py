@@ -577,6 +577,21 @@ def _finish_mouse_clicks():
         STATE["selection_workflow"] = True
         STATE["painted_cell"] = painted_cell
         STATE["paint_undo_redo"] = True
+        history_labels = tuple(
+            str(getattr(snapshot, "label", ""))
+            for snapshot in editor.history
+        )
+        if (
+            not history_labels
+            or history_labels[0] != "Initial state"
+            or not any(label.startswith("Added ") for label in history_labels)
+            or not any(label.startswith("Erased ") for label in history_labels)
+            or not any(label.startswith("Colored ") for label in history_labels)
+        ):
+            return _fail(f"VOXTART history labels were not descriptive: {history_labels!r}")
+        STATE["history_labels"] = history_labels
+        STATE["history_presentation"] = True
+
         scene.voxtart_editor_mode = "ADD"
         scene.voxtart_editor_shape = "FACE"
         scene.voxtart_editor_radius = 2
@@ -619,6 +634,7 @@ def _finish_mouse_clicks():
                 "draw_overlay_handle": editor._draw_handle is not None,
                 "draw_preview_handle": editor._preview_handle is not None,
                 "view_workflow": STATE.get("view_workflow", False),
+                "viewport_hud": STATE.get("viewport_hud", False),
                 "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
@@ -679,11 +695,14 @@ def _finish_mouse_clicks():
                 },
                 "undo_redo_controls": STATE.get("undo_redo_controls", False),
                 "paint_undo_redo": STATE.get("paint_undo_redo", False),
+                "history_presentation": STATE.get("history_presentation", False),
+                "history_labels": list(STATE.get("history_labels", ())),
                 "drag_paint": STATE.get("drag_paint", False),
                 "palette_non_default": STATE.get("palette_non_default", False),
                 "hover_highlight": STATE.get("hover_highlight", False),
                 "material_shading": STATE.get("material_shading", False),
                 "palette_selection": STATE.get("palette_selection", False),
+                "palette_favorite": STATE.get("palette_favorite", False),
                 "color_wheel": STATE.get("color_wheel", False),
                 "grid_shortcut": STATE.get("grid_shortcut", False),
                 "dock_drawers": STATE.get("dock_drawers", False),
@@ -2132,6 +2151,97 @@ def _probe():
                 return _fail(f"Could not capture Menu screenshot: {menu_screenshot_result!r}")
             editor._activate_topbar_action(bpy.context, "MENU")
         STATE["menu_surface"] = True
+        hud_layout = voxel_editor._editor_view_hud_layout(editor, region)
+        hud_entries = {
+            action: bounds
+            for action, _label, bounds in hud_layout["entries"]
+        }
+        required_hud_actions = {
+            "VIEW_FRONT",
+            "VIEW_RIGHT",
+            "VIEW_TOP",
+            "VIEW_FRAME",
+            "VIEW_PROJECTION",
+        }
+        palette_dock = voxel_editor._editor_dock_layout(editor, region)["panels"].get("PALETTE")
+        if (
+            hud_layout["panel"][2] <= hud_layout["panel"][0]
+            or not required_hud_actions.issubset(hud_entries)
+            or palette_dock is None
+            or hud_layout["panel"][2] >= palette_dock["bounds"][0]
+        ):
+            return _fail("VOXTART viewport HUD did not expose a compact non-overlapping action panel")
+
+        def _hud_event(action, event_type="LEFTMOUSE"):
+            bounds = hud_entries[action]
+            return SimpleNamespace(
+                type=event_type,
+                value="NOTHING" if event_type == "MOUSEMOVE" else "PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+            )
+
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            hud_hover_result = editor.modal(bpy.context, _hud_event("VIEW_FRONT", "MOUSEMOVE"))
+        if (
+            "RUNNING_MODAL" not in hud_hover_result
+            or editor.view_hud_hover != "VIEW_FRONT"
+        ):
+            return _fail("VOXTART viewport HUD did not report hover feedback")
+
+        for action, expected_status in (
+            ("VIEW_FRONT", "Front view"),
+            ("VIEW_RIGHT", "Right view"),
+            ("VIEW_TOP", "Top view"),
+            ("VIEW_FRAME", "View framed"),
+        ):
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                hud_result = editor.modal(bpy.context, _hud_event(action))
+            if "RUNNING_MODAL" not in hud_result or editor.status != expected_status:
+                return _fail(f"VOXTART viewport HUD action failed: {action} -> {editor.status!r}")
+
+        projection_before = area.spaces.active.region_3d.view_perspective
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            projection_result = editor.modal(
+                bpy.context,
+                _hud_event("VIEW_PROJECTION"),
+            )
+        projection_after = area.spaces.active.region_3d.view_perspective
+        if (
+            "RUNNING_MODAL" not in projection_result
+            or projection_after == projection_before
+            or editor.status not in {"Orthographic view", "Perspective view"}
+        ):
+            return _fail("VOXTART viewport HUD projection toggle did not change the view")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, _hud_event("VIEW_PROJECTION"))
+        if area.spaces.active.region_3d.view_perspective != projection_before:
+            return _fail("VOXTART viewport HUD projection toggle did not restore the view")
+        STATE["viewport_hud"] = True
+
         seam_name = editor.obj.get(operators.SEAM_OVERLAY_PROPERTY)
         seam_overlay = bpy.data.objects.get(seam_name) if isinstance(seam_name, str) else None
         if seam_overlay is None or seam_overlay.hide_viewport:
@@ -2159,6 +2269,62 @@ def _probe():
             palette_result = editor.modal(bpy.context, palette_event)
         if "RUNNING_MODAL" not in palette_result or scene.voxtart_edit_palette_index != palette_index:
             return _fail("VOXTART editor palette swatch click did not select a non-default color")
+        metadata = voxel_editor._editor_palette_metadata(editor, palette_index)
+        if not metadata[0].startswith("#") or metadata[1] != "Diffuse":
+            return _fail(f"VOXTART palette swatch metadata is incomplete: {metadata!r}")
+        favorite_event = SimpleNamespace(
+            type="RIGHTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(palette_bounds[0] + palette_bounds[2]) * 0.5,
+            mouse_region_y=(palette_bounds[1] + palette_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            favorite_result = editor.modal(bpy.context, favorite_event)
+        favorite_indices = voxel_editor._editor_palette_favorite_indices(editor)
+        favorite_panel, favorite_entries = voxel_editor._editor_palette_favorite_layout(editor, region)
+        favorite_bounds = next(
+            (bounds for index, bounds in favorite_entries if index == palette_index),
+            None,
+        )
+        if (
+            "RUNNING_MODAL" not in favorite_result
+            or favorite_indices != (palette_index,)
+            or favorite_bounds is None
+            or "pinned" not in editor.status
+        ):
+            return _fail("VOXTART palette right-click did not persist a pinned swatch")
+        favorite_select_event = SimpleNamespace(
+            type="LEFTMOUSE",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(favorite_bounds[0] + favorite_bounds[2]) * 0.5,
+            mouse_region_y=(favorite_bounds[1] + favorite_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            favorite_select_result = editor.modal(bpy.context, favorite_select_event)
+        if (
+            "RUNNING_MODAL" not in favorite_select_result
+            or scene.voxtart_edit_palette_index != palette_index
+            or favorite_panel[2] <= favorite_panel[0]
+        ):
+            return _fail("VOXTART pinned swatch was not a selectable palette shortcut")
+        STATE["palette_favorite"] = True
+
         STATE["palette_selection"] = True
         STATE["palette_non_default"] = True
         wheel_geometry = voxel_editor._editor_color_wheel_geometry(editor, region)
@@ -2199,6 +2365,8 @@ def _probe():
         ):
             return _fail("VOXTART editor color wheel did not update the active palette color")
         STATE["color_wheel"] = True
+        if palette_index not in voxel_editor._editor_palette_favorite_indices(editor):
+            return _fail("VOXTART pinned palette metadata was lost while editing its color")
         with bpy.context.temp_override(
             window=window,
             screen=screen,

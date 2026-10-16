@@ -72,6 +72,12 @@ later, including how to orbit, undo, and redo a change.
 The editor top bar, color strip, toolbar, and first-run card share rounded
 panels and accent borders so the editing surface reads as one focused product
 workspace.
+
+The editor keeps navigation discoverable with a compact **VIEWPORT** HUD beside
+the Colors drawer. Its isometric cube and direct buttons expose **Front**,
+**Right**, **Top**, **Frame**, and a projection toggle; `Numpad 1/3/7/5` and
+`Home` provide the same camera shortcuts without opening Blender's native UI.
+
 The desktop shell remains available as a secondary project surface through the
 editor's **Home** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,
@@ -198,6 +204,13 @@ The bundled Blender runtime retains its own `license/license.md`,
   palette sources by its explicit source URL.
 - Palette operations add/remove colors, remap affected voxels to the nearest
   target color, select an editing swatch, and apply a scene palette.
+- The editor exposes a **PINNED** swatch row: `Alt`-click or right-click a
+  swatch to favorite it, then click the pinned swatch for a quick selection.
+  Favorites persist as scene metadata and follow a color when its HSV value is
+  edited.
+- Swatch headers show the active color's display-space HEX value and material
+  kind; hover cards expose the same metadata and the pin/unpin action.
+
 
 ### Goxel-style voxel editing
 
@@ -241,6 +254,9 @@ available while adding a compact voxel workflow:
   highlights the active tool, and exposes a tooltip on hover;
 - the VOXTART product panels expose palette, layer, history, and scene controls
   without revealing Blender's native panels.
+- The **History** drawer names committed transitions (`Added 1 block`,
+  `Colored 2 blocks`, `Moved asset`) instead of generic step numbers. Clicking
+  a row restores that snapshot and reports the restored action.
 - In **Add** or **Attach**, **left click places** on a voxel face and **right
   click erases** the hit voxel; dragging paints continuously. When the ray
   misses the asset, Add/Attach places on the ground grid plane so the first

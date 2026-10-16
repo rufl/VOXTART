@@ -92,11 +92,16 @@ EDITOR_ADVANCED_PROPERTY = "voxtart_editor_advanced_tools"
 EDITOR_OPTIONS_PROPERTY = "voxtart_editor_options_open"
 EDITOR_GRID_PROPERTY = "voxtart_editor_grid"
 EDITOR_MENU_PROPERTY = "voxtart_editor_menu_open"
+EDITOR_PALETTE_FAVORITES_PROPERTY = "voxtart_editor_palette_favorites"
+
 EDITOR_DOCK_LEFT_PROPERTY = "voxtart_editor_dock_left"
 EDITOR_DOCK_RIGHT_PROPERTY = "voxtart_editor_dock_right"
 EDITOR_DOCK_PANEL_WIDTH = 252.0
 EDITOR_DOCK_PANEL_GAP = 8.0
 EDITOR_DOCK_PANELS = ("PALETTE", "LAYERS", "HISTORY")
+EDITOR_VIEW_HUD_WIDTH = 190.0
+EDITOR_VIEW_HUD_HEIGHT = 154.0
+
 
 _EDITOR_MENU_GROUPS = (
     (
@@ -130,6 +135,14 @@ _EDITOR_MENU_GROUPS = (
         ),
     ),
 )
+_EDITOR_VIEW_HUD_ACTIONS = (
+    ("VIEW_FRONT", "Front"),
+    ("VIEW_RIGHT", "Right"),
+    ("VIEW_TOP", "Top"),
+    ("VIEW_FRAME", "Frame"),
+    ("VIEW_PROJECTION", "Projection"),
+)
+
 
 EDITOR_WORKSPACES = ("EDIT", "SCENE")
 EDITOR_WORKSPACE_ITEMS = (
@@ -138,6 +151,9 @@ EDITOR_WORKSPACE_ITEMS = (
 )
 EDITOR_MAX_RADIUS = 16
 EDITOR_COLOR_WHEEL_SIZE = 148.0
+EDITOR_PALETTE_FAVORITE_SWATCH = 28.0
+EDITOR_PALETTE_FAVORITE_GAP = 6.0
+EDITOR_PALETTE_FAVORITE_LABEL = 42.0
 EDITOR_COLOR_WHEEL_SEGMENTS = 64
 EDITOR_REDRAW_INTERVAL = 1.0 / 60.0
 EDITOR_AUTOSAVE_INTERVAL = 0.5
@@ -195,6 +211,8 @@ class _HistoryState:
     location: tuple[float, float, float] = (0.0, 0.0, 0.0)
     rotation: tuple[float, float, float] = (0.0, 0.0, 0.0)
     scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    label: str = "Edit"
+
 
 
 def _scene_mode(scene) -> str:
@@ -291,9 +309,22 @@ def _layer_asset(asset: VoxelAsset, stack) -> VoxelAsset:
     )
 
 
-def _copy_history(asset: VoxelAsset, stack, selection: tuple[Cell, ...], obj=None) -> _HistoryState:
+def _copy_history(
+    asset: VoxelAsset,
+    stack,
+    selection: tuple[Cell, ...],
+    obj=None,
+    *,
+    label: str = "Edit",
+) -> _HistoryState:
+    normalized_label = str(label or "Edit")
     if obj is None:
-        return _HistoryState(asset.to_dict(), stack.encode(), tuple(selection))
+        return _HistoryState(
+            asset.to_dict(),
+            stack.encode(),
+            tuple(selection),
+            label=normalized_label,
+        )
     return _HistoryState(
         asset.to_dict(),
         stack.encode(),
@@ -301,7 +332,20 @@ def _copy_history(asset: VoxelAsset, stack, selection: tuple[Cell, ...], obj=Non
         tuple(float(value) for value in obj.location),
         tuple(float(value) for value in obj.rotation_euler),
         tuple(float(value) for value in obj.scale),
+        normalized_label,
     )
+
+
+def _history_label(report) -> str:
+    changed = int(getattr(report, "added", 0)) + int(getattr(report, "removed", 0)) + int(getattr(report, "painted", 0))
+    unit = "block" if changed == 1 else "blocks"
+    verb = {
+        "editor_add": "Added",
+        "editor_attach": "Added",
+        "editor_erase": "Erased",
+        "editor_paint": "Colored",
+    }.get(str(getattr(report, "operation", "")), "Updated")
+    return f"{verb} {changed} {unit}"
 
 
 def _restore_overlay(obj, asset: VoxelAsset) -> None:
@@ -340,6 +384,7 @@ def _editor_cursor(editor, event=None) -> str:
         or getattr(editor, "color_wheel_hover", None) is not None
         or getattr(editor, "dock_hover", None) is not None
         or getattr(editor, "dock_dragging", None) is not None
+        or getattr(editor, "view_hud_hover", None) is not None
     ):
         return "HAND"
     if getattr(event, "alt", False):
@@ -351,6 +396,105 @@ def _editor_cursor(editor, event=None) -> str:
         "PAINT": "PAINT_BRUSH",
         "SELECT": "CROSSHAIR",
     }.get(_editor_input_mode(editor), "CROSSHAIR")
+
+
+def _editor_view_hud_layout(editor, region):
+    scale = ui_style.ui_scale()
+    width = float(getattr(region, "width", 0.0))
+    height = float(getattr(region, "height", 0.0))
+    hud_width = min(
+        EDITOR_VIEW_HUD_WIDTH * scale,
+        max(150.0 * scale, width - 16.0 * scale),
+    )
+    hud_height = min(
+        EDITOR_VIEW_HUD_HEIGHT * scale,
+        max(128.0 * scale, height - 96.0 * scale),
+    )
+    right = max(8.0 * scale, width - 12.0 * scale)
+    dock_layout = _editor_dock_layout(editor, region)
+    right_panels = tuple(
+        panel["bounds"][0]
+        for panel in dock_layout["panels"].values()
+        if panel.get("side") == "RIGHT"
+    )
+    if right_panels:
+        right = min(right, min(right_panels) - 10.0 * scale)
+    x0 = max(8.0 * scale, right - hud_width)
+    x1 = min(width - 8.0 * scale, x0 + hud_width)
+    y1 = max(72.0 * scale, height - 60.0 * scale)
+    y0 = max(44.0 * scale, y1 - hud_height)
+    cube = (
+        x0 + 12.0 * scale,
+        y0 + 43.0 * scale,
+        x0 + 76.0 * scale,
+        y0 + 107.0 * scale,
+    )
+    button_x0 = x0 + 84.0 * scale
+    button_x1 = x1 - 10.0 * scale
+    button_height = 20.0 * scale
+    button_gap = 5.0 * scale
+    entries = [
+        (
+            action,
+            label,
+            (
+                button_x0,
+                y0 + offset * scale,
+                button_x1,
+                y0 + offset * scale + button_height,
+            ),
+        )
+        for action, label, offset in (
+            ("VIEW_FRONT", "Front", 88.0),
+            ("VIEW_RIGHT", "Right", 63.0),
+            ("VIEW_TOP", "Top", 38.0),
+        )
+    ]
+    bottom_x0 = x0 + 12.0 * scale
+    bottom_x1 = x1 - 10.0 * scale
+    bottom_width = (bottom_x1 - bottom_x0 - button_gap) * 0.5
+    entries.extend(
+        (
+            (
+                "VIEW_FRAME",
+                "Frame",
+                (
+                    bottom_x0,
+                    y0 + 10.0 * scale,
+                    bottom_x0 + bottom_width,
+                    y0 + 10.0 * scale + button_height,
+                ),
+            ),
+            (
+                "VIEW_PROJECTION",
+                "Projection",
+                (
+                    bottom_x0 + bottom_width + button_gap,
+                    y0 + 10.0 * scale,
+                    bottom_x1,
+                    y0 + 10.0 * scale + button_height,
+                ),
+            ),
+        )
+    )
+    return {
+        "panel": (x0, y0, x1, y1),
+        "cube": cube,
+        "entries": tuple(entries),
+    }
+
+
+def _editor_view_hud_action_at(context, event):
+    region = getattr(context, "region", None)
+    editor = _ACTIVE_EDITOR
+    if region is None or editor is None:
+        return None
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    for action, _label, bounds in _editor_view_hud_layout(editor, region)["entries"]:
+        if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
+            return action
+    return None
 
 
 def _set_editor_cursor(context, cursor: str) -> None:
@@ -628,6 +772,72 @@ def _editor_dock_open(editor, side: str) -> bool:
     return _editor_scene_bool(editor, property_name, side == "RIGHT")
 
 
+def _editor_palette_color_key(color) -> str:
+    return json.dumps(
+        [round(float(channel), 6) for channel in tuple(color)[:4]],
+        separators=(",", ":"),
+    )
+
+
+def _editor_palette_favorite_keys(editor) -> set[str]:
+    scene = getattr(editor, "scene", None)
+    getter = getattr(scene, "get", None)
+    raw = getter(EDITOR_PALETTE_FAVORITES_PROPERTY, "[]") if callable(getter) else "[]"
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return set()
+    if not isinstance(raw, (list, tuple, set)):
+        return set()
+    return {str(value) for value in raw if isinstance(value, str)}
+
+
+def _set_editor_palette_favorite_keys(editor, keys) -> None:
+    scene = getattr(editor, "scene", None)
+    if scene is None:
+        return
+    scene[EDITOR_PALETTE_FAVORITES_PROPERTY] = json.dumps(
+        sorted({str(key) for key in keys}),
+        separators=(",", ":"),
+    )
+
+
+def _editor_palette_favorite_indices(editor) -> tuple[int, ...]:
+    palette = tuple(getattr(getattr(editor, "asset", None), "palette", ()) or ())
+    keys = _editor_palette_favorite_keys(editor)
+    return tuple(
+        index
+        for index, color in enumerate(palette)
+        if _editor_palette_color_key(color) in keys
+    )
+
+
+def _editor_palette_favorite_band_height(editor, panel_width: float, scale: float) -> float:
+    favorite_size = EDITOR_PALETTE_FAVORITE_SWATCH * scale
+    favorite_gap = EDITOR_PALETTE_FAVORITE_GAP * scale
+    available = max(
+        1.0 * scale,
+        panel_width
+        - 24.0 * scale
+        - EDITOR_PALETTE_FAVORITE_LABEL * scale,
+    )
+    columns = max(
+        1,
+        int((available + favorite_gap) // (favorite_size + favorite_gap)),
+    )
+    rows = (
+        len(_editor_palette_favorite_indices(editor)) + columns - 1
+    ) // columns
+    rows = max(1, rows)
+    return (
+        12.0 * scale
+        + rows * favorite_size
+        + max(0, rows - 1) * favorite_gap
+        + 8.0 * scale
+    )
+
+
 def _editor_dock_layout(editor, region):
     scale = ui_style.ui_scale()
     width = float(getattr(region, "width", 0.0))
@@ -658,6 +868,7 @@ def _editor_dock_layout(editor, region):
         "PALETTE": 58.0 * scale
         + wheel_size
         + 14.0 * scale
+        + _editor_palette_favorite_band_height(editor, dock_width, scale)
         + rows * swatch_size
         + max(0, rows - 1) * swatch_gap
         + 12.0 * scale,
@@ -732,13 +943,48 @@ def _editor_palette_layout(editor, region):
     )
     rows = (len(palette) + columns - 1) // columns
     entries = []
-    swatch_bottom = panel[1] + 12.0 * scale
+    swatch_bottom = panel[1] + _editor_palette_favorite_band_height(
+        editor,
+        panel_width,
+        scale,
+    )
+
     for index in range(len(palette)):
         row, column = divmod(index, columns)
         x = panel[0] + 12.0 * scale + column * (swatch_size + gap)
         y = swatch_bottom + (rows - row - 1) * (swatch_size + gap)
         entries.append((index, (x, y, x + swatch_size, y + swatch_size)))
     return panel, tuple(entries)
+def _editor_palette_favorite_layout(editor, region):
+    panel, regular_entries = _editor_palette_layout(editor, region)
+    if not regular_entries:
+        return panel, ()
+    favorite_indices = _editor_palette_favorite_indices(editor)
+    if not favorite_indices:
+        return panel, ()
+    scale = ui_style.ui_scale()
+    panel_width = panel[2] - panel[0]
+    swatch_size = EDITOR_PALETTE_FAVORITE_SWATCH * scale
+    gap = EDITOR_PALETTE_FAVORITE_GAP * scale
+    label_width = EDITOR_PALETTE_FAVORITE_LABEL * scale
+    available = max(
+        1.0 * scale,
+        panel_width - 24.0 * scale - label_width,
+    )
+    columns = max(
+        1,
+        int((available + gap) // (swatch_size + gap)),
+    )
+    rows = (len(favorite_indices) + columns - 1) // columns
+    entries = []
+    for position, index in enumerate(favorite_indices):
+        row, column = divmod(position, columns)
+        x = panel[0] + 12.0 * scale + label_width + column * (swatch_size + gap)
+        y = panel[1] + 12.0 * scale + (rows - row - 1) * (swatch_size + gap)
+        entries.append((index, (x, y, x + swatch_size, y + swatch_size)))
+    return panel, tuple(entries)
+
+
 
 
 def _editor_color_wheel_geometry(editor, region):
@@ -778,6 +1024,26 @@ def _editor_palette_color(editor):
     index = int(getattr(editor.scene, "voxtart_edit_palette_index", 0)) % len(palette)
     color = tuple(float(value) for value in palette[index])
     return color if len(color) == 4 else (*color[:3], 1.0)
+def _editor_palette_metadata(editor, index: int):
+    palette = tuple(getattr(getattr(editor, "asset", None), "palette", ()) or ())
+    if not 0 <= index < len(palette):
+        return "#FFFFFF", "Diffuse", False
+    display_color = scene_linear_to_srgb(palette[index])
+    channels = tuple(
+        max(0, min(255, int(round(float(channel) * 255.0))))
+        for channel in display_color[:3]
+    )
+    hex_color = "#" + "".join(f"{channel:02X}" for channel in channels)
+    materials = ()
+    getter = getattr(getattr(editor, "asset", None), "get_palette_materials", None)
+    if callable(getter):
+        materials = tuple(getter() or ())
+    material = materials[index] if index < len(materials) else None
+    material_kind = str(getattr(material, "kind", "DIFFUSE")).title()
+    favorite = _editor_palette_color_key(palette[index]) in _editor_palette_favorite_keys(editor)
+    return hex_color, material_kind, favorite
+
+
 
 
 def _editor_color_wheel_hsv(editor):
@@ -833,8 +1099,14 @@ def _set_editor_color_from_wheel(editor, context, hit) -> None:
     index = int(getattr(editor.scene, "voxtart_edit_palette_index", 0))
     if not 0 <= index < len(editor.asset.palette):
         return
+    old_key = _editor_palette_color_key(editor.asset.palette[index])
     editor.asset.palette[index] = color
     editor.layer_asset.palette[index] = color
+    favorite_keys = _editor_palette_favorite_keys(editor)
+    if old_key in favorite_keys:
+        favorite_keys.discard(old_key)
+        favorite_keys.add(_editor_palette_color_key(color))
+        _set_editor_palette_favorite_keys(editor, favorite_keys)
     collection = getattr(editor.scene, "voxtart_palette_colors", None)
     if collection is not None and index < len(collection):
         collection[index].color = color
@@ -853,7 +1125,9 @@ def _editor_palette_index_at(editor, context, event):
         return None
     x = float(getattr(event, "mouse_region_x", -1.0))
     y = float(getattr(event, "mouse_region_y", -1.0))
-    for index, bounds in _editor_palette_layout(editor, region)[1]:
+    favorite_entries = _editor_palette_favorite_layout(editor, region)[1]
+    regular_entries = _editor_palette_layout(editor, region)[1]
+    for index, bounds in (*favorite_entries, *regular_entries):
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
             return index
     return None
@@ -1379,8 +1653,11 @@ def _draw_editor_palette(editor, context) -> None:
     panel, entries = _editor_palette_layout(editor, region)
     if not entries:
         return
+    _favorite_panel, favorite_entries = _editor_palette_favorite_layout(editor, region)
     palette = tuple(getattr(editor.asset, "palette", ()) or ())
     selected = int(getattr(context.scene, "voxtart_edit_palette_index", 0)) % len(palette)
+    selected_hex, selected_kind, _selected_favorite = _editor_palette_metadata(editor, selected)
+    all_entries = (*favorite_entries, *entries)
     x0, y0, x1, y1 = panel
     try:
         gpu.state.blend_set("ALPHA")
@@ -1397,16 +1674,60 @@ def _draw_editor_palette(editor, context) -> None:
         if wheel is not None:
             _draw_editor_color_wheel(editor, wheel)
         _draw_editor_text("COLORS", x0 + 12.0 * scale, y1 - 22.0 * scale, 11.0, _THEME["text_muted"])
-        _draw_editor_text("Choose a color", x0 + 12.0 * scale, y1 - 40.0 * scale, 10.0, _THEME["text_dim"])
-        color_label = f"Color {selected + 1}"
+        _draw_editor_text(
+            "Alt/Right-click to pin",
+            x0 + 12.0 * scale,
+            y1 - 40.0 * scale,
+            10.0,
+            _THEME["text_dim"],
+        )
+        color_label = f"{selected_hex} · {selected_kind}"
         _draw_editor_text(
             color_label,
-            x1 - _editor_text_width(color_label, 11.0) - 12.0 * scale,
+            x1 - _editor_text_width(color_label, 10.0) - 12.0 * scale,
             y1 - 22.0 * scale,
-            11.0,
+            10.0,
             _THEME["text"],
         )
+        favorite_label_y = y0 + 21.0 * scale
+        _draw_editor_text(
+            "PINNED",
+            x0 + 12.0 * scale,
+            favorite_label_y,
+            8.0,
+            _THEME["accent"] if favorite_entries else _THEME["text_dim"],
+        )
+        if not favorite_entries:
+            _draw_editor_text(
+                "Alt/Right-click",
+                x0 + 55.0 * scale,
+                favorite_label_y,
+                8.0,
+                _THEME["text_dim"],
+            )
         hovered_index = getattr(editor, "palette_hover", None)
+        for index, bounds in favorite_entries:
+            sx0, sy0, sx1, sy1 = bounds
+            active = index == selected
+            hovered = index == hovered_index
+            _draw_editor_panel(
+                sx0 - 2.0 * scale,
+                sy0 - 2.0 * scale,
+                sx1 - sx0 + 4.0 * scale,
+                sy1 - sy0 + 4.0 * scale,
+                _THEME["panel_hover"] if hovered else _THEME["panel_raised"],
+                border=_THEME["accent"] if active or hovered else _THEME["accent_hover"],
+                radius=6.0 * scale,
+            )
+            color = scene_linear_to_srgb(palette[index])
+            _draw_editor_round_rect(
+                sx0,
+                sy0,
+                sx1 - sx0,
+                sy1 - sy0,
+                color[:4],
+                radius=4.0 * scale,
+            )
         for index, bounds in entries:
             sx0, sy0, sx1, sy1 = bounds
             active = index == selected
@@ -1429,14 +1750,21 @@ def _draw_editor_palette(editor, context) -> None:
                 color[:4],
                 radius=5.0 * scale,
             )
+            if _editor_palette_metadata(editor, index)[2]:
+                _draw_editor_circle(
+                    sx1 - 6.0 * scale,
+                    sy1 - 6.0 * scale,
+                    2.5 * scale,
+                    _THEME["accent"],
+                )
         if hovered_index is not None:
             hovered_bounds = next(
-                (bounds for index, bounds in entries if index == hovered_index),
+                (bounds for index, bounds in all_entries if index == hovered_index),
                 None,
             )
             if hovered_bounds is not None:
                 tooltip_width = 222.0 * scale
-                tooltip_height = 56.0 * scale
+                tooltip_height = 70.0 * scale
                 tooltip_x = max(
                     8.0 * scale,
                     min(
@@ -1451,6 +1779,10 @@ def _draw_editor_palette(editor, context) -> None:
                         float(region.height) - tooltip_height - 8.0 * scale,
                     ),
                 )
+                hovered_hex, hovered_kind, hovered_favorite = _editor_palette_metadata(
+                    editor,
+                    hovered_index,
+                )
                 _draw_editor_panel(
                     tooltip_x,
                     tooltip_y,
@@ -1463,19 +1795,157 @@ def _draw_editor_palette(editor, context) -> None:
                 _draw_editor_text(
                     f"Color {hovered_index + 1}",
                     tooltip_x + 12.0 * scale,
-                    tooltip_y + 34.0 * scale,
+                    tooltip_y + 48.0 * scale,
                     13.0,
                     _THEME["text"],
                 )
                 _draw_editor_text(
-                    "Use this color for new blocks.",
+                    f"{hovered_hex} · {hovered_kind}",
                     tooltip_x + 12.0 * scale,
-                    tooltip_y + 14.0 * scale,
-                    11.0,
+                    tooltip_y + 28.0 * scale,
+                    10.0,
+                    _THEME["accent"] if hovered_favorite else _THEME["text_muted"],
+                )
+                _draw_editor_text(
+                    "Pinned · right-click to unpin"
+                    if hovered_favorite
+                    else "Alt/Right-click to pin",
+                    tooltip_x + 12.0 * scale,
+                    tooltip_y + 12.0 * scale,
+                    10.0,
                     _THEME["text_muted"],
                 )
     finally:
         gpu.state.blend_set("NONE")
+def _draw_editor_view_hud(editor, context) -> None:
+    region = getattr(context, "region", None)
+    if region is None or gpu is None or batch_for_shader is None:
+        return
+    layout = _editor_view_hud_layout(editor, region)
+    panel = layout["panel"]
+    cube = layout["cube"]
+    entries = layout["entries"]
+    scale = ui_style.ui_scale()
+    region_3d = getattr(
+        getattr(getattr(context, "area", None), "spaces", None),
+        "active",
+        None,
+    )
+    region_3d = getattr(region_3d, "region_3d", None)
+    projection = str(getattr(region_3d, "view_perspective", "PERSP"))
+    projection_label = "ORTHO" if projection == "ORTHO" else "PERSP"
+    label_map = dict(_EDITOR_VIEW_HUD_ACTIONS)
+    x0, y0, x1, y1 = panel
+    try:
+        gpu.state.blend_set("ALPHA")
+        _draw_editor_panel(
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            _THEME["panel"],
+            border=_THEME["border"],
+            radius=10.0 * scale,
+        )
+        _draw_editor_text(
+            "VIEWPORT",
+            x0 + 12.0 * scale,
+            y1 - 20.0 * scale,
+            11.0,
+            _THEME["text"],
+        )
+        _draw_editor_text(
+            projection_label,
+            x1 - _editor_text_width(projection_label, 10.0) - 12.0 * scale,
+            y1 - 20.0 * scale,
+            10.0,
+            _THEME["accent"],
+        )
+        _draw_editor_text(
+            "Orient and frame",
+            x0 + 12.0 * scale,
+            y1 - 37.0 * scale,
+            10.0,
+            _THEME["text_dim"],
+        )
+        cube_x0, cube_y0, cube_x1, cube_y1 = cube
+        cube_center_x = (cube_x0 + cube_x1) * 0.5
+        cube_center_y = (cube_y0 + cube_y1) * 0.5
+        cube_mid_y = cube_center_y + 4.0 * scale
+        cube_top = (cube_center_x, cube_y1)
+        cube_left = (cube_x0, cube_mid_y + 6.0 * scale)
+        cube_center = (cube_center_x, cube_mid_y - 10.0 * scale)
+        cube_right = (cube_x1, cube_mid_y + 6.0 * scale)
+        cube_bottom = (cube_center_x, cube_y0)
+        _draw_editor_polygon(
+            (cube_top, cube_right, cube_center, cube_left),
+            _THEME["accent_fill"],
+        )
+        _draw_editor_polygon(
+            (cube_left, cube_center, cube_bottom),
+            _THEME["panel_raised"],
+        )
+        _draw_editor_polygon(
+            (cube_center, cube_right, cube_bottom),
+            _THEME["panel_hover"],
+        )
+        _draw_editor_text(
+            "TOP",
+            cube_center_x - _editor_text_width("TOP", 8.0) * 0.5,
+            cube_center_y + 14.0 * scale,
+            8.0,
+            _THEME["text"],
+        )
+        _draw_editor_text(
+            "FRONT",
+            cube_x0 + 6.0 * scale,
+            cube_center_y - 8.0 * scale,
+            8.0,
+            _THEME["text_muted"],
+        )
+        _draw_editor_text(
+            "RIGHT",
+            cube_center_x + 7.0 * scale,
+            cube_center_y - 8.0 * scale,
+            8.0,
+            _THEME["text_muted"],
+        )
+        for action, label, bounds in entries:
+            button_x0, button_y0, button_x1, button_y1 = bounds
+            hovered = action == getattr(editor, "view_hud_hover", None)
+            button_color = _THEME["panel_hover"] if hovered else _THEME["panel_raised"]
+            border_color = _THEME["accent"] if hovered else _THEME["border_subtle"]
+            _draw_editor_panel(
+                button_x0,
+                button_y0,
+                button_x1 - button_x0,
+                button_y1 - button_y0,
+                button_color,
+                border=border_color,
+                radius=6.0 * scale,
+            )
+            button_label = label_map.get(action, label)
+            if action == "VIEW_PROJECTION":
+                button_label = "Ortho" if projection != "ORTHO" else "Persp"
+            _draw_editor_round_rect(
+                button_x0 + 8.0 * scale,
+                button_y0 + 7.0 * scale,
+                5.0 * scale,
+                5.0 * scale,
+                _THEME["accent"] if hovered else _THEME["text_dim"],
+                radius=2.5 * scale,
+            )
+            _draw_editor_text(
+                button_label,
+                button_x0 + 19.0 * scale,
+                button_y0 + 6.0 * scale,
+                10.0,
+                _THEME["text"],
+            )
+    finally:
+        gpu.state.blend_set("NONE")
+
+
 
 def _editor_dock_panel_bounds(editor, context, name: str):
     region = getattr(context, "region", None)
@@ -1655,7 +2125,15 @@ def _draw_editor_dock_panels(editor, context) -> None:
                         border=_THEME["accent"] if history_index == current else _THEME["border_subtle"],
                         radius=5.0 * scale,
                     )
-                    label = "Initial state" if history_index == 0 else f"Edit {history_index}"
+                    snapshot = history[history_index]
+                    label = str(
+                        getattr(
+                            snapshot,
+                            "label",
+                            "Initial state" if history_index == 0 else f"Edit {history_index}",
+                        )
+                        or ("Initial state" if history_index == 0 else f"Edit {history_index}")
+                    )
                     _draw_editor_text(label, x0 + 16.0 * scale, row_bottom + 10.0 * scale, 10.0, _THEME["text"])
                     _draw_editor_text(
                         "CURRENT" if history_index == current else str(history_index + 1),
@@ -2114,6 +2592,21 @@ def _draw_editor_toolbar(editor, context) -> None:
         gpu.state.blend_set("NONE")
 
 
+def _toggle_view_projection(context) -> str | None:
+    area = getattr(context, "area", None)
+    space = getattr(getattr(area, "spaces", None), "active", None)
+    region_3d = getattr(space, "region_3d", None)
+    if region_3d is None:
+        return None
+    try:
+        current = str(getattr(region_3d, "view_perspective", "PERSP"))
+        target = "ORTHO" if current != "ORTHO" else "PERSP"
+        region_3d.view_perspective = target
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+    return "Orthographic view" if target == "ORTHO" else "Perspective view"
+
+
 def _view_shortcut(context, event) -> str | None:
     if getattr(event, "value", None) != "PRESS" or getattr(event, "ctrl", False) or getattr(event, "alt", False):
         return None
@@ -2121,10 +2614,13 @@ def _view_shortcut(context, event) -> str | None:
         "HOME": ("view_selected", "View recentered"),
         "NUMPAD1": ("front", "Front view"),
         "NUMPAD3": ("right", "Right view"),
+        "NUMPAD5": ("projection", None),
         "NUMPAD7": ("top", "Top view"),
     }.get(getattr(event, "type", ""))
     if command is None:
         return None
+    if command[0] == "projection":
+        return _toggle_view_projection(context)
     try:
         if command[0] == "view_selected":
             bpy.ops.view3d.view_selected()
@@ -2629,6 +3125,7 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_options_menu(editor, context)
     _draw_editor_dock_panels(editor, context)
     _draw_editor_palette(editor, context)
+    _draw_editor_view_hud(editor, context)
     _draw_editor_toolbar(editor, context)
     _draw_editor_topbar_tooltip(editor, context)
     _draw_editor_chat_prompt(editor, context)
@@ -2981,10 +3478,19 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 del self.scene[EDITOR_CLIPBOARD_PROPERTY]
             self.status = "Invalid clipboard discarded"
 
-    def _record_history(self) -> None:
+    def _record_history(self, label: str = "Edit") -> None:
         self.history = self.history[: self.history_index + 1]
-        self.history.append(_copy_history(self.asset, self.stack, self.selection, self.obj))
+        self.history.append(
+            _copy_history(
+                self.asset,
+                self.stack,
+                self.selection,
+                self.obj,
+                label=label,
+            )
+        )
         self.history_index = len(self.history) - 1
+
 
     def _restore_history(self, context, index: int) -> None:
         if not 0 <= index < len(self.history):
@@ -3000,7 +3506,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         _store_selection(self.obj, self.selection)
         self._sync(context)
         self.history_index = index
-        self.status = "History restored"
+        self.status = f"History restored · {getattr(state, 'label', 'Edit')}"
 
     def _begin_stroke(self, operation: str | None = None) -> None:
         if self.stack.active.locked:
@@ -3063,7 +3569,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self._last_stroke_sync = 0.0
         self.preview_cells = ()
         if report.changed:
-            self._record_history()
+            self._record_history(_history_label(report))
             self.scene[FIRST_RUN_HINT_PROPERTY] = False
             changed = report.added + report.removed + report.painted
             unit = "block" if changed == 1 else "blocks"
@@ -3382,9 +3888,14 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
     def _commit_scene_transform(self) -> None:
         if not self.scene_transform_active:
             return
-        self._record_history()
+        transform_label = {
+            "MOVE": "Moved asset",
+            "ROTATE": "Rotated asset",
+            "SCALE": "Scaled asset",
+        }.get(self.scene_transform_kind, "Transformed asset")
+        self._record_history(transform_label)
         self._reset_scene_transform()
-        self.status = "Scene transform committed"
+        self.status = f"Scene transform committed · {transform_label}"
 
     def _cancel_scene_transform(self) -> None:
         if not self.scene_transform_active:
@@ -3696,6 +4207,20 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         palette_ui._set_palette_selection(self.scene, index, edit_index=index)
         self.scene.voxtart_palette_edit_color = palette[index]
         self.status = f"Color {index + 1} selected"
+    def _toggle_palette_favorite(self, index: int) -> None:
+        palette = tuple(getattr(self.asset, "palette", ()) or ())
+        if not palette or not 0 <= index < len(palette):
+            return
+        key = _editor_palette_color_key(palette[index])
+        favorites = _editor_palette_favorite_keys(self)
+        if key in favorites:
+            favorites.discard(key)
+            self.status = f"Color {index + 1} unpinned"
+        else:
+            favorites.add(key)
+            self.status = f"Color {index + 1} pinned"
+        _set_editor_palette_favorite_keys(self, favorites)
+
 
     def _activate_dock_hit(self, context, hit) -> None:
         if hit is None or hit[1] != "ROW":
@@ -3711,7 +4236,6 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self.status = f"Layer {layers[index].name} selected"
         elif panel == "HISTORY":
             self._restore_history(context, index)
-            self.status = "History restored"
         _request_redraw(self, context, force=True)
 
     def _finish_dock_drag(self, context, event) -> None:
@@ -3867,12 +4391,51 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             return
         if action == "PROJECT":
             self._open_project_surface(context)
+    def _activate_view_action(self, context, action: str) -> None:
+        if action not in {
+            "VIEW_FRONT",
+            "VIEW_RIGHT",
+            "VIEW_TOP",
+            "VIEW_FRAME",
+            "VIEW_PROJECTION",
+        }:
+            return
+        if self.transaction is not None:
+            self._cancel_stroke(context)
+        try:
+            if action == "VIEW_FRONT":
+                bpy.ops.view3d.view_axis(type="FRONT")
+                status = "Front view"
+            elif action == "VIEW_RIGHT":
+                bpy.ops.view3d.view_axis(type="RIGHT")
+                status = "Right view"
+            elif action == "VIEW_TOP":
+                bpy.ops.view3d.view_axis(type="TOP")
+                status = "Top view"
+            elif action == "VIEW_FRAME":
+                bpy.ops.view3d.view_selected(use_all_regions=False)
+                status = "View framed"
+            else:
+                status = _toggle_view_projection(context)
+                if status is None:
+                    self.status = "Viewport control unavailable"
+                    _request_redraw(self, context, force=True)
+                    return
+        except (AttributeError, RuntimeError, TypeError, ValueError):
+            self.status = "Viewport control unavailable"
+            _request_redraw(self, context, force=True)
+            return
+        self.status = status
+        self.view_hud_hover = action
+        _request_redraw(self, context, force=True)
+
 
 
     def _finish(self, context, result=None):
         self.toolbar_hover = None
         self.topbar_hover = None
         self.palette_hover = None
+        self.view_hud_hover = None
         self.dock_hover = None
         self.dock_dragging = None
         try:
@@ -3976,6 +4539,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
             self.chat_hover = _editor_chat_action_at(context, event)
+            self.view_hud_hover = None
             if self.chat_hover is not None:
                 self.dock_hover = None
                 self.color_wheel_hover = None
@@ -4004,6 +4568,23 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.dock_hover = None
                 self.color_wheel_hover = None
                 self.topbar_hover = menu_hit
+                self.palette_hover = None
+                self.toolbar_hover = None
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
+            view_hud_hit = (
+                None
+                if bool(self.scene.get(EDITOR_MENU_PROPERTY))
+                or bool(self.scene.get(EDITOR_OPTIONS_PROPERTY))
+                else _editor_view_hud_action_at(context, event)
+            )
+            if view_hud_hit is not None:
+                self.view_hud_hover = view_hud_hit
+                self.dock_hover = None
+                self.color_wheel_hover = None
+                self.topbar_hover = None
                 self.palette_hover = None
                 self.toolbar_hover = None
                 self.last_hit = None
@@ -4048,6 +4629,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.preview_cells = ()
                 _set_editor_cursor(context, "HAND")
                 return {"RUNNING_MODAL"}
+
         if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "PRESS":
             if event.type == "LEFTMOUSE":
                 mcp.set_chat_input_focus(False)
@@ -4055,6 +4637,17 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             if menu_action is not None:
                 if event.type == "LEFTMOUSE":
                     self._activate_topbar_action(context, menu_action)
+                return {"RUNNING_MODAL"}
+            view_hud_action = (
+                None
+                if bool(self.scene.get(EDITOR_MENU_PROPERTY))
+                or bool(self.scene.get(EDITOR_OPTIONS_PROPERTY))
+                else _editor_view_hud_action_at(context, event)
+            )
+            if view_hud_action is not None:
+                self.view_hud_hover = view_hud_action
+                if event.type == "LEFTMOUSE":
+                    self._activate_view_action(context, view_hud_action)
                 return {"RUNNING_MODAL"}
             dock_hit = _editor_dock_hit(self, context, event)
             if dock_hit is not None:
@@ -4099,7 +4692,10 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 return {"RUNNING_MODAL"}
             palette_index = _editor_palette_index_at(self, context, event)
             if palette_index is not None:
-                if event.type == "LEFTMOUSE":
+                if event.type == "RIGHTMOUSE" or getattr(event, "alt", False):
+                    self._toggle_palette_favorite(palette_index)
+                    _request_redraw(self, context, force=True)
+                elif event.type == "LEFTMOUSE":
                     self._activate_palette(palette_index)
                     _request_redraw(self, context, force=True)
                 return {"RUNNING_MODAL"}
@@ -4335,7 +4931,15 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             operators._update_visual_overlays(self.obj, self.asset)
             recovery_status = getattr(self, "status", "")
             self._load_clipboard()
-            self.history = [_copy_history(self.asset, self.stack, self.selection, self.obj)]
+            self.history = [
+                _copy_history(
+                    self.asset,
+                    self.stack,
+                    self.selection,
+                    self.obj,
+                    label="Initial state",
+                )
+            ]
             self.history_index = 0
             self.transaction = None
             self.stroke_anchor = None
@@ -4356,6 +4960,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self.toolbar_hover = None
             self.topbar_hover = None
             self.palette_hover = None
+            self.view_hud_hover = None
             self.color_wheel_hover = None
             self.color_wheel_dragging = False
             self.dock_hover = None
