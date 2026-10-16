@@ -593,6 +593,8 @@ def _finish_mouse_clicks():
                 area=STATE["area"],
                 region=STATE["region"],
             ):
+                voxel_editor._draw_editor_overlay(editor, bpy.context)
+                STATE["editor_overlay_draw"] = True
                 bpy.ops.view3d.view_selected(use_all_regions=False)
                 screenshot_result = bpy.ops.screen.screenshot(filepath=str(SCREENSHOT))
                 bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
@@ -606,6 +608,7 @@ def _finish_mouse_clicks():
         _write(
             {
                 "ok": True,
+                "editor_overlay_draw": STATE.get("editor_overlay_draw", False),
                 "operator_running_modal": True,
                 "draw_overlay_handle": editor._draw_handle is not None,
                 "draw_preview_handle": editor._preview_handle is not None,

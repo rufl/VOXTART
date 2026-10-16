@@ -507,6 +507,7 @@ def _run_gui_probe() -> None:
             or not str(payload.get("first_edit_feedback", "")).startswith("Added ")
             or payload.get("operator_running_modal") is not True
             or payload.get("draw_overlay_handle") is not True
+            or payload.get("editor_overlay_draw") is not True
             or payload.get("draw_preview_handle") is not True
             or payload.get("shell_draw_handle") is not True
             or payload.get("preview_count", 0) <= 0

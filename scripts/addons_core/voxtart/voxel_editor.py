@@ -780,6 +780,7 @@ def _draw_editor_topbar(editor, context) -> None:
         10.0,
         _THEME["text_muted"],
     )
+    help_visible = bool(context.scene.get(EDITOR_HELP_PROPERTY))
     labels = {
         "UNDO": "Undo",
         "REDO": "Redo",
@@ -2429,6 +2430,7 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_options_menu(editor, context)
     _draw_editor_dock_panels(editor, context)
     _draw_editor_palette(editor, context)
+    _draw_editor_toolbar(editor, context)
     _draw_editor_topbar_tooltip(editor, context)
     _draw_editor_chat_prompt(editor, context)
     context_label = f"{mode_label}  ·  {shape.title()} brush" if details else mode_label
