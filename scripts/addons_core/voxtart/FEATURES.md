@@ -27,9 +27,11 @@ splash then opens the voxel editor directly on the starter asset instead of
 making a new user choose a project shell first.
 The default editor surface hides Blender's header, native toolbar, sidebar,
 gizmos, grid, axes, footer, and status bar. VOXTART supplies its own friendly
-top bar with **Undo**, **Redo**, **Home**, **Save**, **Help**, **More**, and
-**Left**/**Right** drawer toggles; the last two keep workspace panels available
-without consuming the canvas when they are closed. **Undo** and **Redo** explain
+top bar with **Undo**, **Redo**, **Home**, **Save**, **Help**, **More**,
+**Menu**, and **Left**/**Right** drawer toggles; the last two keep workspace
+panels available without consuming the canvas when they are closed.
+**Menu** groups common **File**, **Edit**, **View**, **Tools**, and **Help**
+commands in one discoverable surface without removing the quick actions above. **Undo** and **Redo** explain
 their `Ctrl+Z` and `Ctrl+Y` shortcuts; **More** opens a small menu: **Grid**
 draws a bounded 3D box around the active asset, with one line per voxel
 interval, and `G` toggles it directly (`Shift+G` keeps the Select- or Scene-mode

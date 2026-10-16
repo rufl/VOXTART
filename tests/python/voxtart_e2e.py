@@ -488,6 +488,8 @@ def _run_gui_probe() -> None:
             or payload.get("advanced_tools_toggle") is not True
             or payload.get("beginner_toolbar_after_first_edit") is not True
             or payload.get("options_menu") is not True
+            or payload.get("menu_surface") is not True
+            or not Path(str(payload.get("menu_screenshot", ""))).is_file()
             or payload.get("grid_toggle") is not True
             or payload.get("product_controls") is not True
             or payload.get("details_toggle") is not True

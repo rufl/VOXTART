@@ -50,6 +50,12 @@ SHELL_SCREENSHOT = Path(
         str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_shell{SCREENSHOT.suffix}")),
     )
 )
+MENU_SCREENSHOT = Path(
+    os.environ.get(
+        "VOXTART_GUI_MENU_SCREENSHOT",
+        str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_menu{SCREENSHOT.suffix}")),
+    )
+)
 GUI_SAVE_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_SAVE_PATH",
@@ -681,6 +687,7 @@ def _finish_mouse_clicks():
                 "color_wheel": STATE.get("color_wheel", False),
                 "grid_shortcut": STATE.get("grid_shortcut", False),
                 "dock_drawers": STATE.get("dock_drawers", False),
+                "menu_surface": STATE.get("menu_surface", False),
                 "dock_snap": STATE.get("dock_snap", False),
                 "product_controls": STATE.get("product_controls", False),
                 "project_control": STATE.get("project_control", False),
@@ -688,6 +695,7 @@ def _finish_mouse_clicks():
                 "preview_count": len(editor.preview_cells),
                 "area": [STATE["area"].width, STATE["area"].height],
                 "screenshot": str(SCREENSHOT),
+                "menu_screenshot": str(MENU_SCREENSHOT),
                 "mouse_place_erase": True,
                 "baseline_count": len(STATE["baseline_voxels"]),
                 "after_left_count": len(STATE["after_left_voxels"]),
@@ -2045,6 +2053,7 @@ def _probe():
             "SAVE",
             "HELP",
             "OPTIONS",
+            "MENU",
             "DOCK_LEFT",
             "DOCK_RIGHT",
         ):
@@ -2061,6 +2070,68 @@ def _probe():
             return _fail("VOXTART editor did not default to an open right panel drawer")
         if scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not False:
             return _fail("VOXTART editor did not default to a hidden grid")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "MENU")
+            if scene.get(voxel_editor.EDITOR_MENU_PROPERTY) is not True:
+                return _fail("VOXTART editor Menu control did not open the command menu")
+            menu_panel, menu_entries, _menu_headings = voxel_editor._editor_menu_layout(region)
+            menu_bounds = {
+                action: bounds
+                for action, _label, _icon, bounds in menu_entries
+            }
+            required_menu_actions = {
+                "MENU_PROJECT",
+                "MENU_SAVE",
+                "MENU_UNDO",
+                "MENU_REDO",
+                "MENU_GRID",
+                "MENU_DETAILS",
+                "MENU_DOCK_LEFT",
+                "MENU_DOCK_RIGHT",
+                "MENU_MORE_TOOLS",
+                "MENU_HELP",
+            }
+            if (
+                menu_panel[2] <= menu_panel[0]
+                or menu_panel[3] <= menu_panel[1]
+                or not required_menu_actions.issubset(menu_bounds)
+            ):
+                return _fail("VOXTART editor Menu control did not expose grouped commands")
+            menu_grid_bounds = menu_bounds["MENU_GRID"]
+            menu_event = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(menu_grid_bounds[0] + menu_grid_bounds[2]) * 0.5,
+                mouse_region_y=(menu_grid_bounds[1] + menu_grid_bounds[3]) * 0.5,
+            )
+            if voxel_editor._editor_topbar_action_at(bpy.context, menu_event) != "MENU_GRID":
+                return _fail("VOXTART editor Menu grid target was not clickable")
+            menu_result = editor.modal(bpy.context, menu_event)
+            if (
+                "RUNNING_MODAL" not in menu_result
+                or scene.get(voxel_editor.EDITOR_MENU_PROPERTY) is not False
+                or scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not True
+            ):
+                return _fail("VOXTART editor Menu command did not activate the grid")
+            editor._activate_topbar_action(bpy.context, "GRID")
+            editor._activate_topbar_action(bpy.context, "MENU")
+            MENU_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
+            area.tag_redraw()
+            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=4)
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            menu_screenshot_result = bpy.ops.screen.screenshot(filepath=str(MENU_SCREENSHOT))
+            if "FINISHED" not in menu_screenshot_result or not MENU_SCREENSHOT.is_file():
+                return _fail(f"Could not capture Menu screenshot: {menu_screenshot_result!r}")
+            editor._activate_topbar_action(bpy.context, "MENU")
+        STATE["menu_surface"] = True
         seam_name = editor.obj.get(operators.SEAM_OVERLAY_PROPERTY)
         seam_overlay = bpy.data.objects.get(seam_name) if isinstance(seam_name, str) else None
         if seam_overlay is None or seam_overlay.hide_viewport:

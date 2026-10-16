@@ -91,11 +91,45 @@ EDITOR_HELP_PROPERTY = "voxtart_editor_help"
 EDITOR_ADVANCED_PROPERTY = "voxtart_editor_advanced_tools"
 EDITOR_OPTIONS_PROPERTY = "voxtart_editor_options_open"
 EDITOR_GRID_PROPERTY = "voxtart_editor_grid"
+EDITOR_MENU_PROPERTY = "voxtart_editor_menu_open"
 EDITOR_DOCK_LEFT_PROPERTY = "voxtart_editor_dock_left"
 EDITOR_DOCK_RIGHT_PROPERTY = "voxtart_editor_dock_right"
 EDITOR_DOCK_PANEL_WIDTH = 252.0
 EDITOR_DOCK_PANEL_GAP = 8.0
 EDITOR_DOCK_PANELS = ("PALETTE", "LAYERS", "HISTORY")
+
+_EDITOR_MENU_GROUPS = (
+    (
+        "FILE",
+        (
+            ("MENU_PROJECT", "Home", "folder"),
+            ("MENU_SAVE", "Save", "save"),
+        ),
+    ),
+    (
+        "EDIT",
+        (
+            ("MENU_UNDO", "Undo", "undo"),
+            ("MENU_REDO", "Redo", "redo"),
+        ),
+    ),
+    (
+        "VIEW",
+        (
+            ("MENU_GRID", "Grid", "grid"),
+            ("MENU_DETAILS", "Edit info", "details"),
+            ("MENU_DOCK_LEFT", "Left drawer", "dock_left"),
+            ("MENU_DOCK_RIGHT", "Right drawer", "dock_right"),
+        ),
+    ),
+    (
+        "TOOLS",
+        (
+            ("MENU_MORE_TOOLS", "Advanced tools", "toolbox"),
+            ("MENU_HELP", "Help", "help"),
+        ),
+    ),
+)
 
 EDITOR_WORKSPACES = ("EDIT", "SCENE")
 EDITOR_WORKSPACE_ITEMS = (
@@ -392,6 +426,7 @@ def _editor_topbar_action_bounds(region):
         ("SAVE", 68.0),
         ("HELP", 80.0),
         ("OPTIONS", 90.0),
+        ("MENU", 68.0),
         ("DOCK_LEFT", 48.0),
         ("DOCK_RIGHT", 48.0),
     )
@@ -464,10 +499,85 @@ def _editor_options_action_at(context, event):
     return None
 
 
+def _editor_menu_layout(region):
+    scale = ui_style.ui_scale()
+    width = float(getattr(region, "width", 0.0))
+    menu_bounds = next(
+        (bounds for action, bounds in _editor_topbar_action_bounds(region) if action == "MENU"),
+        None,
+    )
+    if menu_bounds is None or width <= 16.0 * scale:
+        return (0.0, 0.0, 0.0, 0.0), (), ()
+    margin = 8.0 * scale
+    menu_width = min(272.0 * scale, max(236.0 * scale, width - 2.0 * margin))
+    row_height = 34.0 * scale
+    heading_height = 18.0 * scale
+    group_gap = 7.0 * scale
+    padding = 10.0 * scale
+    content_height = sum(
+        heading_height + len(items) * row_height + group_gap
+        for _label, items in _EDITOR_MENU_GROUPS
+    )
+    menu_height = padding * 2.0 + content_height
+    menu_top = menu_bounds[1] - 8.0 * scale
+    menu_y = max(margin, menu_top - menu_height)
+    menu_x = min(
+        max(margin, menu_bounds[2] - menu_width),
+        max(margin, width - menu_width - margin),
+    )
+    cursor = menu_top - padding
+    entries = []
+    headings = []
+    for group_label, items in _EDITOR_MENU_GROUPS:
+        heading_top = cursor
+        heading_bottom = heading_top - heading_height
+        headings.append((group_label, (menu_x + padding, heading_bottom, menu_x + menu_width - padding, heading_top)))
+        cursor = heading_bottom
+        for action, label, icon in items:
+            row_top = cursor - 2.0 * scale
+            row_bottom = row_top - row_height
+            entries.append(
+                (
+                    action,
+                    label,
+                    icon,
+                    (
+                        menu_x + padding,
+                        row_bottom,
+                        menu_x + menu_width - padding,
+                        row_top,
+                    ),
+                )
+            )
+            cursor = row_bottom
+        cursor -= group_gap
+    return (
+        (menu_x, menu_y, menu_x + menu_width, menu_top),
+        tuple(entries),
+        tuple(headings),
+    )
+
+
+def _editor_menu_action_at(context, event):
+    region = getattr(context, "region", None)
+    scene = getattr(context, "scene", None)
+    if region is None or scene is None or not bool(scene.get(EDITOR_MENU_PROPERTY)):
+        return None
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    for action, _label, _icon, bounds in _editor_menu_layout(region)[1]:
+        if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
+            return action
+    return None
+
+
 def _editor_topbar_action_at(context, event):
     region = getattr(context, "region", None)
     if region is None:
         return None
+    menu_action = _editor_menu_action_at(context, event)
+    if menu_action is not None:
+        return menu_action
     option_action = _editor_options_action_at(context, event)
     if option_action is not None:
         return option_action
@@ -788,6 +898,7 @@ def _draw_editor_topbar(editor, context) -> None:
         "SAVE": "Save",
         "HELP": "Close help" if help_visible else "Help",
         "OPTIONS": "More",
+        "MENU": "Menu",
         "DOCK_LEFT": "Left",
         "DOCK_RIGHT": "Right",
     }
@@ -1010,6 +1121,91 @@ def _draw_editor_options_menu(editor, context) -> None:
             _THEME["success"] if state == "ON" else _THEME["text_dim"],
         )
 
+def _draw_editor_menu(editor, context) -> None:
+    region = getattr(context, "region", None)
+    scene = getattr(context, "scene", None)
+    if region is None or scene is None or not bool(scene.get(EDITOR_MENU_PROPERTY)):
+        return
+    scale = ui_style.ui_scale()
+    panel, entries, headings = _editor_menu_layout(region)
+    if not entries:
+        return
+    menu_x, menu_y, menu_x1, menu_y1 = panel
+    _draw_editor_panel(
+        menu_x,
+        menu_y,
+        menu_x1 - menu_x,
+        menu_y1 - menu_y,
+        _THEME["panel"],
+        border=_THEME["border"],
+        radius=10.0 * scale,
+    )
+    _draw_editor_text(
+        "VOXTART MENU",
+        menu_x + 14.0 * scale,
+        menu_y1 - 22.0 * scale,
+        12.0,
+        _THEME["accent"],
+    )
+    _draw_editor_text(
+        "Common editor commands",
+        menu_x + 14.0 * scale,
+        menu_y1 - 40.0 * scale,
+        10.0,
+        _THEME["text_muted"],
+    )
+    for label, bounds in headings:
+        _draw_editor_text(
+            label,
+            bounds[0],
+            bounds[3] - 12.0 * scale,
+            9.0,
+            _THEME["text_dim"],
+        )
+    state_labels = {
+        "MENU_GRID": "ON" if bool(scene.get(EDITOR_GRID_PROPERTY)) else "OFF",
+        "MENU_DETAILS": "ON" if bool(scene.get(EDITOR_DETAILS_PROPERTY)) else "OFF",
+        "MENU_DOCK_LEFT": "ON" if bool(scene.get(EDITOR_DOCK_LEFT_PROPERTY)) else "OFF",
+        "MENU_DOCK_RIGHT": "ON" if bool(scene.get(EDITOR_DOCK_RIGHT_PROPERTY)) else "OFF",
+        "MENU_MORE_TOOLS": "ON" if bool(scene.get(EDITOR_ADVANCED_PROPERTY)) else "OFF",
+    }
+    for action, label, icon, bounds in entries:
+        x0, y0, x1, y1 = bounds
+        hovered = action == getattr(editor, "topbar_hover", None)
+        _draw_editor_panel(
+            x0,
+            y0,
+            x1 - x0,
+            y1 - y0,
+            _THEME["panel_hover"] if hovered else _THEME["panel_raised"],
+            border=_THEME["accent"] if hovered else _THEME["border_subtle"],
+            radius=7.0 * scale,
+        )
+        _draw_editor_icon(
+            icon,
+            x0 + 17.0 * scale,
+            (y0 + y1) * 0.5,
+            15.0 * scale,
+            _THEME["text"],
+        )
+        _draw_editor_text(
+            label,
+            x0 + 34.0 * scale,
+            y0 + 12.0 * scale,
+            11.0,
+            _THEME["text"],
+        )
+        state = state_labels.get(action)
+        if state is not None:
+            _draw_editor_text(
+                state,
+                x1 - _editor_text_width(state, 9.0) - 10.0 * scale,
+                y0 + 12.0 * scale,
+                9.0,
+                _THEME["success"] if state == "ON" else _THEME["text_dim"],
+            )
+
+
 
 def _draw_editor_topbar_tooltip(editor, context) -> None:
     action = getattr(editor, "topbar_hover", None)
@@ -1031,6 +1227,7 @@ def _draw_editor_topbar_tooltip(editor, context) -> None:
         "SAVE": "Save",
         "HELP": "Close help" if help_visible else "Help",
         "OPTIONS": "More",
+        "MENU": "Menu",
     }
     title = labels.get(action, action.title())
     history = tuple(getattr(editor, "history", ()))
@@ -1546,6 +1743,7 @@ _EDITOR_TOPBAR_ICONS = {
     "SAVE": "save",
     "HELP": "help",
     "OPTIONS": "toolbox",
+    "MENU": "menu",
     "DOCK_LEFT": "dock_left",
     "DOCK_RIGHT": "dock_right",
 }
@@ -1564,6 +1762,7 @@ _EDITOR_TOPBAR_HINTS = {
     "SAVE": "Save your block world.",
     "HELP": "Show the simple steps.",
     "OPTIONS": "Open a few extra choices.",
+    "MENU": "Open File, Edit, View, and Tools commands.",
     "DOCK_LEFT": "Show or hide the left panel drawer.",
     "DOCK_RIGHT": "Show or hide the right panel drawer.",
 }
@@ -2617,6 +2816,7 @@ def _draw_editor_overlay(editor, context) -> None:
     )
     _draw_editor_round_rect(23.0 * scale, 17.0 * scale, 6.0 * scale, 6.0 * scale, status_accent, radius=3.0 * scale)
     _draw_editor_text(status_display, 38.0 * scale, 15.0 * scale, 11.0, status_text)
+    _draw_editor_menu(editor, context)
 
 
 class VOXTART_OT_voxel_editor(bpy.types.Operator):
@@ -3563,8 +3763,28 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             }[action]
         if self.transaction is not None:
             self._cancel_stroke(context)
+        if action == "MENU":
+            self.scene[EDITOR_OPTIONS_PROPERTY] = False
+            visible = not bool(self.scene.get(EDITOR_MENU_PROPERTY))
+            self.scene[EDITOR_MENU_PROPERTY] = visible
+            self.status = "Menu open" if visible else "Menu closed"
+            _request_redraw(self, context, force=True)
+            return
+        action = {
+            "MENU_PROJECT": "PROJECT",
+            "MENU_SAVE": "SAVE",
+            "MENU_UNDO": "UNDO",
+            "MENU_REDO": "REDO",
+            "MENU_GRID": "GRID",
+            "MENU_DETAILS": "DETAILS",
+            "MENU_DOCK_LEFT": "DOCK_LEFT",
+            "MENU_DOCK_RIGHT": "DOCK_RIGHT",
+            "MENU_MORE_TOOLS": "MORE_TOOLS",
+            "MENU_HELP": "HELP",
+        }.get(action, action)
         if action != "OPTIONS":
             self.scene[EDITOR_OPTIONS_PROPERTY] = False
+        self.scene[EDITOR_MENU_PROPERTY] = False
         if action in {"UNDO", "REDO"}:
             history = tuple(getattr(self, "history", ()))
             current = int(getattr(self, "history_index", -1))
@@ -3662,6 +3882,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         except (ImportError, RuntimeError):
             pass
         self.scene[EDITOR_OPTIONS_PROPERTY] = False
+        self.scene[EDITOR_MENU_PROPERTY] = False
         if self.transform_active:
             self._cancel_transform(context)
         elif self.scene_transform_active:
@@ -3711,6 +3932,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.dock_dragging = None
                 self.dock_hover = None
                 self.status = "Panel drag cancelled"
+                _request_redraw(self, context, force=True)
+                return {"RUNNING_MODAL"}
+            if bool(self.scene.get(EDITOR_MENU_PROPERTY)):
+                self.scene[EDITOR_MENU_PROPERTY] = False
+                self.topbar_hover = None
+                self.status = "Menu closed"
                 _request_redraw(self, context, force=True)
                 return {"RUNNING_MODAL"}
             if bool(self.scene.get(EDITOR_OPTIONS_PROPERTY)):
@@ -3772,6 +3999,17 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 _set_editor_cursor(context, "HAND")
                 _request_redraw(self, context)
                 return {"RUNNING_MODAL"}
+            menu_hit = _editor_menu_action_at(context, event)
+            if menu_hit is not None:
+                self.dock_hover = None
+                self.color_wheel_hover = None
+                self.topbar_hover = menu_hit
+                self.palette_hover = None
+                self.toolbar_hover = None
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
             dock_hit = _editor_dock_hit(self, context, event)
             self.dock_hover = dock_hit
             if dock_hit is not None:
@@ -3813,6 +4051,11 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "PRESS":
             if event.type == "LEFTMOUSE":
                 mcp.set_chat_input_focus(False)
+            menu_action = _editor_menu_action_at(context, event)
+            if menu_action is not None:
+                if event.type == "LEFTMOUSE":
+                    self._activate_topbar_action(context, menu_action)
+                return {"RUNNING_MODAL"}
             dock_hit = _editor_dock_hit(self, context, event)
             if dock_hit is not None:
                 self.dock_hover = dock_hit
@@ -3841,6 +4084,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             if topbar_action is not None:
                 if event.type == "LEFTMOUSE":
                     self._activate_topbar_action(context, topbar_action)
+                return {"RUNNING_MODAL"}
+            if bool(self.scene.get(EDITOR_MENU_PROPERTY)):
+                self.scene[EDITOR_MENU_PROPERTY] = False
+                self.topbar_hover = None
+                self.status = "Menu closed"
+                _request_redraw(self, context, force=True)
                 return {"RUNNING_MODAL"}
             if bool(self.scene.get(EDITOR_OPTIONS_PROPERTY)):
                 self.scene[EDITOR_OPTIONS_PROPERTY] = False
@@ -4128,6 +4377,8 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.scene[EDITOR_ADVANCED_PROPERTY] = False
             if EDITOR_OPTIONS_PROPERTY not in self.scene:
                 self.scene[EDITOR_OPTIONS_PROPERTY] = False
+            if EDITOR_MENU_PROPERTY not in self.scene:
+                self.scene[EDITOR_MENU_PROPERTY] = False
             if EDITOR_GRID_PROPERTY not in self.scene:
                 self.scene[EDITOR_GRID_PROPERTY] = False
             if EDITOR_DOCK_LEFT_PROPERTY not in self.scene:
@@ -4369,6 +4620,7 @@ __all__ = [
     "EDITOR_ADVANCED_PROPERTY",
     "EDITOR_OPTIONS_PROPERTY",
     "EDITOR_GRID_PROPERTY",
+    "EDITOR_MENU_PROPERTY",
     "EDITOR_MODE_ITEMS",
     "EDITOR_MODE_PROPERTY",
     "EDITOR_MODES",

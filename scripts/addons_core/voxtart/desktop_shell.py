@@ -272,6 +272,14 @@ def _draw_icon(name: str, x: float, y: float, size: float, color=_TEXT) -> None:
             _draw_line(((x - size * 0.34, y + offset), (x + size * 0.34, y + offset)), color, 1.2)
             _draw_line(((x + offset, y - size * 0.34), (x + offset, y + size * 0.34)), color, 1.2)
         return
+    if name == "menu":
+        for offset in (-size * 0.24, 0.0, size * 0.24):
+            _draw_line(
+                ((x - size * 0.34, y + offset), (x + size * 0.34, y + offset)),
+                color,
+                1.8,
+            )
+        return
     if name == "toolbox":
         _draw_round_rect(x - half, y - size * 0.2, size, size * 0.45, color, 2.0)
         _draw_line(((x - size * 0.18, y + size * 0.25), (x - size * 0.18, y + size * 0.42), (x + size * 0.18, y + size * 0.42), (x + size * 0.18, y + size * 0.25)), color, 1.4)
