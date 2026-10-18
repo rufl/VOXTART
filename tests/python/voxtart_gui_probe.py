@@ -636,6 +636,7 @@ def _finish_mouse_clicks():
                 "view_workflow": STATE.get("view_workflow", False),
                 "viewport_hud": STATE.get("viewport_hud", False),
                 "tool_options": STATE.get("tool_options", False),
+                "selection_tool_options": STATE.get("selection_tool_options", False),
                 "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
@@ -2318,6 +2319,75 @@ def _probe():
             editor.modal(bpy.context, axis_event)
         if scene.voxtart_editor_axis != "Y":
             return _fail("VOXTART tool options cylinder axis control did not update")
+        original_selection = tuple(editor.selection)
+        scene.voxtart_editor_mode = "SELECT"
+        scene.voxtart_editor_shape = "VOXEL"
+        select_layout = voxel_editor._editor_tool_options_layout(editor, region)
+        select_entries = {
+            action: bounds
+            for action, _label, bounds in select_layout["entries"]
+        }
+        if (
+            not {
+                "TOOL_SELECT_ALL",
+                "TOOL_CLEAR_SELECTION",
+                "TOOL_COPY_SELECTION",
+                "TOOL_CUT_SELECTION",
+            }.issubset(select_entries)
+            or {
+                "TOOL_RADIUS_DOWN",
+                "TOOL_RADIUS_UP",
+                "TOOL_HOLLOW",
+                "TOOL_MIRROR_X",
+            }.intersection(select_entries)
+            or select_layout["mode_item"][0] != "SELECT"
+        ):
+            return _fail("VOXTART selection context did not replace brush controls")
+
+        def _select_tool_event(action, event_type="LEFTMOUSE"):
+            bounds = select_entries[action]
+            return SimpleNamespace(
+                type=event_type,
+                value="NOTHING" if event_type == "MOUSEMOVE" else "PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+            )
+
+        def _select_tool_action(action, event_type="LEFTMOUSE"):
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                return editor.modal(
+                    bpy.context,
+                    _select_tool_event(action, event_type),
+                )
+
+        select_hover_result = _select_tool_action("TOOL_SELECT_ALL", "MOUSEMOVE")
+        if (
+            "RUNNING_MODAL" not in select_hover_result
+            or editor.tool_options_hover != "TOOL_SELECT_ALL"
+        ):
+            return _fail("VOXTART selection context did not report hover feedback")
+        _select_tool_action("TOOL_SELECT_ALL")
+        if len(editor.selection) != len(editor.asset.voxels):
+            return _fail("VOXTART selection context Select all did not select the asset")
+        _select_tool_action("TOOL_COPY_SELECTION")
+        if not editor.status.startswith("Copied "):
+            return _fail("VOXTART selection context Copy did not update the status")
+        _select_tool_action("TOOL_CLEAR_SELECTION")
+        if editor.selection:
+            return _fail("VOXTART selection context Clear did not clear the selection")
+        editor.selection = original_selection
+        voxel_editor._store_selection(editor.obj, editor.selection)
+        voxel_editor._restore_overlay(editor.obj, editor.asset)
+        STATE["selection_tool_options"] = True
+
         scene.voxtart_editor_mode = original_tool_state[0]
         scene.voxtart_editor_shape = original_tool_state[1]
         scene.voxtart_editor_radius = original_tool_state[2]

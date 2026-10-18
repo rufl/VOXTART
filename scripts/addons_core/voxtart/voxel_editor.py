@@ -634,27 +634,57 @@ def _editor_tool_options_layout(editor, region):
     panel_width_units = max(210.0, (x1 - x0) / max(scale, 0.001))
     panel_x_units = x0 / max(scale, 0.001)
     panel_y_units = y0 / max(scale, 0.001)
-    add("TOOL_RADIUS_DOWN", "−", panel_x_units + 54.0, panel_y_units + 84.0, panel_x_units + 78.0)
-    add("TOOL_RADIUS_UP", "+", panel_x_units + 116.0, panel_y_units + 84.0, panel_x_units + 140.0)
-    add(
-        "TOOL_HOLLOW",
-        "Hollow",
-        panel_x_units + 152.0,
-        panel_y_units + 84.0,
-        panel_x_units + panel_width_units - 12.0,
-    )
-    add("TOOL_MIRROR_X", "X", panel_x_units + 66.0, panel_y_units + 52.0, panel_x_units + 104.0)
-    add("TOOL_MIRROR_Y", "Y", panel_x_units + 108.0, panel_y_units + 52.0, panel_x_units + 146.0)
-    add("TOOL_MIRROR_Z", "Z", panel_x_units + 150.0, panel_y_units + 52.0, panel_x_units + 188.0)
-    if shape == "CYLINDER":
-        add("TOOL_AXIS_X", "X", panel_x_units + 66.0, panel_y_units + 20.0, panel_x_units + 100.0)
-        add("TOOL_AXIS_Y", "Y", panel_x_units + 104.0, panel_y_units + 20.0, panel_x_units + 138.0)
-        add("TOOL_AXIS_Z", "Z", panel_x_units + 142.0, panel_y_units + 20.0, panel_x_units + 176.0)
-        add("TOOL_HEIGHT_DOWN", "−", panel_x_units + 218.0, panel_y_units + 20.0, panel_x_units + 240.0)
-        add("TOOL_HEIGHT_UP", "+", panel_x_units + 246.0, panel_y_units + 20.0, panel_x_units + 268.0)
-    elif shape == "FACE" or mode == "ATTACH":
-        add("TOOL_DEPTH_DOWN", "−", panel_x_units + 76.0, panel_y_units + 20.0, panel_x_units + 100.0)
-        add("TOOL_DEPTH_UP", "+", panel_x_units + 106.0, panel_y_units + 20.0, panel_x_units + 130.0)
+    if mode == "SELECT":
+        add(
+            "TOOL_SELECT_ALL",
+            "All",
+            panel_x_units + 12.0,
+            panel_y_units + 84.0,
+            panel_x_units + 120.0,
+        )
+        add(
+            "TOOL_CLEAR_SELECTION",
+            "Clear",
+            panel_x_units + 126.0,
+            panel_y_units + 84.0,
+            panel_x_units + panel_width_units - 12.0,
+        )
+        add(
+            "TOOL_COPY_SELECTION",
+            "Copy",
+            panel_x_units + 12.0,
+            panel_y_units + 52.0,
+            panel_x_units + 98.0,
+        )
+        add(
+            "TOOL_CUT_SELECTION",
+            "Cut",
+            panel_x_units + 104.0,
+            panel_y_units + 52.0,
+            panel_x_units + panel_width_units - 12.0,
+        )
+    else:
+        add("TOOL_RADIUS_DOWN", "−", panel_x_units + 54.0, panel_y_units + 84.0, panel_x_units + 78.0)
+        add("TOOL_RADIUS_UP", "+", panel_x_units + 116.0, panel_y_units + 84.0, panel_x_units + 140.0)
+        add(
+            "TOOL_HOLLOW",
+            "Hollow",
+            panel_x_units + 152.0,
+            panel_y_units + 84.0,
+            panel_x_units + panel_width_units - 12.0,
+        )
+        add("TOOL_MIRROR_X", "X", panel_x_units + 66.0, panel_y_units + 52.0, panel_x_units + 104.0)
+        add("TOOL_MIRROR_Y", "Y", panel_x_units + 108.0, panel_y_units + 52.0, panel_x_units + 146.0)
+        add("TOOL_MIRROR_Z", "Z", panel_x_units + 150.0, panel_y_units + 52.0, panel_x_units + 188.0)
+        if shape == "CYLINDER":
+            add("TOOL_AXIS_X", "X", panel_x_units + 66.0, panel_y_units + 20.0, panel_x_units + 100.0)
+            add("TOOL_AXIS_Y", "Y", panel_x_units + 104.0, panel_y_units + 20.0, panel_x_units + 138.0)
+            add("TOOL_AXIS_Z", "Z", panel_x_units + 142.0, panel_y_units + 20.0, panel_x_units + 176.0)
+            add("TOOL_HEIGHT_DOWN", "−", panel_x_units + 218.0, panel_y_units + 20.0, panel_x_units + 240.0)
+            add("TOOL_HEIGHT_UP", "+", panel_x_units + 246.0, panel_y_units + 20.0, panel_x_units + 268.0)
+        elif shape == "FACE" or mode == "ATTACH":
+            add("TOOL_DEPTH_DOWN", "−", panel_x_units + 76.0, panel_y_units + 20.0, panel_x_units + 100.0)
+            add("TOOL_DEPTH_UP", "+", panel_x_units + 106.0, panel_y_units + 20.0, panel_x_units + 130.0)
     return {
         "panel": panel,
         "entries": tuple(entries),
@@ -2795,6 +2825,8 @@ def _draw_editor_tool_options(editor, context) -> None:
             _THEME["accent"],
         )
         active_label = f"{mode_item[1]} · {shape_item[1]}"
+        if mode == "SELECT":
+            active_label = f"{active_label} · {len(getattr(editor, 'selection', ()) or ())} selected"
         _draw_editor_text(
             active_label,
             x0 + 12.0 * scale,
@@ -2829,6 +2861,51 @@ def _draw_editor_tool_options(editor, context) -> None:
                 9.0,
                 _THEME["text_muted"],
             )
+        if mode == "SELECT":
+            for action in (
+                "TOOL_SELECT_ALL",
+                "TOOL_CLEAR_SELECTION",
+                "TOOL_COPY_SELECTION",
+                "TOOL_CUT_SELECTION",
+            ):
+                label, bounds = entries[action]
+                bx0, by0, bx1, by1 = bounds
+                hovered = action == getattr(editor, "tool_options_hover", None)
+                destructive = action == "TOOL_CUT_SELECTION"
+                fill = _THEME["danger_fill"] if destructive else _THEME["panel_raised"]
+                if hovered:
+                    fill = _THEME["panel_hover"]
+                border = (
+                    _THEME["danger"]
+                    if destructive and not hovered
+                    else mode_accent
+                    if hovered
+                    else _THEME["border_subtle"]
+                )
+                _draw_editor_panel(
+                    bx0,
+                    by0,
+                    bx1 - bx0,
+                    by1 - by0,
+                    fill,
+                    border=border,
+                    radius=6.0 * scale,
+                )
+                _draw_editor_text(
+                    label,
+                    bx0 + 8.0 * scale,
+                    by0 + 7.0 * scale,
+                    10.0,
+                    _THEME["text"],
+                )
+            _draw_editor_text(
+                "Ctrl+A all · Ctrl+C copy · Ctrl+D clear",
+                x0 + 12.0 * scale,
+                y0 + 19.0 * scale,
+                9.0,
+                _THEME["text_muted"],
+            )
+            return
         _draw_editor_text(
             "SIZE",
             x0 + 12.0 * scale,
@@ -4816,7 +4893,15 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             return
         self._cancel_stroke(context)
         scene = self.scene
-        if action == "TOOL_RADIUS_DOWN":
+        if action == "TOOL_SELECT_ALL":
+            self._select_all()
+        elif action == "TOOL_CLEAR_SELECTION":
+            self._clear_selection()
+        elif action == "TOOL_COPY_SELECTION":
+            self._copy_selection()
+        elif action == "TOOL_CUT_SELECTION":
+            self._cut_selection(context)
+        elif action == "TOOL_RADIUS_DOWN":
             scene.voxtart_editor_radius = max(1, int(scene.voxtart_editor_radius) - 1)
             self.status = f"Brush radius {scene.voxtart_editor_radius}"
         elif action == "TOOL_RADIUS_UP":

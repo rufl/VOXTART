@@ -84,9 +84,12 @@ The editor also keeps a contextual **TOOL OPTIONS** card beside the tool shelf,
 following the brush-panel pattern used by dedicated voxel editors. It names the
 active mode and brush, shows the matching shortcuts, and exposes click targets
 for brush size, hollow stamping, mirror axes, face depth, and cylinder axis or
-height. These controls use the same scene settings as the keyboard workflow, so
-the compact beginner surface stays discoverable without revealing Blender's
-native sidebar.
+height. When **Select** is active, the same card becomes a selection context:
+it reports the selected count and exposes **All**, **Clear**, **Copy**, and
+**Cut** actions alongside `Ctrl+A`, `Ctrl+D`, and `Ctrl+C`. These controls use
+the same scene settings and selection state as the keyboard workflow, so the
+compact beginner surface stays discoverable without revealing Blender's native
+sidebar.
 
 The desktop shell remains available as a secondary project surface through the
 editor's **Home** control. It uses a project-editor layout: project tab and
