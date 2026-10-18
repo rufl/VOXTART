@@ -120,6 +120,9 @@ Hovering a dock header or row explains how to move panels, activate a layer,
 or restore a history snapshot.
 Navigation and keyboard-bound shell actions show their shortcut directly in
 the button as well as in its hover tooltip.
+The shell's primary actions, compact tool shelf, and chat prompt expose the
+same hover-card pattern with a plain-language description and shortcut when
+one exists.
 
 ### Core project loop
 

@@ -464,6 +464,7 @@ def _run_gui_probe() -> None:
             or payload.get("shell_editor") is not True
             or payload.get("shell_voxelize") is not True
             or payload.get("shell_refresh") is not True
+            or payload.get("shell_hints") is not True
             or payload.get("palette_reduce") is not True
             or payload.get("blockbench_roundtrip") is not True
             or payload.get("minecraft_roundtrip") is not True

@@ -658,6 +658,7 @@ def _finish_mouse_clicks():
                 "shell_voxelize": STATE.get("shell_voxelize", False),
                 "shell_refresh": STATE.get("shell_refresh", False),
                 "shell_optimize": STATE.get("shell_optimize", False),
+                "shell_hints": STATE.get("shell_hints", False),
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
@@ -920,6 +921,65 @@ def _probe():
                 return _fail(f"Desktop shell toolbar is not compact: {shell_toolbar_widths!r}")
             if any(key == "shell:close" for key, _bounds in shell_state.targets):
                 return _fail("VOXTART shell close control is still exposed")
+            shell_hint_targets = {
+                key: bounds
+                for key, bounds in shell_state.targets
+                if key in {"build:editor", "tool:MODE:ADD", "chat:field"}
+            }
+            expected_shell_hints = {
+                "build:editor": (
+                    "Edit blocks",
+                    "",
+                    "Open the hands-on block editor.",
+                ),
+                "tool:MODE:ADD": (
+                    "Add block",
+                    "B",
+                    "Click a face to add one block.",
+                ),
+                "chat:field": (
+                    "Prompt",
+                    "Enter",
+                    "Ask the local model to create or change VOXTART content.",
+                ),
+            }
+            if set(shell_hint_targets) != set(expected_shell_hints):
+                return _fail(
+                    f"Desktop shell hint targets are incomplete: {shell_hint_targets!r}"
+                )
+            for key, expected in expected_shell_hints.items():
+                if tuple(shell_state.tooltips.get(key, ())) != expected:
+                    return _fail(
+                        f"Desktop shell tooltip contract is incomplete: {key}"
+                    )
+            shell_hint_operator = _ShellHarness()
+            for key in expected_shell_hints:
+                bounds = shell_hint_targets[key]
+                hover_event = SimpleNamespace(
+                    type="MOUSEMOVE",
+                    value="NOTHING",
+                    ctrl=False,
+                    shift=False,
+                    alt=False,
+                    mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                    mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+                )
+                hover_result = desktop_shell.VOXTART_OT_desktop_shell.modal(
+                    shell_hint_operator,
+                    bpy.context,
+                    hover_event,
+                )
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                if (
+                    hover_result != {"PASS_THROUGH"}
+                    or shell_state.hovered != key
+                    or tuple(shell_state.tooltips.get(key, ())) != expected_shell_hints[key]
+                ):
+                    return _fail(
+                        f"Desktop shell tooltip hover did not render: {key}"
+                    )
+            STATE["shell_hints"] = True
+
             area.tag_redraw()
             bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
             SHELL_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
