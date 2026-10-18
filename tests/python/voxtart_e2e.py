@@ -507,6 +507,7 @@ def _run_gui_probe() -> None:
             or payload.get("palette_selection") is not True
             or payload.get("palette_favorite") is not True
             or payload.get("color_wheel") is not True
+            or payload.get("color_wheel_hints") is not True
             or payload.get("grid_shortcut") is not True
             or payload.get("dock_drawers") is not True
             or payload.get("dock_hints") is not True

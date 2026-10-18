@@ -718,6 +718,7 @@ def _finish_mouse_clicks():
                 "palette_selection": STATE.get("palette_selection", False),
                 "palette_favorite": STATE.get("palette_favorite", False),
                 "color_wheel": STATE.get("color_wheel", False),
+                "color_wheel_hints": STATE.get("color_wheel_hints", False),
                 "grid_shortcut": STATE.get("grid_shortcut", False),
                 "dock_drawers": STATE.get("dock_drawers", False),
                 "dock_hints": STATE.get("dock_hints", False),
@@ -2956,6 +2957,54 @@ def _probe():
             return _fail("VOXTART editor did not expose its color wheel")
         before_wheel_color = tuple(editor.asset.palette[palette_index])
         wheel_target = wheel_geometry["triangle"][0]
+        hue_radius = (wheel_geometry["outer_radius"] + wheel_geometry["inner_radius"]) * 0.5
+        hue_target = (
+            wheel_geometry["center"][0],
+            wheel_geometry["center"][1] + hue_radius,
+        )
+        hue_hover_event = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=hue_target[0],
+            mouse_region_y=hue_target[1],
+        )
+        sv_hover_event = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=wheel_target[0],
+            mouse_region_y=wheel_target[1],
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            hue_hover_result = editor.modal(bpy.context, hue_hover_event)
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            hue_hint = voxel_editor._editor_color_wheel_hint(editor.color_wheel_hover)
+            sv_hover_result = editor.modal(bpy.context, sv_hover_event)
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            sv_hint = voxel_editor._editor_color_wheel_hint(editor.color_wheel_hover)
+        if (
+            "RUNNING_MODAL" not in hue_hover_result
+            or hue_hint is None
+            or hue_hint[0] != "Hue"
+            or not hue_hint[1]
+            or "RUNNING_MODAL" not in sv_hover_result
+            or sv_hint is None
+            or sv_hint[0] != "Saturation / value"
+            or not sv_hint[1]
+        ):
+            return _fail("VOXTART color wheel hover hints did not distinguish hue and saturation/value")
+        STATE["color_wheel_hints"] = True
+
         wheel_press = SimpleNamespace(
             type="LEFTMOUSE",
             value="PRESS",

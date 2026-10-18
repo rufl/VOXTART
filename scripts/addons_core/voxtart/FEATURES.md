@@ -221,6 +221,8 @@ The bundled Blender runtime retains its own `license/license.md`,
   Krita-style hue ring and HSV triangle; click or drag the wheel to edit the
   active swatch directly. Glass uses blended transparency; emissive colors use
   the Principled emission inputs.
+- Hovering the hue ring or HSV triangle explains which color property the
+  drag changes.
 - VOXTART viewport shading uses the palette material color directly with flat
   lighting, so voxel colors remain faithful to the Color Picker without studio
   light, cavity, or specular modulation. Render/export materials retain their

@@ -1322,6 +1322,20 @@ def _editor_color_wheel_hit(editor, context, event):
     return ("SV", hue, max(0.0, min(1.0, saturation)), value)
 
 
+_EDITOR_COLOR_WHEEL_HINTS = {
+    "HUE": ("Hue", "Drag the ring to change the active color hue."),
+    "SV": (
+        "Saturation / value",
+        "Drag the triangle to adjust color intensity and brightness.",
+    ),
+}
+
+
+def _editor_color_wheel_hint(hit):
+    action = hit[0] if isinstance(hit, tuple) and hit else None
+    return _EDITOR_COLOR_WHEEL_HINTS.get(action)
+
+
 def _set_editor_color_from_wheel(editor, context, hit) -> None:
     if hit is None:
         return
@@ -1881,6 +1895,71 @@ def _draw_editor_color_wheel(editor, geometry) -> None:
     )
 
 
+def _draw_editor_color_wheel_tooltip(editor, context, geometry, panel, scale) -> None:
+    region = getattr(context, "region", None)
+    hint = _editor_color_wheel_hint(getattr(editor, "color_wheel_hover", None))
+    if region is None or geometry is None or hint is None:
+        return
+    title, description = hint
+    lines = ui_style.wrap_text(
+        description,
+        11.0,
+        min(316.0 * scale, float(region.width) - 40.0 * scale),
+    )[:2]
+    if not lines:
+        lines = (description,)
+    tooltip_width = min(
+        float(region.width) - 16.0 * scale,
+        max(
+            240.0 * scale,
+            _editor_text_width(title, 13.0) + 24.0 * scale,
+            max((_editor_text_width(line, 11.0) for line in lines), default=0.0)
+            + 24.0 * scale,
+        ),
+    )
+    tooltip_height = (54.0 + max(0, len(lines) - 1) * 14.0) * scale
+    _center_x, center_y = geometry["center"]
+    tooltip_x = max(
+        8.0 * scale,
+        min(
+            panel[0] - tooltip_width - 10.0 * scale,
+            float(region.width) - tooltip_width - 8.0 * scale,
+        ),
+    )
+    tooltip_y = max(
+        8.0 * scale,
+        min(
+            center_y - tooltip_height * 0.5,
+            float(region.height) - tooltip_height - 8.0 * scale,
+        ),
+    )
+    _draw_editor_panel(
+        tooltip_x,
+        tooltip_y,
+        tooltip_width,
+        tooltip_height,
+        _THEME["panel"],
+        border=_THEME["border"],
+        radius=9.0 * scale,
+    )
+    title_y = tooltip_y + tooltip_height - 20.0 * scale
+    _draw_editor_text(
+        title,
+        tooltip_x + 12.0 * scale,
+        title_y,
+        13.0,
+        _THEME["text"],
+    )
+    for index, line in enumerate(lines):
+        _draw_editor_text(
+            line,
+            tooltip_x + 12.0 * scale,
+            tooltip_y + 11.0 * scale + (len(lines) - index - 1) * 14.0 * scale,
+            11.0,
+            _THEME["text_muted"],
+        )
+
+
 def _draw_editor_palette(editor, context) -> None:
     region = getattr(context, "region", None)
     if region is None or gpu is None or batch_for_shader is None:
@@ -1909,6 +1988,7 @@ def _draw_editor_palette(editor, context) -> None:
         wheel = _editor_color_wheel_geometry(editor, region)
         if wheel is not None:
             _draw_editor_color_wheel(editor, wheel)
+            _draw_editor_color_wheel_tooltip(editor, context, wheel, panel, scale)
         _draw_editor_text("COLORS", x0 + 12.0 * scale, y1 - 22.0 * scale, 11.0, _THEME["text_muted"])
         _draw_editor_text(
             "Alt/Right-click to pin",
