@@ -114,6 +114,8 @@ and a compact status bar at the bottom. When opened before the first edit, it
 defaults to **Build**, keeps only the starter-focused project category, and
 uses the same beginner tool labels.
 Its bottom status bar uses color-coded status and active-asset summary pills.
+Hovering a dock header or row explains how to move panels, activate a layer,
+or restore a history snapshot.
 Navigation and keyboard-bound shell actions show their shortcut directly in
 the button as well as in its hover tooltip.
 

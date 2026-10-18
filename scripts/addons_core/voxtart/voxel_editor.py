@@ -99,6 +99,17 @@ EDITOR_DOCK_RIGHT_PROPERTY = "voxtart_editor_dock_right"
 EDITOR_DOCK_PANEL_WIDTH = 252.0
 EDITOR_DOCK_PANEL_GAP = 8.0
 EDITOR_DOCK_PANELS = ("PALETTE", "LAYERS", "HISTORY")
+_EDITOR_DOCK_HINTS = {
+    "PALETTE": ("Colors", "Choose a swatch or edit its material."),
+    "LAYERS": ("Layers", "Drag this panel or click a layer to activate it."),
+    "HISTORY": ("History", "Drag this panel or click a snapshot to restore it."),
+}
+
+
+def _editor_dock_hint(name):
+    return _EDITOR_DOCK_HINTS.get(name)
+
+
 EDITOR_VIEW_HUD_WIDTH = 190.0
 EDITOR_VIEW_HUD_HEIGHT = 154.0
 EDITOR_TOOL_OPTIONS_WIDTH = 286.0
@@ -2282,6 +2293,82 @@ def _editor_dock_header_bounds(bounds, scale: float):
     return (x0, max(y0, y1 - 36.0 * scale), x1, y1)
 
 
+def _editor_dock_hover_bounds(editor, layout, hover, scale):
+    if not hover or len(hover) < 2:
+        return None
+    name, kind = hover[:2]
+    panel_info = layout["panels"].get(name)
+    if panel_info is None:
+        return None
+    bounds = panel_info["bounds"]
+    if kind == "HEADER":
+        return _editor_dock_header_bounds(bounds, scale)
+    if kind != "ROW" or len(hover) < 3:
+        return None
+    index = hover[2]
+    if not isinstance(index, int):
+        return None
+    if name == "LAYERS":
+        rows = tuple(getattr(getattr(editor, "stack", None), "layers", ()) or ())
+        if not 0 <= index < len(rows):
+            return None
+        display_index = len(rows) - 1 - index
+    elif name == "HISTORY":
+        rows = tuple(getattr(editor, "history", ()) or ())
+        visible_start = max(0, len(rows) - 8)
+        if not visible_start <= index < len(rows):
+            return None
+        display_index = len(rows) - 1 - index
+    else:
+        return None
+    row_height = 28.0 * scale
+    row_top = bounds[3] - 40.0 * scale - display_index * row_height
+    row_bottom = row_top - row_height + 4.0 * scale
+    if row_bottom < bounds[1]:
+        return None
+    return (
+        bounds[0] + 8.0 * scale,
+        row_bottom,
+        bounds[2] - 8.0 * scale,
+        row_top,
+    )
+
+
+def _editor_dock_tooltip_content(editor, hover):
+    if not hover or len(hover) < 2:
+        return None
+    name, kind = hover[:2]
+    if kind == "HEADER":
+        return _editor_dock_hint(name)
+    if kind != "ROW" or len(hover) < 3:
+        return None
+    index = hover[2]
+    if not isinstance(index, int):
+        return None
+    if name == "LAYERS":
+        layers = tuple(getattr(getattr(editor, "stack", None), "layers", ()) or ())
+        if not 0 <= index < len(layers):
+            return None
+        layer = layers[index]
+        title = str(getattr(layer, "name", f"Layer {index + 1}"))
+        return title, "Make this voxel layer active."
+    if name == "HISTORY":
+        history = tuple(getattr(editor, "history", ()) or ())
+        if not 0 <= index < len(history):
+            return None
+        snapshot = history[index]
+        title = str(
+            getattr(
+                snapshot,
+                "label",
+                "Initial state" if index == 0 else f"Edit {index}",
+            )
+            or ("Initial state" if index == 0 else f"Edit {index}")
+        )
+        return title, "Restore this committed edit."
+    return None
+
+
 def _editor_dock_hit(editor, context, event):
     region = getattr(context, "region", None)
     if region is None:
@@ -2351,6 +2438,91 @@ def _draw_editor_dock_header(name: str, bounds, editor, scale: float) -> None:
             1.2 * scale,
             _THEME["text_dim"],
         )
+
+
+def _draw_editor_dock_tooltip(editor, context) -> None:
+    region = getattr(context, "region", None)
+    if region is None or gpu is None or batch_for_shader is None:
+        return
+    scale = ui_style.ui_scale()
+    layout = _editor_dock_layout(editor, region)
+    hover = getattr(editor, "dock_hover", None)
+    content = _editor_dock_tooltip_content(editor, hover)
+    target_bounds = _editor_dock_hover_bounds(editor, layout, hover, scale)
+    if content is None or target_bounds is None:
+        return
+    title, description = content
+    lines = ui_style.wrap_text(
+        description,
+        11.0,
+        min(316.0 * scale, float(region.width) - 40.0 * scale),
+    )[:2]
+    if not lines:
+        lines = ("Choose this panel to continue.",)
+    hint_width = max(
+        (_editor_text_width(line, 11.0) for line in lines),
+        default=0.0,
+    )
+    tooltip_width = min(
+        float(region.width) - 16.0 * scale,
+        max(
+            244.0 * scale,
+            _editor_text_width(title, 13.0) + 32.0 * scale,
+            hint_width + 24.0 * scale,
+        ),
+    )
+    tooltip_height = (52.0 + max(0, len(lines) - 1) * 14.0) * scale
+    panel_info = layout["panels"].get(hover[0])
+    side = panel_info.get("side") if panel_info is not None else "RIGHT"
+    if side == "LEFT":
+        tooltip_x = min(
+            target_bounds[2] + 10.0 * scale,
+            max(8.0 * scale, float(region.width) - tooltip_width - 8.0 * scale),
+        )
+    else:
+        tooltip_x = max(
+            8.0 * scale,
+            min(
+                target_bounds[0] - tooltip_width - 10.0 * scale,
+                float(region.width) - tooltip_width - 8.0 * scale,
+            ),
+        )
+    tooltip_y = max(
+        8.0 * scale,
+        min(
+            target_bounds[1],
+            float(region.height) - tooltip_height - 8.0 * scale,
+        ),
+    )
+    try:
+        gpu.state.blend_set("ALPHA")
+        _draw_editor_panel(
+            tooltip_x,
+            tooltip_y,
+            tooltip_width,
+            tooltip_height,
+            _THEME["panel"],
+            border=_THEME["border"],
+            radius=9.0 * scale,
+        )
+        title_y = tooltip_y + tooltip_height - 20.0 * scale
+        _draw_editor_text(
+            title,
+            tooltip_x + 12.0 * scale,
+            title_y,
+            13.0,
+            _THEME["text"],
+        )
+        for index, line in enumerate(lines):
+            _draw_editor_text(
+                line,
+                tooltip_x + 12.0 * scale,
+                tooltip_y + 11.0 * scale + (len(lines) - index - 1) * 14.0 * scale,
+                11.0,
+                _THEME["text_muted"],
+            )
+    finally:
+        gpu.state.blend_set("NONE")
 
 
 def _draw_editor_dock_panels(editor, context) -> None:
@@ -3964,6 +4136,7 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_options_menu(editor, context)
     _draw_editor_dock_panels(editor, context)
     _draw_editor_palette(editor, context)
+    _draw_editor_dock_tooltip(editor, context)
     _draw_editor_view_hud(editor, context)
     _draw_editor_toolbar(editor, context)
     _draw_editor_tool_options(editor, context)

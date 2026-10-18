@@ -509,6 +509,7 @@ def _run_gui_probe() -> None:
             or payload.get("color_wheel") is not True
             or payload.get("grid_shortcut") is not True
             or payload.get("dock_drawers") is not True
+            or payload.get("dock_hints") is not True
             or payload.get("dock_snap") is not True
             or payload.get("material_shading") is not True
             or payload.get("history_presentation") is not True

@@ -720,6 +720,7 @@ def _finish_mouse_clicks():
                 "color_wheel": STATE.get("color_wheel", False),
                 "grid_shortcut": STATE.get("grid_shortcut", False),
                 "dock_drawers": STATE.get("dock_drawers", False),
+                "dock_hints": STATE.get("dock_hints", False),
                 "menu_surface": STATE.get("menu_surface", False),
                 "dock_snap": STATE.get("dock_snap", False),
                 "product_controls": STATE.get("product_controls", False),
@@ -3012,6 +3013,82 @@ def _probe():
         layer_bounds = dock_layout["panels"]["LAYERS"]["bounds"]
         header_x = (layer_bounds[0] + layer_bounds[2]) * 0.5
         header_y = layer_bounds[3] - 18.0
+        for panel, title in (
+            ("PALETTE", "Colors"),
+            ("LAYERS", "Layers"),
+            ("HISTORY", "History"),
+        ):
+            hint = voxel_editor._editor_dock_hint(panel)
+            if hint is None or hint[0] != title or not hint[1]:
+                return _fail(f"VOXTART dock hint contract is incomplete: {panel}")
+        layers = tuple(getattr(getattr(editor, "stack", None), "layers", ()) or ())
+        history = tuple(getattr(editor, "history", ()) or ())
+        if not layers or not history:
+            return _fail("VOXTART dock hints require layer and history rows")
+        scale = voxel_editor.ui_style.ui_scale()
+        row_height = 28.0 * scale
+        layer_index = len(layers) - 1
+        layer_row_top = layer_bounds[3] - 40.0 * scale
+        layer_row_bottom = layer_row_top - row_height + 4.0 * scale
+        history_bounds = dock_layout["panels"]["HISTORY"]["bounds"]
+        history_index = len(history) - 1
+        history_row_top = history_bounds[3] - 40.0 * scale
+        history_row_bottom = history_row_top - row_height + 4.0 * scale
+
+        def _dock_hover_event(x, y):
+            return SimpleNamespace(
+                type="MOUSEMOVE",
+                value="NOTHING",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=x,
+                mouse_region_y=y,
+            )
+
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            layer_header_hover = editor.modal(
+                bpy.context,
+                _dock_hover_event(header_x, header_y),
+            )
+            if (
+                "RUNNING_MODAL" not in layer_header_hover
+                or editor.dock_hover != ("LAYERS", "HEADER", None)
+            ):
+                return _fail("VOXTART Layers dock header did not report hover feedback")
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            layer_row_hover = editor.modal(
+                bpy.context,
+                _dock_hover_event(
+                    (layer_bounds[0] + layer_bounds[2]) * 0.5,
+                    (layer_row_top + layer_row_bottom) * 0.5,
+                ),
+            )
+            if (
+                "RUNNING_MODAL" not in layer_row_hover
+                or editor.dock_hover != ("LAYERS", "ROW", layer_index)
+            ):
+                return _fail("VOXTART Layers dock row did not report hover feedback")
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            history_row_hover = editor.modal(
+                bpy.context,
+                _dock_hover_event(
+                    (history_bounds[0] + history_bounds[2]) * 0.5,
+                    (history_row_top + history_row_bottom) * 0.5,
+                ),
+            )
+            if (
+                "RUNNING_MODAL" not in history_row_hover
+                or editor.dock_hover != ("HISTORY", "ROW", history_index)
+            ):
+                return _fail("VOXTART History dock row did not report hover feedback")
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+        STATE["dock_hints"] = True
         dock_press = SimpleNamespace(
             type="LEFTMOUSE",
             value="PRESS",
