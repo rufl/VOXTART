@@ -399,10 +399,12 @@ def _run_gui_probe() -> None:
         directory_path = Path(directory)
         marker = directory_path / "gui.json"
         screenshot = directory_path / "gui.png"
+        scene_screenshot = directory_path / "gui_scene.png"
         environment = os.environ.copy()
         environment["VOXTART_CONFIG"] = str(directory_path / "config")
         environment["VOXTART_GUI_MARKER"] = str(marker)
         environment["VOXTART_GUI_SCREENSHOT"] = str(screenshot)
+        environment["VOXTART_GUI_SCENE_SCREENSHOT"] = str(scene_screenshot)
         environment["VOXTART_GUI_SAVE_PATH"] = str(directory_path / "gui_saved.blend")
         environment["VOXTART_GUI_ASSET_PATH"] = str(directory_path / "gui_asset.voxel.json")
         environment["VOXTART_GUI_MESH_PATH"] = str(directory_path / "gui_export.obj")
@@ -492,6 +494,7 @@ def _run_gui_probe() -> None:
             or payload.get("viewport_hud") is not True
             or payload.get("tool_options") is not True
             or payload.get("selection_tool_options") is not True
+            or payload.get("scene_options") is not True
             or payload.get("grid_toggle") is not True
             or payload.get("product_controls") is not True
             or payload.get("details_toggle") is not True
@@ -527,13 +530,21 @@ def _run_gui_probe() -> None:
         if not window_controls_seen:
             raise RuntimeError("Visible GUI probe window lacks standard title bar controls")
         dimensions = _validate_png(screenshot)
+        scene_dimensions = _validate_png(scene_screenshot)
         artifact_root = os.environ.get("VOXTART_E2E_ARTIFACT_DIR")
         if artifact_root:
             artifact_path = Path(artifact_root)
             artifact_path.mkdir(parents=True, exist_ok=True)
             shutil.copy2(marker, artifact_path / "voxtart_gui.json")
             shutil.copy2(screenshot, artifact_path / "voxtart_gui.png")
-        print("VOXTART_GUI_PROBE " + json.dumps({**payload, "dimensions": dimensions}, sort_keys=True))
+            shutil.copy2(scene_screenshot, artifact_path / "voxtart_gui_scene.png")
+        print(
+            "VOXTART_GUI_PROBE "
+            + json.dumps(
+                {**payload, "dimensions": dimensions, "scene_dimensions": scene_dimensions},
+                sort_keys=True,
+            )
+        )
 
 
 def main() -> int:

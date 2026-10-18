@@ -56,6 +56,12 @@ MENU_SCREENSHOT = Path(
         str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_menu{SCREENSHOT.suffix}")),
     )
 )
+SCENE_SCREENSHOT = Path(
+    os.environ.get(
+        "VOXTART_GUI_SCENE_SCREENSHOT",
+        str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_scene{SCREENSHOT.suffix}")),
+    )
+)
 GUI_SAVE_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_SAVE_PATH",
@@ -637,6 +643,8 @@ def _finish_mouse_clicks():
                 "viewport_hud": STATE.get("viewport_hud", False),
                 "tool_options": STATE.get("tool_options", False),
                 "selection_tool_options": STATE.get("selection_tool_options", False),
+                "scene_options": STATE.get("scene_options", False),
+                "scene_screenshot": STATE.get("scene_options_screenshot", ""),
                 "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
                 "shell_make": STATE.get("shell_make", False),
@@ -2202,6 +2210,7 @@ def _probe():
                 mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
             )
 
+        original_workspace = scene.voxtart_editor_workspace
         original_tool_state = (
             scene.voxtart_editor_mode,
             scene.voxtart_editor_shape,
@@ -2388,6 +2397,137 @@ def _probe():
         voxel_editor._restore_overlay(editor.obj, editor.asset)
         STATE["selection_tool_options"] = True
 
+        scene.voxtart_editor_workspace = "SCENE"
+        scene_options_layout = voxel_editor._editor_tool_options_layout(editor, region)
+        scene_entries = {
+            action: bounds
+            for action, _label, bounds in scene_options_layout["entries"]
+        }
+        if (
+            scene_options_layout.get("workspace") != "SCENE"
+            or scene_options_layout["panel"][2] <= scene_options_layout["panel"][0]
+            or not {"SCENE_MOVE", "SCENE_ROTATE", "SCENE_SCALE"}.issubset(scene_entries)
+            or {"TOOL_RADIUS_DOWN", "TOOL_HOLLOW", "TOOL_MIRROR_X"}.intersection(scene_entries)
+        ):
+            return _fail("VOXTART Scene context did not expose transform actions")
+
+        def _scene_tool_event(action, event_type="LEFTMOUSE"):
+            bounds = scene_entries[action]
+            return SimpleNamespace(
+                type=event_type,
+                value="NOTHING" if event_type == "MOUSEMOVE" else "PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+            )
+
+        def _scene_tool_action(action, event_type="LEFTMOUSE"):
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                return editor.modal(
+                    bpy.context,
+                    _scene_tool_event(action, event_type),
+                )
+
+        scene_hover_result = _scene_tool_action("SCENE_MOVE", "MOUSEMOVE")
+        if (
+            "RUNNING_MODAL" not in scene_hover_result
+            or editor.tool_options_hover != "SCENE_MOVE"
+        ):
+            return _fail("VOXTART Scene context did not report hover feedback")
+        baseline_location = tuple(float(value) for value in editor.obj.location)
+        _scene_tool_action("SCENE_MOVE")
+        if not editor.scene_transform_active or editor.scene_transform_kind != "MOVE":
+            return _fail("VOXTART Scene Move action did not begin a transform")
+        arrow_event = SimpleNamespace(
+            type="RIGHT_ARROW",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=0.0,
+            mouse_region_y=0.0,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            arrow_result = editor.modal(bpy.context, arrow_event)
+        if (
+            "RUNNING_MODAL" not in arrow_result
+            or not editor.obj.location[0] > baseline_location[0]
+        ):
+            return _fail("VOXTART Scene Move did not respond to an arrow")
+        escape_event = SimpleNamespace(
+            type="ESC",
+            value="PRESS",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=0.0,
+            mouse_region_y=0.0,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor.modal(bpy.context, escape_event)
+        if (
+            editor.scene_transform_active
+            or any(
+                abs(current - original) > 1e-6
+                for current, original in zip(editor.obj.location, baseline_location)
+            )
+        ):
+            return _fail("VOXTART Scene transform did not cancel cleanly")
+        for action, expected in (
+            ("SCENE_ROTATE", "ROTATE"),
+            ("SCENE_SCALE", "SCALE"),
+        ):
+            _scene_tool_action(action)
+            if not editor.scene_transform_active or editor.scene_transform_kind != expected:
+                return _fail(f"VOXTART {expected.title()} action did not begin a transform")
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                editor.modal(bpy.context, escape_event)
+            if editor.scene_transform_active:
+                return _fail(f"VOXTART {expected.title()} action did not cancel")
+        editor.tool_options_hover = None
+        STATE["scene_options"] = True
+        editor.tool_options_hover = "SCENE_MOVE"
+        SCENE_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
+        area.tag_redraw()
+        bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=4)
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=4)
+            scene_screenshot_result = bpy.ops.screen.screenshot(
+                filepath=str(SCENE_SCREENSHOT)
+            )
+        if "FINISHED" not in scene_screenshot_result or not SCENE_SCREENSHOT.is_file():
+            return _fail(f"Could not capture Scene screenshot: {scene_screenshot_result!r}")
+        STATE["scene_options_screenshot"] = str(SCENE_SCREENSHOT)
+
+        scene.voxtart_editor_workspace = original_workspace
         scene.voxtart_editor_mode = original_tool_state[0]
         scene.voxtart_editor_shape = original_tool_state[1]
         scene.voxtart_editor_radius = original_tool_state[2]

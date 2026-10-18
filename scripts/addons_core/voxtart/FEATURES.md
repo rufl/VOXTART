@@ -91,6 +91,11 @@ the same scene settings and selection state as the keyboard workflow, so the
 compact beginner surface stays discoverable without revealing Blender's native
 sidebar.
 
+In the **PLACE** workspace, the same contextual card becomes **SCENE OPTIONS**.
+It exposes **Move**, **Rotate**, and **Scale**, shows `G · R · S`, and keeps the
+arrow-key/Enter/Esc transform contract visible without requiring Blender's native
+transform gizmos.
+
 The desktop shell remains available as a secondary project surface through the
 editor's **Home** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,

@@ -565,6 +565,7 @@ def _editor_tool_options_layout(editor, region):
     scale = ui_style.ui_scale()
     width = float(getattr(region, "width", 0.0))
     height = float(getattr(region, "height", 0.0))
+    workspace = _scene_workspace(editor.scene)
     mode = _editor_input_mode(editor)
     shape = _scene_shape(editor.scene)
     mode_item = next(
@@ -575,14 +576,19 @@ def _editor_tool_options_layout(editor, region):
         (item for item in EDITOR_SHAPE_ITEMS if item[0] == shape),
         (shape, shape.title(), "Choose a brush shape"),
     )
-    if _scene_workspace(editor.scene) != "EDIT":
+    if workspace not in {"EDIT", "SCENE"}:
         return {
             "panel": (0.0, 0.0, 0.0, 0.0),
             "entries": (),
             "mode_item": mode_item,
             "shape_item": shape_item,
+            "workspace": workspace,
         }
-    toolbar_panel, _toolbar_entries = _editor_toolbar_layout(height, editor.scene)
+    toolbar_panel, _toolbar_entries = (
+        _editor_toolbar_layout(height, editor.scene)
+        if workspace == "EDIT"
+        else ((0.0, 0.0, 0.0, 0.0), ())
+    )
     dock_layout = _editor_dock_layout(editor, region)
     left_panel_right = max(
         (
@@ -634,7 +640,29 @@ def _editor_tool_options_layout(editor, region):
     panel_width_units = max(210.0, (x1 - x0) / max(scale, 0.001))
     panel_x_units = x0 / max(scale, 0.001)
     panel_y_units = y0 / max(scale, 0.001)
-    if mode == "SELECT":
+    if workspace == "SCENE":
+        add(
+            "SCENE_MOVE",
+            "Move",
+            panel_x_units + 12.0,
+            panel_y_units + 84.0,
+            panel_x_units + panel_width_units - 12.0,
+        )
+        add(
+            "SCENE_ROTATE",
+            "Rotate",
+            panel_x_units + 12.0,
+            panel_y_units + 52.0,
+            panel_x_units + panel_width_units - 12.0,
+        )
+        add(
+            "SCENE_SCALE",
+            "Scale",
+            panel_x_units + 12.0,
+            panel_y_units + 20.0,
+            panel_x_units + panel_width_units - 12.0,
+        )
+    elif mode == "SELECT":
         add(
             "TOOL_SELECT_ALL",
             "All",
@@ -690,6 +718,7 @@ def _editor_tool_options_layout(editor, region):
         "entries": tuple(entries),
         "mode_item": mode_item,
         "shape_item": shape_item,
+        "workspace": workspace,
     }
 
 
@@ -2745,7 +2774,8 @@ def _draw_editor_toolbar(editor, context) -> None:
         gpu.state.blend_set("NONE")
 
 def _draw_editor_tool_options(editor, context) -> None:
-    if gpu is None or batch_for_shader is None or _scene_workspace(context.scene) != "EDIT":
+    workspace = _scene_workspace(context.scene)
+    if gpu is None or batch_for_shader is None or workspace not in {"EDIT", "SCENE"}:
         return
     region = getattr(context, "region", None)
     if region is None:
@@ -2771,6 +2801,9 @@ def _draw_editor_tool_options(editor, context) -> None:
         mode,
         (_THEME["panel_raised"], _THEME["accent"]),
     )
+    panel_title = "SCENE OPTIONS" if workspace == "SCENE" else "TOOL OPTIONS"
+    if workspace == "SCENE":
+        mode_accent = _THEME["warning"]
     entries = {
         action: (label, bounds)
         for action, label, bounds in layout["entries"]
@@ -2818,15 +2851,34 @@ def _draw_editor_tool_options(editor, context) -> None:
             radius=10.0 * scale,
         )
         _draw_editor_text(
-            "TOOL OPTIONS",
+            panel_title,
             x0 + 12.0 * scale,
             y1 - 19.0 * scale,
             10.0,
             _THEME["accent"],
         )
-        active_label = f"{mode_item[1]} · {shape_item[1]}"
-        if mode == "SELECT":
-            active_label = f"{active_label} · {len(getattr(editor, 'selection', ()) or ())} selected"
+        if workspace == "SCENE":
+            transform_kind = str(getattr(editor, "scene_transform_kind", "MOVE")).title()
+            active_label = (
+                f"Scene · {transform_kind}"
+                if getattr(editor, "scene_transform_active", False)
+                else "Scene transform"
+            )
+            shortcut_label = "G · R · S"
+            description = (
+                "Move, rotate, or scale the asset with arrows; "
+                "Enter commits; Esc cancels."
+            )
+        else:
+            active_label = f"{mode_item[1]} · {shape_item[1]}"
+            if mode == "SELECT":
+                active_label = f"{active_label} · {len(getattr(editor, 'selection', ()) or ())} selected"
+            shortcut_label = f"{shortcuts.get(mode, '')} · {shape_shortcuts.get(shape, '')}"
+            description = (
+                mode_item[2]
+                if shape == "VOXEL"
+                else shape_item[2]
+            )
         _draw_editor_text(
             active_label,
             x0 + 12.0 * scale,
@@ -2834,7 +2886,6 @@ def _draw_editor_tool_options(editor, context) -> None:
             13.0,
             _THEME["text"],
         )
-        shortcut_label = f"{shortcuts.get(mode, '')} · {shape_shortcuts.get(shape, '')}"
         shortcut_width = _editor_text_width(shortcut_label, 10.0)
         _draw_editor_text(
             shortcut_label,
@@ -2842,11 +2893,6 @@ def _draw_editor_tool_options(editor, context) -> None:
             y1 - 39.0 * scale,
             10.0,
             mode_accent,
-        )
-        description = (
-            mode_item[2]
-            if shape == "VOXEL"
-            else shape_item[2]
         )
         description_lines = ui_style.wrap_text(
             description,
@@ -2861,6 +2907,44 @@ def _draw_editor_tool_options(editor, context) -> None:
                 9.0,
                 _THEME["text_muted"],
             )
+        if workspace == "SCENE":
+            transform_kind = str(getattr(editor, "scene_transform_kind", "MOVE")).upper()
+            for action in ("SCENE_MOVE", "SCENE_ROTATE", "SCENE_SCALE"):
+                label, bounds = entries[action]
+                bx0, by0, bx1, by1 = bounds
+                active = (
+                    getattr(editor, "scene_transform_active", False)
+                    and transform_kind == action.rsplit("_", 1)[-1]
+                )
+                hovered = action == getattr(editor, "tool_options_hover", None)
+                fill = _THEME["accent_fill"] if active else _THEME["panel_raised"]
+                if hovered:
+                    fill = _THEME["panel_hover"]
+                border = mode_accent if active or hovered else _THEME["border_subtle"]
+                _draw_editor_panel(
+                    bx0,
+                    by0,
+                    bx1 - bx0,
+                    by1 - by0,
+                    fill,
+                    border=border,
+                    radius=6.0 * scale,
+                )
+                _draw_editor_text(
+                    label,
+                    bx0 + 8.0 * scale,
+                    by0 + 7.0 * scale,
+                    10.0,
+                    _THEME["text"],
+                )
+            _draw_editor_text(
+                "Arrows adjust · Enter commit · Esc cancel",
+                x0 + 12.0 * scale,
+                y0 + 19.0 * scale,
+                9.0,
+                _THEME["text_muted"],
+            )
+            return
         if mode == "SELECT":
             for action in (
                 "TOOL_SELECT_ALL",
@@ -4889,11 +4973,13 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self.view_hud_hover = action
         _request_redraw(self, context, force=True)
     def _activate_tool_options_action(self, context, action: str) -> None:
-        if not action.startswith("TOOL_"):
+        if not (action.startswith("TOOL_") or action.startswith("SCENE_")):
             return
         self._cancel_stroke(context)
         scene = self.scene
-        if action == "TOOL_SELECT_ALL":
+        if action in {"SCENE_MOVE", "SCENE_ROTATE", "SCENE_SCALE"}:
+            self._begin_scene_transform(action.rsplit("_", 1)[-1])
+        elif action == "TOOL_SELECT_ALL":
             self._select_all()
         elif action == "TOOL_CLEAR_SELECTION":
             self._clear_selection()
