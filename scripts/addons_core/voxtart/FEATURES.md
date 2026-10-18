@@ -98,7 +98,8 @@ transform gizmos.
 
 While a transform is active, **Apply** and **Cancel** buttons appear in the same
 card, so the mouse path can commit or revert the change without relying on the
-keyboard.
+keyboard. Hovering any Scene control opens a short action hint with its shortcut,
+including `Enter` for **Apply** and `Esc` for **Cancel**.
 
 The desktop shell remains available as a secondary project surface through the
 editor's **Home** control. It uses a project-editor layout: project tab and

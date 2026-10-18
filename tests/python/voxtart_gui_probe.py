@@ -645,6 +645,7 @@ def _finish_mouse_clicks():
                 "selection_tool_options": STATE.get("selection_tool_options", False),
                 "scene_options": STATE.get("scene_options", False),
                 "scene_completion_controls": STATE.get("scene_completion_controls", False),
+                "scene_option_hints": STATE.get("scene_option_hints", False),
                 "scene_screenshot": STATE.get("scene_options_screenshot", ""),
                 "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
@@ -2412,6 +2413,22 @@ def _probe():
             or {"TOOL_RADIUS_DOWN", "TOOL_HOLLOW", "TOOL_MIRROR_X"}.intersection(scene_entries)
         ):
             return _fail("VOXTART Scene context did not expose transform actions")
+        for action, title, shortcut in (
+            ("SCENE_MOVE", "Move", "G"),
+            ("SCENE_ROTATE", "Rotate", "R"),
+            ("SCENE_SCALE", "Scale", "S"),
+            ("SCENE_APPLY", "Apply", "Enter"),
+            ("SCENE_CANCEL", "Cancel", "Esc"),
+        ):
+            hint = voxel_editor._editor_scene_tool_option_hint(action)
+            if (
+                hint is None
+                or hint[0] != title
+                or not hint[1]
+                or hint[2] != shortcut
+            ):
+                return _fail(f"VOXTART Scene hint contract is incomplete: {action}")
+        STATE["scene_option_hints"] = True
 
         def _scene_tool_event(action, event_type="LEFTMOUSE"):
             current_layout = voxel_editor._editor_tool_options_layout(editor, region)

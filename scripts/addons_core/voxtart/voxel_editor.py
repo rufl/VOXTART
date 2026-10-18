@@ -2404,6 +2404,18 @@ _EDITOR_TOOL_HINTS = {
 def _editor_toolbar_hint(item) -> str:
     return _EDITOR_TOOL_HINTS.get(item[:2], "Choose this tool for your next edit.")
 
+_EDITOR_SCENE_TOOL_HINTS = {
+    "SCENE_MOVE": ("Move", "Move the selected asset with the arrow keys.", "G"),
+    "SCENE_ROTATE": ("Rotate", "Rotate the selected asset in 90° steps.", "R"),
+    "SCENE_SCALE": ("Scale", "Scale the selected asset in 10% steps.", "S"),
+    "SCENE_APPLY": ("Apply", "Keep the current scene transform.", "Enter"),
+    "SCENE_CANCEL": ("Cancel", "Restore the transform snapshot.", "Esc"),
+}
+
+
+def _editor_scene_tool_option_hint(action):
+    return _EDITOR_SCENE_TOOL_HINTS.get(action)
+
 
 _EDITOR_ICON_NAMES = {
     ("MODE", "ADD"): "place",
@@ -2794,10 +2806,94 @@ def _draw_editor_toolbar(editor, context) -> None:
                         tooltip_x + 12.0 * scale,
                         tooltip_y + 27.0 * scale + (len(hint_lines) - index - 1) * 14.0 * scale,
                         11.0,
-                    _THEME["text_muted"],
+                        _THEME["text_muted"],
                     )
     finally:
         gpu.state.blend_set("NONE")
+
+def _draw_editor_scene_tool_option_hint(editor, context, entries, scale) -> None:
+    action = getattr(editor, "tool_options_hover", None)
+    hint = _editor_scene_tool_option_hint(action)
+    region = getattr(context, "region", None)
+    entry = entries.get(action)
+    if hint is None or region is None or entry is None:
+        return
+    _label, bounds = entry
+    title, description, shortcut = hint
+    lines = ui_style.wrap_text(
+        description,
+        11.0,
+        min(316.0 * scale, float(region.width) - 40.0 * scale),
+    )[:2]
+    if not lines:
+        lines = ("Choose this control to continue.",)
+    shortcut_width = _editor_text_width(shortcut, 10.0) + 16.0 * scale
+    hint_width = max(
+        (_editor_text_width(line, 11.0) for line in lines),
+        default=0.0,
+    )
+    tooltip_width = min(
+        float(region.width) - 16.0 * scale,
+        max(
+            244.0 * scale,
+            _editor_text_width(title, 13.0) + shortcut_width + 38.0 * scale,
+            hint_width + 24.0 * scale,
+        ),
+    )
+    tooltip_height = (64.0 + max(0, len(lines) - 1) * 14.0) * scale
+    tooltip_x = min(
+        bounds[2] + 10.0 * scale,
+        max(8.0 * scale, float(region.width) - tooltip_width - 8.0 * scale),
+    )
+    tooltip_y = max(
+        8.0 * scale,
+        min(
+            bounds[1],
+            float(region.height) - tooltip_height - 8.0 * scale,
+        ),
+    )
+    _draw_editor_panel(
+        tooltip_x,
+        tooltip_y,
+        tooltip_width,
+        tooltip_height,
+        _THEME["panel"],
+        border=_THEME["border"],
+        radius=9.0 * scale,
+    )
+    title_y = tooltip_y + tooltip_height - 20.0 * scale
+    _draw_editor_text(
+        title,
+        tooltip_x + 12.0 * scale,
+        title_y,
+        13.0,
+        _THEME["text"],
+    )
+    pill_x = tooltip_x + tooltip_width - shortcut_width - 10.0 * scale
+    _draw_editor_round_rect(
+        pill_x,
+        title_y - 3.0 * scale,
+        shortcut_width,
+        18.0 * scale,
+        _THEME["accent_fill"],
+        radius=8.0 * scale,
+    )
+    _draw_editor_text(
+        shortcut,
+        pill_x + 8.0 * scale,
+        title_y + 1.0 * scale,
+        10.0,
+        _THEME["text"],
+    )
+    for index, line in enumerate(lines):
+        _draw_editor_text(
+            line,
+            tooltip_x + 12.0 * scale,
+            tooltip_y + 27.0 * scale + (len(lines) - index - 1) * 14.0 * scale,
+            11.0,
+            _THEME["text_muted"],
+        )
+
 
 def _draw_editor_tool_options(editor, context) -> None:
     workspace = _scene_workspace(context.scene)
@@ -3005,6 +3101,7 @@ def _draw_editor_tool_options(editor, context) -> None:
                     9.0,
                     _THEME["text_muted"],
                 )
+            _draw_editor_scene_tool_option_hint(editor, context, entries, scale)
             return
         if mode == "SELECT":
             for action in (
