@@ -493,6 +493,7 @@ def _run_gui_probe() -> None:
             or payload.get("menu_surface") is not True
             or payload.get("viewport_hud") is not True
             or payload.get("tool_options") is not True
+            or payload.get("tool_options_hints") is not True
             or payload.get("selection_tool_options") is not True
             or payload.get("scene_options") is not True
             or payload.get("scene_completion_controls") is not True

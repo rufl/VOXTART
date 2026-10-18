@@ -86,10 +86,14 @@ active mode and brush, shows the matching shortcuts, and exposes click targets
 for brush size, hollow stamping, mirror axes, face depth, and cylinder axis or
 height. When **Select** is active, the same card becomes a selection context:
 it reports the selected count and exposes **All**, **Clear**, **Copy**, and
-**Cut** actions alongside `Ctrl+A`, `Ctrl+D`, and `Ctrl+C`. These controls use
+**Cut** actions alongside `Ctrl+A`, `Ctrl+D`, `Ctrl+C`, and `Ctrl+X`. These
+controls use
 the same scene settings and selection state as the keyboard workflow, so the
 compact beginner surface stays discoverable without revealing Blender's native
 sidebar.
+Hovering a control in the **TOOL OPTIONS** card opens a short action hint with
+its description and keyboard shortcut when one exists; controls without a
+dedicated shortcut still explain the mouse action.
 
 In the **PLACE** workspace, the same contextual card becomes **SCENE OPTIONS**.
 It exposes **Move**, **Rotate**, and **Scale**, shows `G · R · S`, and keeps the

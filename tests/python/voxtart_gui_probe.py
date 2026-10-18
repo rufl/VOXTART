@@ -642,6 +642,7 @@ def _finish_mouse_clicks():
                 "view_workflow": STATE.get("view_workflow", False),
                 "viewport_hud": STATE.get("viewport_hud", False),
                 "tool_options": STATE.get("tool_options", False),
+                "tool_options_hints": STATE.get("tool_options_hints", False),
                 "selection_tool_options": STATE.get("selection_tool_options", False),
                 "scene_options": STATE.get("scene_options", False),
                 "scene_completion_controls": STATE.get("scene_completion_controls", False),
@@ -2200,6 +2201,23 @@ def _probe():
         ):
             return _fail("VOXTART tool options card did not expose a compact edit context")
 
+        for action, title, shortcut in (
+            ("TOOL_RADIUS_DOWN", "Smaller brush", "["),
+            ("TOOL_RADIUS_UP", "Larger brush", "]"),
+            ("TOOL_HOLLOW", "Hollow", "H"),
+            ("TOOL_MIRROR_X", "Mirror X", "1"),
+            ("TOOL_MIRROR_Y", "Mirror Y", "2"),
+            ("TOOL_MIRROR_Z", "Mirror Z", "3"),
+        ):
+            hint = voxel_editor._editor_tool_option_hint(action)
+            if (
+                hint is None
+                or hint[0] != title
+                or not hint[1]
+                or hint[2] != shortcut
+            ):
+                return _fail(f"VOXTART edit hint contract is incomplete: {action}")
+
         def _tool_event(action, event_type="LEFTMOUSE"):
             bounds = tool_entries[action]
             return SimpleNamespace(
@@ -2240,6 +2258,13 @@ def _probe():
             or editor.tool_options_hover != "TOOL_RADIUS_UP"
         ):
             return _fail("VOXTART tool options card did not report hover feedback")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
         radius_before = int(scene.voxtart_editor_radius)
         with bpy.context.temp_override(
             window=window,
@@ -2280,8 +2305,15 @@ def _probe():
             action: bounds
             for action, _label, bounds in face_layout["entries"]
         }
-        if "TOOL_DEPTH_UP" not in face_entries:
+        if not {"TOOL_DEPTH_DOWN", "TOOL_DEPTH_UP"}.issubset(face_entries):
             return _fail("VOXTART tool options did not expose face depth")
+        for action, title in (
+            ("TOOL_DEPTH_DOWN", "Shallower face"),
+            ("TOOL_DEPTH_UP", "Deeper face"),
+        ):
+            hint = voxel_editor._editor_tool_option_hint(action)
+            if hint is None or hint[0] != title or not hint[1] or hint[2] != "":
+                return _fail(f"VOXTART face hint contract is incomplete: {action}")
         depth_before = int(scene.voxtart_editor_depth)
         depth_bounds = face_entries["TOOL_DEPTH_UP"]
         depth_event = SimpleNamespace(
@@ -2302,6 +2334,13 @@ def _probe():
             editor.modal(bpy.context, depth_event)
         if int(scene.voxtart_editor_depth) != depth_before + 1:
             return _fail("VOXTART tool options face depth control did not update")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
 
         scene.voxtart_editor_shape = "CYLINDER"
         cylinder_layout = voxel_editor._editor_tool_options_layout(editor, region)
@@ -2309,8 +2348,24 @@ def _probe():
             action: bounds
             for action, _label, bounds in cylinder_layout["entries"]
         }
-        if not {"TOOL_AXIS_Y", "TOOL_HEIGHT_UP"}.issubset(cylinder_entries):
+        if not {
+            "TOOL_AXIS_X",
+            "TOOL_AXIS_Y",
+            "TOOL_AXIS_Z",
+            "TOOL_HEIGHT_DOWN",
+            "TOOL_HEIGHT_UP",
+        }.issubset(cylinder_entries):
             return _fail("VOXTART tool options did not expose cylinder controls")
+        for action, title in (
+            ("TOOL_AXIS_X", "Axis X"),
+            ("TOOL_AXIS_Y", "Axis Y"),
+            ("TOOL_AXIS_Z", "Axis Z"),
+            ("TOOL_HEIGHT_DOWN", "Shorter cylinder"),
+            ("TOOL_HEIGHT_UP", "Taller cylinder"),
+        ):
+            hint = voxel_editor._editor_tool_option_hint(action)
+            if hint is None or hint[0] != title or not hint[1] or hint[2] != "":
+                return _fail(f"VOXTART cylinder hint contract is incomplete: {action}")
         axis_bounds = cylinder_entries["TOOL_AXIS_Y"]
         axis_event = SimpleNamespace(
             type="LEFTMOUSE",
@@ -2330,6 +2385,13 @@ def _probe():
             editor.modal(bpy.context, axis_event)
         if scene.voxtart_editor_axis != "Y":
             return _fail("VOXTART tool options cylinder axis control did not update")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
         original_selection = tuple(editor.selection)
         scene.voxtart_editor_mode = "SELECT"
         scene.voxtart_editor_shape = "VOXEL"
@@ -2354,6 +2416,21 @@ def _probe():
             or select_layout["mode_item"][0] != "SELECT"
         ):
             return _fail("VOXTART selection context did not replace brush controls")
+
+        for action, title, shortcut in (
+            ("TOOL_SELECT_ALL", "All", "Ctrl+A"),
+            ("TOOL_CLEAR_SELECTION", "Clear", "Ctrl+D"),
+            ("TOOL_COPY_SELECTION", "Copy", "Ctrl+C"),
+            ("TOOL_CUT_SELECTION", "Cut", "Ctrl+X"),
+        ):
+            hint = voxel_editor._editor_tool_option_hint(action)
+            if (
+                hint is None
+                or hint[0] != title
+                or not hint[1]
+                or hint[2] != shortcut
+            ):
+                return _fail(f"VOXTART Select hint contract is incomplete: {action}")
 
         def _select_tool_event(action, event_type="LEFTMOUSE"):
             bounds = select_entries[action]
@@ -2385,6 +2462,13 @@ def _probe():
             or editor.tool_options_hover != "TOOL_SELECT_ALL"
         ):
             return _fail("VOXTART selection context did not report hover feedback")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
         _select_tool_action("TOOL_SELECT_ALL")
         if len(editor.selection) != len(editor.asset.voxels):
             return _fail("VOXTART selection context Select all did not select the asset")
@@ -2398,6 +2482,7 @@ def _probe():
         voxel_editor._store_selection(editor.obj, editor.selection)
         voxel_editor._restore_overlay(editor.obj, editor.asset)
         STATE["selection_tool_options"] = True
+        STATE["tool_options_hints"] = True
 
         scene.voxtart_editor_workspace = "SCENE"
         scene_options_layout = voxel_editor._editor_tool_options_layout(editor, region)
@@ -2420,7 +2505,7 @@ def _probe():
             ("SCENE_APPLY", "Apply", "Enter"),
             ("SCENE_CANCEL", "Cancel", "Esc"),
         ):
-            hint = voxel_editor._editor_scene_tool_option_hint(action)
+            hint = voxel_editor._editor_tool_option_hint(action)
             if (
                 hint is None
                 or hint[0] != title

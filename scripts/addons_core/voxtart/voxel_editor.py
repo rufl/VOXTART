@@ -2404,17 +2404,34 @@ _EDITOR_TOOL_HINTS = {
 def _editor_toolbar_hint(item) -> str:
     return _EDITOR_TOOL_HINTS.get(item[:2], "Choose this tool for your next edit.")
 
-_EDITOR_SCENE_TOOL_HINTS = {
+_EDITOR_TOOL_OPTIONS_HINTS = {
     "SCENE_MOVE": ("Move", "Move the selected asset with the arrow keys.", "G"),
     "SCENE_ROTATE": ("Rotate", "Rotate the selected asset in 90° steps.", "R"),
     "SCENE_SCALE": ("Scale", "Scale the selected asset in 10% steps.", "S"),
     "SCENE_APPLY": ("Apply", "Keep the current scene transform.", "Enter"),
     "SCENE_CANCEL": ("Cancel", "Restore the transform snapshot.", "Esc"),
+    "TOOL_SELECT_ALL": ("All", "Select every block in the active asset.", "Ctrl+A"),
+    "TOOL_CLEAR_SELECTION": ("Clear", "Remove the current block selection.", "Ctrl+D"),
+    "TOOL_COPY_SELECTION": ("Copy", "Copy selected blocks to the clipboard.", "Ctrl+C"),
+    "TOOL_CUT_SELECTION": ("Cut", "Remove selected blocks and copy them.", "Ctrl+X"),
+    "TOOL_RADIUS_DOWN": ("Smaller brush", "Reduce the brush radius by one cell.", "["),
+    "TOOL_RADIUS_UP": ("Larger brush", "Increase the brush radius by one cell.", "]"),
+    "TOOL_HOLLOW": ("Hollow", "Toggle hollow stamping for solid shapes.", "H"),
+    "TOOL_MIRROR_X": ("Mirror X", "Mirror the next brush stamp across X.", "1"),
+    "TOOL_MIRROR_Y": ("Mirror Y", "Mirror the next brush stamp across Y.", "2"),
+    "TOOL_MIRROR_Z": ("Mirror Z", "Mirror the next brush stamp across Z.", "3"),
+    "TOOL_AXIS_X": ("Axis X", "Use X as the cylinder axis.", ""),
+    "TOOL_AXIS_Y": ("Axis Y", "Use Y as the cylinder axis.", ""),
+    "TOOL_AXIS_Z": ("Axis Z", "Use Z as the cylinder axis.", ""),
+    "TOOL_HEIGHT_DOWN": ("Shorter cylinder", "Reduce cylinder height by one cell.", ""),
+    "TOOL_HEIGHT_UP": ("Taller cylinder", "Increase cylinder height by one cell.", ""),
+    "TOOL_DEPTH_DOWN": ("Shallower face", "Reduce face brush depth by one cell.", ""),
+    "TOOL_DEPTH_UP": ("Deeper face", "Increase face brush depth by one cell.", ""),
 }
 
 
-def _editor_scene_tool_option_hint(action):
-    return _EDITOR_SCENE_TOOL_HINTS.get(action)
+def _editor_tool_option_hint(action):
+    return _EDITOR_TOOL_OPTIONS_HINTS.get(action)
 
 
 _EDITOR_ICON_NAMES = {
@@ -2811,9 +2828,9 @@ def _draw_editor_toolbar(editor, context) -> None:
     finally:
         gpu.state.blend_set("NONE")
 
-def _draw_editor_scene_tool_option_hint(editor, context, entries, scale) -> None:
+def _draw_editor_tool_option_hint(editor, context, entries, scale) -> None:
     action = getattr(editor, "tool_options_hover", None)
-    hint = _editor_scene_tool_option_hint(action)
+    hint = _editor_tool_option_hint(action)
     region = getattr(context, "region", None)
     entry = entries.get(action)
     if hint is None or region is None or entry is None:
@@ -2827,7 +2844,11 @@ def _draw_editor_scene_tool_option_hint(editor, context, entries, scale) -> None
     )[:2]
     if not lines:
         lines = ("Choose this control to continue.",)
-    shortcut_width = _editor_text_width(shortcut, 10.0) + 16.0 * scale
+    shortcut_width = (
+        _editor_text_width(shortcut, 10.0) + 16.0 * scale
+        if shortcut
+        else 0.0
+    )
     hint_width = max(
         (_editor_text_width(line, 11.0) for line in lines),
         default=0.0,
@@ -2869,22 +2890,23 @@ def _draw_editor_scene_tool_option_hint(editor, context, entries, scale) -> None
         13.0,
         _THEME["text"],
     )
-    pill_x = tooltip_x + tooltip_width - shortcut_width - 10.0 * scale
-    _draw_editor_round_rect(
-        pill_x,
-        title_y - 3.0 * scale,
-        shortcut_width,
-        18.0 * scale,
-        _THEME["accent_fill"],
-        radius=8.0 * scale,
-    )
-    _draw_editor_text(
-        shortcut,
-        pill_x + 8.0 * scale,
-        title_y + 1.0 * scale,
-        10.0,
-        _THEME["text"],
-    )
+    if shortcut:
+        pill_x = tooltip_x + tooltip_width - shortcut_width - 10.0 * scale
+        _draw_editor_round_rect(
+            pill_x,
+            title_y - 3.0 * scale,
+            shortcut_width,
+            18.0 * scale,
+            _THEME["accent_fill"],
+            radius=8.0 * scale,
+        )
+        _draw_editor_text(
+            shortcut,
+            pill_x + 8.0 * scale,
+            title_y + 1.0 * scale,
+            10.0,
+            _THEME["text"],
+        )
     for index, line in enumerate(lines):
         _draw_editor_text(
             line,
@@ -3101,7 +3123,7 @@ def _draw_editor_tool_options(editor, context) -> None:
                     9.0,
                     _THEME["text_muted"],
                 )
-            _draw_editor_scene_tool_option_hint(editor, context, entries, scale)
+            _draw_editor_tool_option_hint(editor, context, entries, scale)
             return
         if mode == "SELECT":
             for action in (
@@ -3147,6 +3169,7 @@ def _draw_editor_tool_options(editor, context) -> None:
                 9.0,
                 _THEME["text_muted"],
             )
+            _draw_editor_tool_option_hint(editor, context, entries, scale)
             return
         _draw_editor_text(
             "SIZE",
@@ -3289,6 +3312,7 @@ def _draw_editor_tool_options(editor, context) -> None:
                 9.0,
                 _THEME["text_muted"],
             )
+        _draw_editor_tool_option_hint(editor, context, entries, scale)
     finally:
         gpu.state.blend_set("NONE")
 
