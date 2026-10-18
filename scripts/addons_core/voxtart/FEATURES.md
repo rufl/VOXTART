@@ -51,6 +51,8 @@ stay comfortable on high-DPI displays while narrow regions scale down their
 layout to remain inside the viewport.
 The top bar identifies the active **MAKE** or **PLACE** workspace with a
 color-coded pill and the `Tab` shortcut.
+Hovering a top-bar or vertical-toolbar control opens a compact action hint;
+keyboard shortcuts stay visible when available.
 The visual theme uses restrained near-black chrome, cool slate panels, blue
 focus states, and green, amber, or red only for semantic feedback.
 

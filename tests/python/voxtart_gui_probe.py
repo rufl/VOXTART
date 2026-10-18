@@ -719,6 +719,7 @@ def _finish_mouse_clicks():
                 "palette_favorite": STATE.get("palette_favorite", False),
                 "color_wheel": STATE.get("color_wheel", False),
                 "color_wheel_hints": STATE.get("color_wheel_hints", False),
+                "topbar_toolbar_hints": STATE.get("topbar_toolbar_hints", False),
                 "grid_shortcut": STATE.get("grid_shortcut", False),
                 "dock_drawers": STATE.get("dock_drawers", False),
                 "dock_hints": STATE.get("dock_hints", False),
@@ -2105,6 +2106,88 @@ def _probe():
             return _fail("VOXTART editor did not default to an open right panel drawer")
         if scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not False:
             return _fail("VOXTART editor did not default to a hidden grid")
+        topbar_bounds = dict(voxel_editor._editor_topbar_action_bounds(region))
+        if "UNDO" not in topbar_bounds or "DOCK_LEFT" not in topbar_bounds:
+            return _fail("VOXTART editor did not expose topbar hint targets")
+
+        def _topbar_hover_event(action):
+            bounds = topbar_bounds[action]
+            return SimpleNamespace(
+                type="MOUSEMOVE",
+                value="NOTHING",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(bounds[0] + bounds[2]) * 0.5,
+                mouse_region_y=(bounds[1] + bounds[3]) * 0.5,
+            )
+
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            undo_hover_result = editor.modal(
+                bpy.context,
+                _topbar_hover_event("UNDO"),
+            )
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            dock_hover_result = editor.modal(
+                bpy.context,
+                _topbar_hover_event("DOCK_LEFT"),
+            )
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+        if (
+            "RUNNING_MODAL" not in undo_hover_result
+            or "RUNNING_MODAL" not in dock_hover_result
+            or editor.topbar_hover != "DOCK_LEFT"
+            or voxel_editor._editor_topbar_hint("UNDO")
+            != "Undo your last change. You can also press Ctrl+Z."
+            or voxel_editor._editor_topbar_label("DOCK_LEFT") != "Left panel"
+        ):
+            return _fail("VOXTART topbar hover hints did not expose friendly titles")
+
+        toolbar_target = next(
+            (
+                (item, bounds)
+                for item, bounds in voxel_editor._editor_toolbar_layout(
+                    region.height,
+                    scene,
+                )[1]
+                if item[0] == "MODE" and item[1] == "ADD"
+            ),
+            None,
+        )
+        if toolbar_target is None:
+            return _fail("VOXTART editor did not expose the Add toolbar hint target")
+        toolbar_item, toolbar_bounds = toolbar_target
+        toolbar_hover_event = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(toolbar_bounds[0] + toolbar_bounds[2]) * 0.5,
+            mouse_region_y=(toolbar_bounds[1] + toolbar_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            toolbar_hover_result = editor.modal(bpy.context, toolbar_hover_event)
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+        if (
+            "RUNNING_MODAL" not in toolbar_hover_result
+            or editor.toolbar_hover != toolbar_item
+            or voxel_editor._editor_toolbar_hint(toolbar_item)
+            != "Click a face to add a block."
+        ):
+            return _fail("VOXTART toolbar hover hint did not describe the Add tool")
+        STATE["topbar_toolbar_hints"] = True
+
         with bpy.context.temp_override(
             window=window,
             screen=screen,

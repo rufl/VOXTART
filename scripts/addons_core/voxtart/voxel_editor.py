@@ -1744,16 +1744,7 @@ def _draw_editor_topbar_tooltip(editor, context) -> None:
     if bounds is None:
         return
     help_visible = bool(context.scene.get(EDITOR_HELP_PROPERTY))
-    labels = {
-        "UNDO": "Undo",
-        "REDO": "Redo",
-        "PROJECT": "Home",
-        "SAVE": "Save",
-        "HELP": "Close help" if help_visible else "Help",
-        "OPTIONS": "More",
-        "MENU": "Menu",
-    }
-    title = labels.get(action, action.title())
+    title = _editor_topbar_label(action, help_visible=help_visible)
     history = tuple(getattr(editor, "history", ()))
     history_index = int(getattr(editor, "history_index", -1))
     if action == "UNDO" and history_index <= 0:
@@ -1761,7 +1752,7 @@ def _draw_editor_topbar_tooltip(editor, context) -> None:
     elif action == "REDO" and not (0 <= history_index < len(history) - 1):
         description = "Nothing to redo yet."
     else:
-        description = _EDITOR_TOPBAR_HINTS.get(action, "Choose this control to continue.")
+        description = _editor_topbar_hint(action)
     lines = ui_style.wrap_text(
         description,
         11.0,
@@ -2847,6 +2838,29 @@ _EDITOR_TOPBAR_HINTS = {
     "DOCK_LEFT": "Show or hide the left panel drawer.",
     "DOCK_RIGHT": "Show or hide the right panel drawer.",
 }
+
+
+_EDITOR_TOPBAR_LABELS = {
+    "UNDO": "Undo",
+    "REDO": "Redo",
+    "PROJECT": "Home",
+    "SAVE": "Save",
+    "HELP": "Help",
+    "OPTIONS": "More",
+    "MENU": "Menu",
+    "DOCK_LEFT": "Left panel",
+    "DOCK_RIGHT": "Right panel",
+}
+
+
+def _editor_topbar_hint(action):
+    return _EDITOR_TOPBAR_HINTS.get(action, "Choose this control to continue.")
+
+
+def _editor_topbar_label(action, *, help_visible=False):
+    if action == "HELP" and help_visible:
+        return "Close help"
+    return _EDITOR_TOPBAR_LABELS.get(action, str(action).replace("_", " ").title())
 
 
 def _draw_editor_icon(name: str, x: float, y: float, size: float, color) -> bool:
