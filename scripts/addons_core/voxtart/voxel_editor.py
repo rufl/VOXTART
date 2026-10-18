@@ -655,13 +655,39 @@ def _editor_tool_options_layout(editor, region):
             panel_y_units + 52.0,
             panel_x_units + panel_width_units - 12.0,
         )
-        add(
-            "SCENE_SCALE",
-            "Scale",
-            panel_x_units + 12.0,
-            panel_y_units + 20.0,
-            panel_x_units + panel_width_units - 12.0,
-        )
+        if getattr(editor, "scene_transform_active", False):
+            inner_left = panel_x_units + 12.0
+            inner_right = panel_x_units + panel_width_units - 12.0
+            segment_width = max(0.0, (inner_right - inner_left - 12.0) / 3.0)
+            add(
+                "SCENE_SCALE",
+                "Scale",
+                inner_left,
+                panel_y_units + 20.0,
+                inner_left + segment_width,
+            )
+            add(
+                "SCENE_APPLY",
+                "Apply",
+                inner_left + segment_width + 6.0,
+                panel_y_units + 20.0,
+                inner_left + (segment_width * 2.0) + 6.0,
+            )
+            add(
+                "SCENE_CANCEL",
+                "Cancel",
+                inner_left + (segment_width * 2.0) + 12.0,
+                panel_y_units + 20.0,
+                inner_right,
+            )
+        else:
+            add(
+                "SCENE_SCALE",
+                "Scale",
+                panel_x_units + 12.0,
+                panel_y_units + 20.0,
+                panel_x_units + panel_width_units - 12.0,
+            )
     elif mode == "SELECT":
         add(
             "TOOL_SELECT_ALL",
@@ -2937,13 +2963,48 @@ def _draw_editor_tool_options(editor, context) -> None:
                     10.0,
                     _THEME["text"],
                 )
-            _draw_editor_text(
-                "Arrows adjust · Enter commit · Esc cancel",
-                x0 + 12.0 * scale,
-                y0 + 19.0 * scale,
-                9.0,
-                _THEME["text_muted"],
-            )
+            if getattr(editor, "scene_transform_active", False):
+                for action in ("SCENE_APPLY", "SCENE_CANCEL"):
+                    label, bounds = entries[action]
+                    bx0, by0, bx1, by1 = bounds
+                    hovered = action == getattr(editor, "tool_options_hover", None)
+                    destructive = action == "SCENE_CANCEL"
+                    fill = _THEME["danger_fill"] if destructive else _THEME["success_fill"]
+                    if hovered:
+                        fill = _THEME["panel_hover"]
+                    border = (
+                        _THEME["danger"]
+                        if destructive and not hovered
+                        else _THEME["success"]
+                        if not destructive and not hovered
+                        else mode_accent
+                        if hovered
+                        else _THEME["border_subtle"]
+                    )
+                    _draw_editor_panel(
+                        bx0,
+                        by0,
+                        bx1 - bx0,
+                        by1 - by0,
+                        fill,
+                        border=border,
+                        radius=6.0 * scale,
+                    )
+                    _draw_editor_text(
+                        label,
+                        bx0 + 8.0 * scale,
+                        by0 + 7.0 * scale,
+                        10.0,
+                        _THEME["text"],
+                    )
+            else:
+                _draw_editor_text(
+                    "Arrows adjust · Enter commit · Esc cancel",
+                    x0 + 12.0 * scale,
+                    y0 + 19.0 * scale,
+                    9.0,
+                    _THEME["text_muted"],
+                )
             return
         if mode == "SELECT":
             for action in (
@@ -4977,7 +5038,11 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             return
         self._cancel_stroke(context)
         scene = self.scene
-        if action in {"SCENE_MOVE", "SCENE_ROTATE", "SCENE_SCALE"}:
+        if action == "SCENE_APPLY":
+            self._commit_scene_transform()
+        elif action == "SCENE_CANCEL":
+            self._cancel_scene_transform()
+        elif action in {"SCENE_MOVE", "SCENE_ROTATE", "SCENE_SCALE"}:
             self._begin_scene_transform(action.rsplit("_", 1)[-1])
         elif action == "TOOL_SELECT_ALL":
             self._select_all()

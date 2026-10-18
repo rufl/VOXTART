@@ -96,6 +96,10 @@ It exposes **Move**, **Rotate**, and **Scale**, shows `G · R · S`, and keeps t
 arrow-key/Enter/Esc transform contract visible without requiring Blender's native
 transform gizmos.
 
+While a transform is active, **Apply** and **Cancel** buttons appear in the same
+card, so the mouse path can commit or revert the change without relying on the
+keyboard.
+
 The desktop shell remains available as a secondary project surface through the
 editor's **Home** control. It uses a project-editor layout: project tab and
 modes at the top, project items on the left, palette and assets on the right,

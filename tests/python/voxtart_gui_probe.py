@@ -644,6 +644,7 @@ def _finish_mouse_clicks():
                 "tool_options": STATE.get("tool_options", False),
                 "selection_tool_options": STATE.get("selection_tool_options", False),
                 "scene_options": STATE.get("scene_options", False),
+                "scene_completion_controls": STATE.get("scene_completion_controls", False),
                 "scene_screenshot": STATE.get("scene_options_screenshot", ""),
                 "shell_draw_handle": STATE.get("shell_draw_handle", False),
                 "shell_screenshot": STATE.get("shell_screenshot", ""),
@@ -2407,12 +2408,18 @@ def _probe():
             scene_options_layout.get("workspace") != "SCENE"
             or scene_options_layout["panel"][2] <= scene_options_layout["panel"][0]
             or not {"SCENE_MOVE", "SCENE_ROTATE", "SCENE_SCALE"}.issubset(scene_entries)
+            or {"SCENE_APPLY", "SCENE_CANCEL"}.intersection(scene_entries)
             or {"TOOL_RADIUS_DOWN", "TOOL_HOLLOW", "TOOL_MIRROR_X"}.intersection(scene_entries)
         ):
             return _fail("VOXTART Scene context did not expose transform actions")
 
         def _scene_tool_event(action, event_type="LEFTMOUSE"):
-            bounds = scene_entries[action]
+            current_layout = voxel_editor._editor_tool_options_layout(editor, region)
+            current_entries = {
+                current_action: bounds
+                for current_action, _label, bounds in current_layout["entries"]
+            }
+            bounds = current_entries[action]
             return SimpleNamespace(
                 type=event_type,
                 value="NOTHING" if event_type == "MOUSEMOVE" else "PRESS",
@@ -2506,9 +2513,101 @@ def _probe():
                 editor.modal(bpy.context, escape_event)
             if editor.scene_transform_active:
                 return _fail(f"VOXTART {expected.title()} action did not cancel")
-        editor.tool_options_hover = None
+        committed_baseline_location = tuple(float(value) for value in editor.obj.location)
+        history_before_apply = editor.history_index
+        _scene_tool_action("SCENE_MOVE")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            committed_arrow_result = editor.modal(bpy.context, arrow_event)
+        committed_location = tuple(float(value) for value in editor.obj.location)
+        active_scene_entries = {
+            action: bounds
+            for action, _label, bounds in voxel_editor._editor_tool_options_layout(
+                editor,
+                region,
+            )["entries"]
+        }
+        if (
+            "RUNNING_MODAL" not in committed_arrow_result
+            or not committed_location[0] > committed_baseline_location[0]
+            or not {"SCENE_APPLY", "SCENE_CANCEL"}.issubset(active_scene_entries)
+        ):
+            return _fail("VOXTART active Scene transform did not expose completion controls")
+        apply_hover_result = _scene_tool_action("SCENE_APPLY", "MOUSEMOVE")
+        if (
+            "RUNNING_MODAL" not in apply_hover_result
+            or editor.tool_options_hover != "SCENE_APPLY"
+        ):
+            return _fail("VOXTART Scene Apply did not report hover feedback")
+        apply_result = _scene_tool_action("SCENE_APPLY")
+        history_labels = tuple(
+            str(getattr(snapshot, "label", ""))
+            for snapshot in editor.history
+        )
+        if (
+            "RUNNING_MODAL" not in apply_result
+            or editor.scene_transform_active
+            or any(
+                abs(current - expected) > 1e-6
+                for current, expected in zip(editor.obj.location, committed_location)
+            )
+            or editor.history_index != history_before_apply + 1
+            or not history_labels
+            or history_labels[-1] != "Moved asset"
+            or not str(editor.status).startswith("Scene transform committed")
+        ):
+            return _fail("VOXTART Scene Apply did not commit the transform")
+        cancel_baseline_location = tuple(float(value) for value in editor.obj.location)
+        history_after_apply = editor.history_index
+        _scene_tool_action("SCENE_MOVE")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            cancel_arrow_result = editor.modal(bpy.context, arrow_event)
+        cancel_moved_location = tuple(float(value) for value in editor.obj.location)
+        cancel_scene_entries = {
+            action: bounds
+            for action, _label, bounds in voxel_editor._editor_tool_options_layout(
+                editor,
+                region,
+            )["entries"]
+        }
+        if (
+            "RUNNING_MODAL" not in cancel_arrow_result
+            or not cancel_moved_location[0] > cancel_baseline_location[0]
+            or not {"SCENE_APPLY", "SCENE_CANCEL"}.issubset(cancel_scene_entries)
+        ):
+            return _fail("VOXTART active Scene transform controls were not stable")
+        cancel_hover_result = _scene_tool_action("SCENE_CANCEL", "MOUSEMOVE")
+        if (
+            "RUNNING_MODAL" not in cancel_hover_result
+            or editor.tool_options_hover != "SCENE_CANCEL"
+        ):
+            return _fail("VOXTART Scene Cancel did not report hover feedback")
+        cancel_result = _scene_tool_action("SCENE_CANCEL")
+        if (
+            "RUNNING_MODAL" not in cancel_result
+            or editor.scene_transform_active
+            or any(
+                abs(current - expected) > 1e-6
+                for current, expected in zip(editor.obj.location, cancel_baseline_location)
+            )
+            or editor.history_index != history_after_apply
+            or str(editor.status) != "Scene transform cancelled"
+        ):
+            return _fail("VOXTART Scene Cancel did not restore the snapshot")
+        STATE["scene_completion_controls"] = True
+        _scene_tool_action("SCENE_MOVE")
+        _scene_tool_action("SCENE_APPLY", "MOUSEMOVE")
         STATE["scene_options"] = True
-        editor.tool_options_hover = "SCENE_MOVE"
+        editor.tool_options_hover = "SCENE_APPLY"
         SCENE_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
         area.tag_redraw()
         bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=4)
@@ -2525,6 +2624,9 @@ def _probe():
             )
         if "FINISHED" not in scene_screenshot_result or not SCENE_SCREENSHOT.is_file():
             return _fail(f"Could not capture Scene screenshot: {scene_screenshot_result!r}")
+        screenshot_cancel_result = _scene_tool_action("SCENE_CANCEL")
+        if "RUNNING_MODAL" not in screenshot_cancel_result or editor.scene_transform_active:
+            return _fail("VOXTART Scene screenshot left an active transform")
         STATE["scene_options_screenshot"] = str(SCENE_SCREENSHOT)
 
         scene.voxtart_editor_workspace = original_workspace

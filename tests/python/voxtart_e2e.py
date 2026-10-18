@@ -495,6 +495,7 @@ def _run_gui_probe() -> None:
             or payload.get("tool_options") is not True
             or payload.get("selection_tool_options") is not True
             or payload.get("scene_options") is not True
+            or payload.get("scene_completion_controls") is not True
             or payload.get("grid_toggle") is not True
             or payload.get("product_controls") is not True
             or payload.get("details_toggle") is not True
