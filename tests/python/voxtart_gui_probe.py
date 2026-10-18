@@ -641,6 +641,7 @@ def _finish_mouse_clicks():
                 "draw_preview_handle": editor._preview_handle is not None,
                 "view_workflow": STATE.get("view_workflow", False),
                 "viewport_hud": STATE.get("viewport_hud", False),
+                "viewport_hud_hints": STATE.get("viewport_hud_hints", False),
                 "tool_options": STATE.get("tool_options", False),
                 "tool_options_hints": STATE.get("tool_options_hints", False),
                 "selection_tool_options": STATE.get("selection_tool_options", False),
@@ -2770,6 +2771,22 @@ def _probe():
         ):
             return _fail("VOXTART viewport HUD did not expose a compact non-overlapping action panel")
 
+        for action, title, shortcut in (
+            ("VIEW_FRONT", "Front", "Numpad 1"),
+            ("VIEW_RIGHT", "Right", "Numpad 3"),
+            ("VIEW_TOP", "Top", "Numpad 7"),
+            ("VIEW_FRAME", "Frame", "Home"),
+            ("VIEW_PROJECTION", "Projection", "Numpad 5"),
+        ):
+            hint = voxel_editor._editor_view_hud_hint(action)
+            if (
+                hint is None
+                or hint[0] != title
+                or not hint[1]
+                or hint[2] != shortcut
+            ):
+                return _fail(f"VOXTART viewport HUD hint contract is incomplete: {action}")
+
         def _hud_event(action, event_type="LEFTMOUSE"):
             bounds = hud_entries[action]
             return SimpleNamespace(
@@ -2794,6 +2811,14 @@ def _probe():
             or editor.view_hud_hover != "VIEW_FRONT"
         ):
             return _fail("VOXTART viewport HUD did not report hover feedback")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+        STATE["viewport_hud_hints"] = True
 
         for action, expected_status in (
             ("VIEW_FRONT", "Front view"),

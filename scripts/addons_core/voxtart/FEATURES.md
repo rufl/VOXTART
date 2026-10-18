@@ -79,6 +79,8 @@ The editor keeps navigation discoverable with a compact **VIEWPORT** HUD beside
 the Colors drawer. Its isometric cube and direct buttons expose **Front**,
 **Right**, **Top**, **Frame**, and a projection toggle; `Numpad 1/3/7/5` and
 `Home` provide the same camera shortcuts without opening Blender's native UI.
+Hovering a **VIEWPORT** control opens a short orientation hint with its
+keyboard shortcut.
 
 The editor also keeps a contextual **TOOL OPTIONS** card beside the tool shelf,
 following the brush-panel pattern used by dedicated voxel editors. It names the

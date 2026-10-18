@@ -144,6 +144,23 @@ _EDITOR_VIEW_HUD_ACTIONS = (
     ("VIEW_FRAME", "Frame"),
     ("VIEW_PROJECTION", "Projection"),
 )
+_EDITOR_VIEW_HUD_HINTS = {
+    "VIEW_FRONT": ("Front", "Align the viewport to the front axis.", "Numpad 1"),
+    "VIEW_RIGHT": ("Right", "Align the viewport to the right axis.", "Numpad 3"),
+    "VIEW_TOP": ("Top", "Align the viewport to the top axis.", "Numpad 7"),
+    "VIEW_FRAME": ("Frame", "Center the active asset in the viewport.", "Home"),
+    "VIEW_PROJECTION": (
+        "Projection",
+        "Toggle between orthographic and perspective view.",
+        "Numpad 5",
+    ),
+}
+
+
+def _editor_view_hud_hint(action):
+    return _EDITOR_VIEW_HUD_HINTS.get(action)
+
+
 
 
 EDITOR_WORKSPACES = ("EDIT", "SCENE")
@@ -2150,8 +2167,105 @@ def _draw_editor_view_hud(editor, context) -> None:
                 10.0,
                 _THEME["text"],
             )
+        _draw_editor_view_hud_tooltip(editor, context, entries, scale)
     finally:
         gpu.state.blend_set("NONE")
+
+
+def _draw_editor_view_hud_tooltip(editor, context, entries, scale) -> None:
+    action = getattr(editor, "view_hud_hover", None)
+    hint = _editor_view_hud_hint(action)
+    region = getattr(context, "region", None)
+    entry = next(
+        (
+            (label, bounds)
+            for entry_action, label, bounds in entries
+            if entry_action == action
+        ),
+        None,
+    )
+    if hint is None or region is None or entry is None:
+        return
+    _label, bounds = entry
+    title, description, shortcut = hint
+    lines = ui_style.wrap_text(
+        description,
+        11.0,
+        min(316.0 * scale, float(region.width) - 40.0 * scale),
+    )[:2]
+    if not lines:
+        lines = ("Choose this control to continue.",)
+    shortcut_width = (
+        _editor_text_width(shortcut, 10.0) + 16.0 * scale
+        if shortcut
+        else 0.0
+    )
+    hint_width = max(
+        (_editor_text_width(line, 11.0) for line in lines),
+        default=0.0,
+    )
+    tooltip_width = min(
+        float(region.width) - 16.0 * scale,
+        max(
+            244.0 * scale,
+            _editor_text_width(title, 13.0) + shortcut_width + 38.0 * scale,
+            hint_width + 24.0 * scale,
+        ),
+    )
+    tooltip_height = (64.0 + max(0, len(lines) - 1) * 14.0) * scale
+    tooltip_x = min(
+        bounds[2] + 10.0 * scale,
+        max(8.0 * scale, float(region.width) - tooltip_width - 8.0 * scale),
+    )
+    tooltip_y = max(
+        8.0 * scale,
+        min(
+            bounds[1],
+            float(region.height) - tooltip_height - 8.0 * scale,
+        ),
+    )
+    _draw_editor_panel(
+        tooltip_x,
+        tooltip_y,
+        tooltip_width,
+        tooltip_height,
+        _THEME["panel"],
+        border=_THEME["border"],
+        radius=9.0 * scale,
+    )
+    title_y = tooltip_y + tooltip_height - 20.0 * scale
+    _draw_editor_text(
+        title,
+        tooltip_x + 12.0 * scale,
+        title_y,
+        13.0,
+        _THEME["text"],
+    )
+    if shortcut:
+        pill_x = tooltip_x + tooltip_width - shortcut_width - 10.0 * scale
+        _draw_editor_round_rect(
+            pill_x,
+            title_y - 3.0 * scale,
+            shortcut_width,
+            18.0 * scale,
+            _THEME["accent_fill"],
+            radius=8.0 * scale,
+        )
+        _draw_editor_text(
+            shortcut,
+            pill_x + 8.0 * scale,
+            title_y + 1.0 * scale,
+            10.0,
+            _THEME["text"],
+        )
+    for index, line in enumerate(lines):
+        _draw_editor_text(
+            line,
+            tooltip_x + 12.0 * scale,
+            tooltip_y + 27.0 * scale + (len(lines) - index - 1) * 14.0 * scale,
+            11.0,
+            _THEME["text_muted"],
+        )
 
 
 
