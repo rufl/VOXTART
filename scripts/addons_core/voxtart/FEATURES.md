@@ -736,6 +736,10 @@ radius-bearing graph bones into low-poly volume.
 
 - choose the built-in `Biped` or `Quadruped` template from the VOXTART sidebar
   or the 3D View object menu;
+- select an original modular parts pack: `Natural Anatomy`, `Fantasy Anatomy`,
+  or `Mechanical Anatomy`;
+- select an inspector preset: `Balanced`, `Agile`, `Heavy`, or `Armored` to
+  change body/limb radii and deformation without rewriting the base graph;
 - generate a labeled voxel asset without hand-placing every limb;
 - preserve semantic part labels such as `TORSO`, `HEAD`, `ARM_L`, `LEG_FL`,
   and `TAIL` in `VoxelAsset.part_assignments`;
@@ -745,6 +749,12 @@ radius-bearing graph bones into low-poly volume.
   reusable asset;
 - keep the canonical graph recipe and joint records on the generated object
   for deterministic rebuilds and downstream tools.
+- inspect the active creature in **Creature Inspector**, including its graph
+  counts, selected pack, inspector profile, and generated modular parts;
+- apply a different pack/profile to the active creature while retaining the
+  canonical base recipe;
+- persist the composition as a `voxtart.creature_preset` JSON record on the
+  object and in gallery provenance.
 
 The graph core lives in `creature.py` and is Blender-independent, so templates
 and custom recipes can be validated and built in system-Python tests. The

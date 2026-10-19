@@ -35,7 +35,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_formats  # noqa: E402
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
-from voxtart import character_editor, creature, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import character_editor, creature, creature_presets, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
 from voxtart import metrics, provenance  # noqa: E402
 
 
@@ -45,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 115
+EXPECTED_TESTS = 117
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -4711,6 +4711,66 @@ class CreatureGraphTest(unittest.TestCase):
         recipe = creature.template_recipe("BIPED")
         with self.assertRaises(ValueError):
             creature.build_voxel_asset(recipe, max_voxels=1)
+
+
+class CreaturePresetTest(unittest.TestCase):
+    def test_parts_packs_and_inspectors_compose_deterministically(self):
+        base = creature.template_recipe("BIPED")
+        preset = creature_presets.make_creature_preset(
+            "BIPED",
+            parts_pack="FANTASY",
+            inspector_preset="ARMORED",
+        )
+        composed = creature_presets.apply_creature_preset(base, preset)
+        repeated = creature_presets.apply_creature_preset(base, preset)
+        self.assertEqual(composed.to_dict(), repeated.to_dict())
+        self.assertEqual(
+            creature_presets.preset_from_recipe(composed),
+            preset,
+        )
+        self.assertTrue(any(node.id.startswith("horns_") for node in composed.nodes))
+        self.assertTrue(any(node.id.startswith("wings_") for node in composed.nodes))
+        result = creature.build_voxel_asset(composed, palette=PALETTE[:1])
+        labels = set(result.asset.part_assignments.values())
+        self.assertTrue({"HORN_L", "WING_R"}.issubset(labels))
+        agile = creature_presets.apply_creature_preset(
+            base,
+            creature_presets.make_creature_preset(
+                "BIPED",
+                parts_pack="FANTASY",
+                inspector_preset="AGILE",
+            ),
+        )
+        self.assertNotEqual(
+            creature.build_voxel_asset(agile, palette=PALETTE[:1]).asset.content_digest,
+            result.asset.content_digest,
+        )
+
+    def test_preset_round_trip_and_validation(self):
+        preset = creature_presets.make_creature_preset(
+            "QUADRUPED",
+            parts_pack="MECHANICAL",
+            inspector_preset="HEAVY",
+            enabled_parts=("ANTENNA", "TAIL_THRUSTERS"),
+        )
+        self.assertEqual(
+            creature_presets.CreaturePreset.decode(preset.encode()),
+            preset,
+        )
+        with self.assertRaises(ValueError):
+            creature_presets.make_creature_preset(
+                "BIPED",
+                parts_pack="NATURAL",
+                enabled_parts=("HORNS",),
+            )
+        with self.assertRaises(ValueError):
+            creature_presets.apply_creature_preset(
+                creature.template_recipe("BIPED"),
+                creature_presets.CreaturePreset(
+                    "QUADRUPED",
+                    parts_pack="NATURAL",
+                ),
+            )
 
 
 if __name__ == "__main__":

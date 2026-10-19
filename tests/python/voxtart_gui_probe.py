@@ -2227,7 +2227,7 @@ def _probe():
             hasattr(bpy.types, name)
             for name in (
                 "VOXTART_OT_creature_generate",
-                "VOXTART_PT_creature_builder",
+                "VOXTART_OT_creature_apply_preset",
             )
         ):
             return _fail("VOXTART creature builder surface is not registered")

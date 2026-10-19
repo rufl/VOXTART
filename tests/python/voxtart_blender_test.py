@@ -595,6 +595,18 @@ class BlenderRegistrationTest(unittest.TestCase):
             getattr(bpy.types, "VOXTART_PT_creature_builder"),
             creature_ui.VOXTART_PT_creature_builder,
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_PT_creature_inspector"),
+            creature_ui.VOXTART_PT_creature_inspector,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_creature_apply_preset"),
+            creature_ui.VOXTART_OT_creature_apply_preset,
+        )
+        self.assertEqual(
+            creature_ui.VOXTART_OT_creature_apply_preset.bl_idname,
+            "voxtart.creature_apply_preset",
+        )
         self.assertEqual(
             creature_ui.VOXTART_OT_creature_generate.bl_idname,
             "voxtart.creature_generate",
@@ -603,6 +615,8 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(scene.voxtart_creature_template, "BIPED")
         self.assertEqual(scene.voxtart_creature_name, "VOXTART Biped")
         self.assertAlmostEqual(scene.voxtart_creature_grid_size, 1.0)
+        self.assertEqual(scene.voxtart_creature_part_pack, "NATURAL")
+        self.assertEqual(scene.voxtart_creature_inspector_preset, "BALANCED")
         self.assertTrue(scene.voxtart_creature_save_to_gallery)
         before_names = {obj.name for obj in bpy.data.objects}
         previous_gallery_path = scene.voxtart_blob_gallery_path
@@ -615,6 +629,8 @@ class BlenderRegistrationTest(unittest.TestCase):
                         template="BIPED",
                         name="Test Biped",
                         grid_size=1.0,
+                        parts_pack="FANTASY",
+                        inspector_preset="ARMORED",
                         save_to_gallery=True,
                     ),
                     {"FINISHED"},
@@ -630,6 +646,10 @@ class BlenderRegistrationTest(unittest.TestCase):
                     biped[creature_ui.CREATURE_RECIPE_PROPERTY]
                 )
                 self.assertEqual(recipe.template, "BIPED")
+                self.assertEqual(recipe.settings["parts_pack"], "FANTASY")
+                self.assertEqual(recipe.settings["inspector_preset"], "ARMORED")
+                self.assertTrue(any(label.startswith("HORN_") for label in asset.part_assignments.values()))
+                self.assertTrue(biped.get(creature_ui.CREATURE_BASE_RECIPE_PROPERTY))
                 records = json.loads(biped[creature_ui.CREATURE_JOINTS_PROPERTY])
                 self.assertEqual(len(records), len(asset.sockets))
                 self.assertTrue(scene.voxtart_blob_gallery_selected)
@@ -641,12 +661,26 @@ class BlenderRegistrationTest(unittest.TestCase):
                     {joint.name for joint in entries[0].joints},
                     {record["name"] for record in records},
                 )
+                self.assertEqual(
+                    bpy.ops.voxtart.creature_apply_preset(
+                        parts_pack="MECHANICAL",
+                        inspector_preset="AGILE",
+                    ),
+                    {"FINISHED"},
+                )
+                applied_recipe = creature.CreatureRecipe.decode(
+                    biped[creature_ui.CREATURE_RECIPE_PROPERTY]
+                )
+                self.assertEqual(applied_recipe.settings["parts_pack"], "MECHANICAL")
+                self.assertEqual(applied_recipe.settings["inspector_preset"], "AGILE")
 
                 self.assertEqual(
                     bpy.ops.voxtart.creature_generate(
                         template="QUADRUPED",
                         name="Test Quadruped",
                         grid_size=1.0,
+                        parts_pack="NATURAL",
+                        inspector_preset="BALANCED",
                         save_to_gallery=False,
                     ),
                     {"FINISHED"},
