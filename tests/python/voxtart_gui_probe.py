@@ -2210,8 +2210,14 @@ def _probe():
         ):
             return _fail("VOXTART Spriteform sequence surface is not registered")
         STATE["sprite_sequence_surface"] = True
-        if not hasattr(bpy.types, "VOXTART_OT_character_bind_animation") or not hasattr(
-            bpy.types, "VOXTART_OT_character_unbind_animation"
+        if not all(
+            hasattr(bpy.types, name)
+            for name in (
+                "VOXTART_OT_character_bind_animation",
+                "VOXTART_OT_character_unbind_animation",
+                "VOXTART_OT_character_set_animation_bone",
+                "VOXTART_OT_character_clear_animation_bone",
+            )
         ):
             return _fail("VOXTART Charameld animation surface is not registered")
         STATE["charameld_animation_surface"] = True

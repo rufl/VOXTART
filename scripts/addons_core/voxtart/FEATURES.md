@@ -753,6 +753,9 @@ assignment, slot replacement, and character cleanup.
 - bind the assembled parts to the selected animation target; slot roles map
   deterministically to compatible bones, persist in the recipe, survive
   rebuilds, and can be unbound to restore socket parenting.
+- override an automatic slot-to-bone choice from the Character Editor and
+  reset it to deterministic role matching; overrides persist in the character
+  recipe and are reapplied on rebuild.
 
 The editor requires a `Root` part before socketed children. A child slot must
 have its canonical parent (`Torso` mounts to `Root`; head, limbs, and

@@ -544,6 +544,23 @@ class BlenderRegistrationTest(unittest.TestCase):
             character_editor_ui.VOXTART_OT_character_unbind_animation.bl_idname,
             "voxtart.character_unbind_animation",
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_set_animation_bone"),
+            character_editor_ui.VOXTART_OT_character_set_animation_bone,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_clear_animation_bone"),
+            character_editor_ui.VOXTART_OT_character_clear_animation_bone,
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_set_animation_bone.bl_idname,
+            "voxtart.character_set_animation_bone",
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_clear_animation_bone.bl_idname,
+            "voxtart.character_clear_animation_bone",
+        )
+
 
 
         scene = bpy.context.scene
@@ -551,6 +568,8 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(scene.voxtart_character_slot, "ROOT")
         self.assertEqual(scene.voxtart_character_search, "")
         self.assertTrue(scene.voxtart_character_auto_snap)
+        self.assertEqual(scene.voxtart_character_animation_slot, "ROOT")
+        self.assertEqual(scene.voxtart_character_animation_bone, "")
     def test_optimizer_registration_and_defaults(self):
         self.assertIs(
             getattr(bpy.types, "VOXTART_OT_optimize_mesh"),
@@ -758,6 +777,31 @@ class BlenderRegistrationTest(unittest.TestCase):
                     bound_by_slot["TORSO"]["voxtart_animation_armature"],
                     target.name,
                 )
+                self.assertEqual(
+                    bpy.ops.voxtart.character_set_animation_bone(
+                        slot="TORSO",
+                        bone_name="root",
+                    ),
+                    {"FINISHED"},
+                )
+                override_recipe = CharacterRecipe.decode(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY]
+                )
+                self.assertEqual(
+                    override_recipe.settings["animation_overrides"],
+                    {"TORSO": "root"},
+                )
+                self.assertEqual(
+                    override_recipe.settings["animation_bindings"],
+                    {"ROOT": "root", "TORSO": "root"},
+                )
+                overridden_by_slot = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                self.assertEqual(overridden_by_slot["TORSO"].parent_bone, "root")
+
 
                 self.assertEqual(bpy.ops.voxtart.character_rebuild(), {"FINISHED"})
                 rebuilt_bound = {
@@ -766,7 +810,22 @@ class BlenderRegistrationTest(unittest.TestCase):
                     if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
                 }
                 self.assertIs(rebuilt_bound["TORSO"].parent, target)
-                self.assertEqual(rebuilt_bound["TORSO"].parent_bone, "spine")
+                self.assertEqual(rebuilt_bound["TORSO"].parent_bone, "root")
+
+                self.assertEqual(
+                    bpy.ops.voxtart.character_clear_animation_bone(slot="TORSO"),
+                    {"FINISHED"},
+                )
+                automatic_recipe = CharacterRecipe.decode(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY]
+                )
+                self.assertNotIn("animation_overrides", automatic_recipe.settings)
+                automatic_by_slot = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                self.assertEqual(automatic_by_slot["TORSO"].parent_bone, "spine")
                 self.assertEqual(
                     bpy.ops.voxtart.character_unbind_animation(),
                     {"FINISHED"},

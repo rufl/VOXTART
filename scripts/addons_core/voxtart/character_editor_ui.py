@@ -19,7 +19,6 @@ from .character_editor import (
     CharacterRecipe,
 )
 from .animation import canonical_bone_role
-
 from .operators import ASSET_PROPERTY
 
 
@@ -28,6 +27,9 @@ CHARACTER_ID_PROPERTY = "voxtart_character_id"
 CHARACTER_OBJECT_ID_PROPERTY = "voxtart_character_object_id"
 CHARACTER_SLOT_PROPERTY = "voxtart_character_slot"
 CHARACTER_BLOB_PROPERTY = "voxtart_character_blob_id"
+CHARACTER_ANIMATION_SLOT_PROPERTY = "voxtart_character_animation_slot"
+CHARACTER_ANIMATION_BONE_PROPERTY = "voxtart_character_animation_bone"
+
 
 _SLOT_ITEMS = (
     ("ROOT", "Root", "Main character anchor; required before socketed parts."),
@@ -50,7 +52,6 @@ _CHARACTER_ANIMATION_ROLES = {
     "LEG_R": ("upper_leg_r", "lower_leg_r", "foot_r"),
     "ACCESSORY": ("chest", "spine", "head", "pelvis"),
 }
-
 
 
 def _gallery(context):
@@ -120,6 +121,7 @@ def _root_location(recipe: CharacterRecipe, context: bpy.types.Context) -> tuple
     recipe.settings["root_location"] = list(location)
     return location
 
+
 def _animation_target_object(context, name: str = "") -> bpy.types.Object:
     target_name = str(
         name or getattr(context.scene, "voxtart_animation_target", "") or ""
@@ -153,10 +155,21 @@ def _animation_bone_for_slot(target: bpy.types.Object, slot: str) -> str:
 def _animation_bindings_for_target(
     recipe: CharacterRecipe, target: bpy.types.Object
 ) -> dict[str, str]:
-    return {
-        part.slot: _animation_bone_for_slot(target, part.slot)
-        for part in recipe.ordered_parts()
-    }
+    raw_overrides = recipe.settings.get("animation_overrides", {})
+    overrides = raw_overrides if isinstance(raw_overrides, dict) else {}
+    bindings: dict[str, str] = {}
+    for part in recipe.ordered_parts():
+        override = str(overrides.get(part.slot, "") or "").strip()
+        if override:
+            if target.data.bones.get(override) is None:
+                raise ValueError(
+                    f"animation override for character slot {part.slot} names "
+                    f"missing target bone {override!r}"
+                )
+            bindings[part.slot] = override
+        else:
+            bindings[part.slot] = _animation_bone_for_slot(target, part.slot)
+    return bindings
 
 
 def _bind_created_to_animation_target(
@@ -193,7 +206,6 @@ def _bind_created_to_animation_target(
         obj.matrix_world = world_matrices[slot]
         obj["voxtart_animation_armature"] = target.name
         obj["voxtart_animation_bone"] = bone_name
-
 
 
 def _remove_objects_with_id(character_id: str) -> None:
@@ -475,6 +487,91 @@ class VOXTART_OT_character_unbind_animation(bpy.types.Operator):
         self.report({'INFO'}, f"Unbound {recipe.name} from its animation target")
         return {'FINISHED'}
 
+
+class VOXTART_OT_character_set_animation_bone(bpy.types.Operator):
+    bl_idname = "voxtart.character_set_animation_bone"
+    bl_label = "Set Character Bone Override"
+    bl_description = "Override the automatic target bone for one assembled character slot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    slot: EnumProperty(name="Slot", items=_SLOT_ITEMS, default="ROOT", options={'HIDDEN'})
+    bone_name: StringProperty(name="Target Bone", options={'HIDDEN'})
+
+    def execute(self, context):
+        scene = context.scene
+        try:
+            recipe = _load_recipe(scene)
+            if recipe.get(self.slot) is None:
+                self.report({'ERROR'}, f"slot {self.slot} is empty")
+                return {'CANCELLED'}
+            target = _animation_target_object(
+                context,
+                str(recipe.settings.get("animation_target", "") or ""),
+            )
+            bone_name = str(self.bone_name or "").strip()
+            if not bone_name:
+                self.report({'ERROR'}, "enter a target bone name")
+                return {'CANCELLED'}
+            if target.data.bones.get(bone_name) is None:
+                self.report({'ERROR'}, f"target bone does not exist: {bone_name}")
+                return {'CANCELLED'}
+            raw_overrides = recipe.settings.get("animation_overrides", {})
+            overrides = dict(raw_overrides) if isinstance(raw_overrides, dict) else {}
+            overrides[self.slot] = bone_name
+            recipe.settings["animation_overrides"] = overrides
+            recipe.settings["animation_bindings"] = _animation_bindings_for_target(
+                recipe, target
+            )
+            _rebuild_character(context, recipe)
+            _save_recipe(scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Mapped {self.slot} to {bone_name}")
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_clear_animation_bone(bpy.types.Operator):
+    bl_idname = "voxtart.character_clear_animation_bone"
+    bl_label = "Reset Character Bone Override"
+    bl_description = "Restore automatic target-bone selection for one assembled character slot"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    slot: EnumProperty(name="Slot", items=_SLOT_ITEMS, default="ROOT", options={'HIDDEN'})
+
+    def execute(self, context):
+        scene = context.scene
+        try:
+            recipe = _load_recipe(scene)
+            if recipe.get(self.slot) is None:
+                self.report({'ERROR'}, f"slot {self.slot} is empty")
+                return {'CANCELLED'}
+            target = _animation_target_object(
+                context,
+                str(recipe.settings.get("animation_target", "") or ""),
+            )
+            raw_overrides = recipe.settings.get("animation_overrides", {})
+            overrides = dict(raw_overrides) if isinstance(raw_overrides, dict) else {}
+            if self.slot not in overrides:
+                self.report({'ERROR'}, f"slot {self.slot} has no bone override")
+                return {'CANCELLED'}
+            del overrides[self.slot]
+            if overrides:
+                recipe.settings["animation_overrides"] = overrides
+            else:
+                recipe.settings.pop("animation_overrides", None)
+            recipe.settings["animation_bindings"] = _animation_bindings_for_target(
+                recipe, target
+            )
+            _rebuild_character(context, recipe)
+            _save_recipe(scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Reset {self.slot} to automatic bone mapping")
+        return {'FINISHED'}
+
+
 class VOXTART_OT_character_clear(bpy.types.Operator):
     bl_idname = "voxtart.character_clear"
     bl_label = "Clear Character"
@@ -566,6 +663,43 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
                     text="Unbind Animation Rig",
                     icon="UNLINKED",
                 )
+                animation_box.prop(
+                    scene,
+                    CHARACTER_ANIMATION_SLOT_PROPERTY,
+                    text="Slot",
+                )
+                animation_box.prop(
+                    scene,
+                    CHARACTER_ANIMATION_BONE_PROPERTY,
+                    text="Bone",
+                )
+                selected_slot = getattr(scene, CHARACTER_ANIMATION_SLOT_PROPERTY)
+                bindings = recipe.settings.get("animation_bindings", {})
+                resolved_bone = (
+                    str(bindings.get(selected_slot, "") or "")
+                    if isinstance(bindings, dict)
+                    else ""
+                )
+                animation_box.label(
+                    text=f"Resolved bone: {resolved_bone or 'None'}",
+                    icon="BONE_DATA",
+                )
+                row = animation_box.row(align=True)
+                set_bone = row.operator(
+                    VOXTART_OT_character_set_animation_bone.bl_idname,
+                    text="Set Override",
+                    icon="BONE_DATA",
+                )
+                set_bone.slot = selected_slot
+                set_bone.bone_name = getattr(
+                    scene, CHARACTER_ANIMATION_BONE_PROPERTY
+                )
+                clear_bone = row.operator(
+                    VOXTART_OT_character_clear_animation_bone.bl_idname,
+                    text="Reset",
+                    icon="LOOP_BACK",
+                )
+                clear_bone.slot = selected_slot
             else:
                 animation_box.label(
                     text="Bind parts to the selected animation target.",
@@ -579,8 +713,6 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
             box.label(text="Parts snap through compatible opposite-facing joints.", icon="CONSTRAINT")
 
 
-
-
 _CLASSES = (
     VOXTART_OT_character_assign_blob,
     VOXTART_OT_character_assign_active,
@@ -589,10 +721,11 @@ _CLASSES = (
     VOXTART_OT_character_toggle_visibility,
     VOXTART_OT_character_bind_animation,
     VOXTART_OT_character_unbind_animation,
+    VOXTART_OT_character_set_animation_bone,
+    VOXTART_OT_character_clear_animation_bone,
     VOXTART_OT_character_clear,
     VOXTART_PT_character_editor,
 )
-
 
 
 def register() -> None:
@@ -616,10 +749,21 @@ def register() -> None:
         description="Use compatible Blob Gallery joints while rebuilding character parts",
         default=True,
     )
+    bpy.types.Scene.voxtart_character_animation_slot = EnumProperty(
+        name="Animation Slot",
+        items=_SLOT_ITEMS,
+        default="ROOT",
+    )
+    bpy.types.Scene.voxtart_character_animation_bone = StringProperty(
+        name="Animation Bone",
+        default="",
+    )
 
 
 def unregister() -> None:
     for name in (
+        "voxtart_character_animation_bone",
+        "voxtart_character_animation_slot",
         "voxtart_character_auto_snap",
         "voxtart_character_search",
         "voxtart_character_slot",
@@ -632,12 +776,16 @@ def unregister() -> None:
 
 
 __all__ = [
+    "CHARACTER_ANIMATION_BONE_PROPERTY",
+    "CHARACTER_ANIMATION_SLOT_PROPERTY",
     "CHARACTER_BLOB_PROPERTY",
     "CHARACTER_ID_PROPERTY",
     "CHARACTER_OBJECT_ID_PROPERTY",
     "CHARACTER_RECIPE_PROPERTY",
     "CHARACTER_SLOT_PROPERTY",
     "VOXTART_OT_character_bind_animation",
+    "VOXTART_OT_character_clear_animation_bone",
+    "VOXTART_OT_character_set_animation_bone",
     "VOXTART_OT_character_toggle_visibility",
     "VOXTART_OT_character_unbind_animation",
     "register",
