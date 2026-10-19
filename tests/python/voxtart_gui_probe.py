@@ -33,6 +33,7 @@ from voxtart import (
     operators,
     optimizer_ui,
     palette_ui,
+    reconstruct_ui,
     scene_assembly,
     scene_hierarchy,
     scene_hierarchy_ui,
@@ -2202,6 +2203,11 @@ def _probe():
         STATE["view_workflow"] = _exercise_view_workflow(window, screen, area, region, scene)
         if not hasattr(bpy.types, "VOXTART_OT_voxel_editor"):
             return _fail("VOXTART voxel editor is not registered")
+        if not hasattr(bpy.types, "VOXTART_OT_reconstruct_sequence") or not hasattr(
+            bpy.types, "VOXTART_PT_sprite_sequence"
+        ):
+            return _fail("VOXTART Spriteform sequence surface is not registered")
+        STATE["sprite_sequence_surface"] = True
         existing = bpy.data.objects.get("P0 GUI Asset")
         if existing is not None:
             bpy.data.objects.remove(existing, do_unlink=True)

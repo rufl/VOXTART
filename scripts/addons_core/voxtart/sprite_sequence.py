@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Sequence
 
+from .depth_observations import DepthObservation, PartMask
 from .image_intake import IndexedImage
 from .provenance import SourceIdentity
 from .reconstruct import OrthographicView, ReconstructionResult, ReconstructionSettings, reconstruct_views
@@ -25,6 +26,8 @@ class SequenceFrame:
     direction: int = 1
     origin: Cell = (0, 0, 0)
     depth: int = 1
+    depth_observation: DepthObservation | None = None
+    part_mask: PartMask | None = None
 
     def __post_init__(self) -> None:
         frame_id = str(self.frame_id).strip()
@@ -32,6 +35,12 @@ class SequenceFrame:
             raise ValueError("sequence frame_id must not be empty")
         if not isinstance(self.image, IndexedImage):
             raise TypeError("sequence image must be an IndexedImage")
+        if self.depth_observation is not None and not isinstance(
+            self.depth_observation, DepthObservation
+        ):
+            raise TypeError("sequence depth_observation must be a DepthObservation")
+        if self.part_mask is not None and not isinstance(self.part_mask, PartMask):
+            raise TypeError("sequence part_mask must be a PartMask")
         object.__setattr__(self, "frame_id", frame_id)
         object.__setattr__(self, "pose_id", str(self.pose_id).strip())
         object.__setattr__(self, "camera_id", str(self.camera_id).strip())
@@ -54,6 +63,8 @@ class SequenceFrame:
             origin=self.origin,
             depth=self.depth,
             source_identity=self.source_identity(),
+            depth_observation=self.depth_observation,
+            part_mask=self.part_mask,
         )
 
 

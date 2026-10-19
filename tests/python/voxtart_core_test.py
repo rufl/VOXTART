@@ -4367,13 +4367,23 @@ class Sprite2DEndToEndTest(unittest.TestCase):
         shared_palette = image_intake.extract_palette_frames((first_frame, second_frame), intake)
         first = image_intake.index_image(first_frame, intake, palette=shared_palette)
         second = image_intake.index_image(second_frame, intake, palette=shared_palette)
+        depth = depth_observations.DepthObservation.from_rows("sequence-depth", [[0, None]])
+        parts = depth_observations.PartMask.from_rows("sequence-parts", [["body", None]])
         sequence = sprite_sequence.SpriteSequence(
             (
-                sprite_sequence.SequenceFrame("first", first),
+                sprite_sequence.SequenceFrame(
+                    "first",
+                    first,
+                    depth_observation=depth,
+                    part_mask=parts,
+                ),
                 sprite_sequence.SequenceFrame("second", second),
             ),
             name="walk",
         )
+        first_view = sequence.frames[0].to_view(palette=shared_palette)
+        self.assertIs(first_view.depth_observation, depth)
+        self.assertIs(first_view.part_mask, parts)
         result = sprite_sequence.reconstruct_sequence(sequence, shared_palette)
         self.assertEqual(result.deltas[0].added, ((1, 0, 0),))
         self.assertEqual(result.deltas[0].removed, ())

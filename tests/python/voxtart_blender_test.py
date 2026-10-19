@@ -33,7 +33,7 @@ from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_u
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterPart, CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
-EXPECTED_TESTS = 33
+EXPECTED_TESTS = 34
 
 
 def _gallery_entry(name, blob_id, normal):
@@ -138,6 +138,15 @@ class BlenderRegistrationTest(unittest.TestCase):
             getattr(bpy.types, "VOXTART_PT_multiview_reconstruction"),
             reconstruct_ui.VOXTART_PT_multiview_reconstruction,
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_reconstruct_sequence"),
+            reconstruct_ui.VOXTART_OT_reconstruct_sequence,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_PT_sprite_sequence"),
+            reconstruct_ui.VOXTART_PT_sprite_sequence,
+        )
+        self.assertEqual(bpy.context.scene.voxtart_reconstruction_sequence_mode, "SURFACE")
         self.assertTrue(hasattr(bpy.types.VIEW3D_MT_object, "append"))
         self.assertIs(
             getattr(bpy.types, "VOXTART_PT_zoo_asset_placer"),
@@ -1709,6 +1718,83 @@ class BlenderRegistrationTest(unittest.TestCase):
                 setattr(scene, reconstruct_ui._slot_property(slot, field), value)
             for name, value in previous_shared.items():
                 setattr(scene, name, value)
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+            for path in paths:
+                path.unlink(missing_ok=True)
+
+    def test_sprite_sequence_manifest_operator_reports_deltas(self):
+        before_names = {obj.name for obj in bpy.data.objects}
+        paths = []
+
+        def write_pixels(path, name, pixels):
+            image = bpy.data.images.new(name, width=2, height=1, alpha=True)
+            try:
+                image.pixels = tuple(channel for pixel in pixels for channel in pixel)
+                image.filepath_raw = str(path)
+                image.file_format = "PNG"
+                image.save()
+            finally:
+                bpy.data.images.remove(image)
+
+        try:
+            colors = (
+                ((1.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0, 0.0)),
+                ((1.0, 0.0, 0.0, 1.0), (1.0, 0.0, 0.0, 1.0)),
+            )
+            image_paths = []
+            for index, pixels in enumerate(colors, 1):
+                with tempfile.NamedTemporaryFile(suffix=f"_sequence{index}.png", delete=False) as handle:
+                    image_path = Path(handle.name)
+                image_paths.append(image_path)
+                paths.append(image_path)
+                write_pixels(image_path, f"VOXTART Sequence Fixture {index}", pixels)
+            with tempfile.NamedTemporaryFile(suffix="_sequence.json", delete=False) as handle:
+                manifest_path = Path(handle.name)
+            paths.append(manifest_path)
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "schema": 1,
+                        "name": "walk",
+                        "defaults": {
+                            "axis": "Z",
+                            "direction": 1,
+                            "origin": [0, 0, 0],
+                            "depth": 1,
+                        },
+                        "frames": [
+                            {"id": "idle", "image": image_paths[0].name},
+                            {"id": "step", "image": image_paths[1].name},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            result = bpy.ops.voxtart.reconstruct_sequence(
+                manifest_filepath=str(manifest_path),
+                background_mode="ALPHA",
+                max_colors=8,
+                pixels_per_voxel=1,
+                mode="SURFACE",
+            )
+            self.assertEqual(result, {"FINISHED"})
+            obj = bpy.context.active_object
+            asset = operators._load_asset(obj)
+            self.assertEqual(asset.voxels, {(0, 0, 0): 0})
+            report = json.loads(obj[reconstruct_ui.RECONSTRUCTION_SEQUENCE_REPORT_PROPERTY])
+            self.assertEqual(report["name"], "walk")
+            self.assertEqual(report["frame_count"], 2)
+            self.assertEqual([frame["frame_id"] for frame in report["frames"]], ["idle", "step"])
+            self.assertEqual(report["frames"][1]["delta"]["added"], [[1, 0, 0]])
+            self.assertEqual(report["frames"][1]["delta"]["removed"], [])
+            self.assertEqual(report["frames"][1]["delta"]["recolored"], [])
+            self.assertEqual(
+                len(json.loads(obj[reconstruct_ui.RECONSTRUCTION_SEQUENCE_DELTAS_PROPERTY])),
+                1,
+            )
+            self.assertEqual(obj[reconstruct_ui.RECONSTRUCTION_SEQUENCE_MANIFEST_PROPERTY], str(manifest_path))
+        finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
             for path in paths:
                 path.unlink(missing_ok=True)

@@ -523,6 +523,22 @@ selected policy on the Blender object, and displays the review in the panel.
 They draw unresolved candidate cells as a purple wire overlay and report
 unresolved, conflicting, missing, extra, and color-mismatched pixels.
 
+### Spriteform sequence workflow
+
+The **Spriteform Sequence** panel accepts a schema-1 JSON manifest and
+reconstructs a deterministic base pose plus per-frame voxel deltas:
+
+- image and optional depth/part-mask paths resolve relative to the manifest;
+- defaults and frame overrides cover axis, facing direction, integer origin,
+  depth, pose ID, and camera ID;
+- all frames must share dimensions and use one extracted palette;
+- optional depth observations and semantic part masks are preserved in each
+  frame view and its provenance; they require `Pixels / Block = 1`;
+- `SURFACE`, `VOLUME`, `LAYERED`, and `SHELL` reconstruction modes are
+  available, with a 256-frame and bounded-cell guard;
+- the created asset stores the manifest path, compact sequence report, and
+  JSON pose deltas (`added`, `removed`, and `recolored` cells).
+
 The core remains offline-capable and testable with deterministic RGBA fixtures;
 file-format decoding is delegated to Blender's image loader at the adapter
 boundary.
