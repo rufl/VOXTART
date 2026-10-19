@@ -456,7 +456,8 @@ _TOOLTIP_DESCRIPTIONS = {
     "mode:CHARACTER": "Turn your blocks into a character.",
     "project:blocks": "Go back to your block-making workspace.",
     "project:characters": "Open character tools and animation.",
-    "chat:image": "Add a reference image for the local model.",
+    "chat:image": "Attach a reference image for the local model.",
+    "chat:send": "Send the prompt to the local model.",
     "project:layers": "Work with colors and layers.",
     "home:make": "Start with a small block world you can change.",
     "home:open": "Open a saved block world or voxel model.",
@@ -532,6 +533,7 @@ _SHORTCUT_FOR_KEY = {
     "paint:paint": "Alt+Shift+P",
     "paint:remove": "Alt+Shift+X",
     "paint:place": "Alt+Shift+V",
+    "chat:send": "Enter",
 }
 
 

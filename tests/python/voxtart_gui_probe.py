@@ -665,6 +665,7 @@ def _finish_mouse_clicks():
                 "shell_refresh": STATE.get("shell_refresh", False),
                 "shell_optimize": STATE.get("shell_optimize", False),
                 "shell_hints": STATE.get("shell_hints", False),
+                "shell_chat_hints": STATE.get("shell_chat_hints", False),
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
@@ -934,7 +935,13 @@ def _probe():
             shell_hint_targets = {
                 key: bounds
                 for key, bounds in shell_state.targets
-                if key in {"build:editor", "tool:MODE:ADD", "chat:field"}
+                if key in {
+                    "build:editor",
+                    "tool:MODE:ADD",
+                    "chat:image",
+                    "chat:field",
+                    "chat:send",
+                }
             }
             expected_shell_hints = {
                 "build:editor": (
@@ -951,6 +958,16 @@ def _probe():
                     "Prompt",
                     "Enter",
                     "Ask the local model to create or change VOXTART content.",
+                ),
+                "chat:image": (
+                    "Image",
+                    "",
+                    "Attach a reference image for the local model.",
+                ),
+                "chat:send": (
+                    "Send",
+                    "Enter",
+                    "Send the prompt to the local model.",
                 ),
             }
             if set(shell_hint_targets) != set(expected_shell_hints):
@@ -989,6 +1006,7 @@ def _probe():
                         f"Desktop shell tooltip hover did not render: {key}"
                     )
             STATE["shell_hints"] = True
+            STATE["shell_chat_hints"] = True
 
             area.tag_redraw()
             bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
