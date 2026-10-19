@@ -520,6 +520,15 @@ class BlenderRegistrationTest(unittest.TestCase):
             character_editor_ui.VOXTART_OT_character_rebuild.bl_idname,
             "voxtart.character_rebuild",
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_toggle_visibility"),
+            character_editor_ui.VOXTART_OT_character_toggle_visibility,
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_toggle_visibility.bl_idname,
+            "voxtart.character_toggle_visibility",
+        )
+
         scene = bpy.context.scene
         self.assertEqual(scene.voxtart_character_name, "VOXTART Character")
         self.assertEqual(scene.voxtart_character_slot, "ROOT")
@@ -644,6 +653,47 @@ class BlenderRegistrationTest(unittest.TestCase):
                     if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
                 )
                 self.assertEqual(len(rebuilt), 2)
+                self.assertEqual(
+                    bpy.ops.voxtart.character_toggle_visibility(slot="TORSO"),
+                    {"FINISHED"},
+                )
+                hidden_recipe = CharacterRecipe.decode(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY]
+                )
+                self.assertFalse(hidden_recipe.get("TORSO").visible)
+                hidden_torso = next(
+                    obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY) == "TORSO"
+                    and obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                )
+                self.assertTrue(hidden_torso.hide_viewport)
+                self.assertTrue(hidden_torso.hide_render)
+                self.assertFalse(hidden_torso["voxtart_character_visible"])
+
+                self.assertEqual(bpy.ops.voxtart.character_rebuild(), {"FINISHED"})
+                rebuilt_by_slot = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                self.assertTrue(rebuilt_by_slot["TORSO"].hide_viewport)
+                self.assertTrue(rebuilt_by_slot["TORSO"].hide_render)
+                self.assertFalse(rebuilt_by_slot["TORSO"]["voxtart_character_visible"])
+                self.assertEqual(
+                    bpy.ops.voxtart.character_toggle_visibility(slot="TORSO"),
+                    {"FINISHED"},
+                )
+                shown_torso = next(
+                    obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY) == "TORSO"
+                    and obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                )
+                self.assertFalse(shown_torso.hide_viewport)
+                self.assertFalse(shown_torso.hide_render)
+                self.assertTrue(shown_torso["voxtart_character_visible"])
+
 
                 self.assertEqual(
                     bpy.ops.voxtart.character_remove_part(slot="TORSO"),

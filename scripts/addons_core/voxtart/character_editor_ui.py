@@ -5,6 +5,8 @@
 """Blender UI for assembling socketed voxel character parts."""
 
 
+from dataclasses import replace
+
 import json
 import uuid
 
@@ -163,6 +165,11 @@ def _rebuild_character(context: bpy.types.Context, recipe: CharacterRecipe) -> t
             obj[CHARACTER_BLOB_PROPERTY] = part.blob_id
             obj["voxtart_character_parent_slot"] = part.parent_slot
             obj["voxtart_character_part_name"] = part.name
+            obj["voxtart_character_visible"] = bool(part.visible)
+            obj.hide_viewport = not part.visible
+            obj.hide_render = not part.visible
+            obj.hide_set(not part.visible)
+
     except Exception:
         _remove_created(created)
         raise
@@ -298,6 +305,34 @@ class VOXTART_OT_character_remove_part(bpy.types.Operator):
         return {'FINISHED'}
 
 
+
+class VOXTART_OT_character_toggle_visibility(bpy.types.Operator):
+    bl_idname = "voxtart.character_toggle_visibility"
+    bl_label = "Toggle Character Part Visibility"
+    bl_description = "Show or hide an assigned character part without removing it from the recipe"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    slot: EnumProperty(name="Slot", items=_SLOT_ITEMS, default="ROOT", options={'HIDDEN'})
+
+    def execute(self, context):
+        scene = context.scene
+        try:
+            recipe = _load_recipe(scene)
+            part = recipe.get(self.slot)
+            if part is None:
+                self.report({'ERROR'}, f"slot {self.slot} is empty")
+                return {'CANCELLED'}
+            part = replace(part, visible=not part.visible)
+            recipe.upsert(part)
+            _rebuild_character(context, recipe)
+            _save_recipe(scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        state = "Shown" if part.visible else "Hidden"
+        self.report({'INFO'}, f"{state} {self.slot}")
+        return {'FINISHED'}
+
 class VOXTART_OT_character_clear(bpy.types.Operator):
     bl_idname = "voxtart.character_clear"
     bl_label = "Clear Character"
@@ -369,10 +404,16 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
             if part is None:
                 row.label(text="Empty")
                 continue
-            row.label(text=part.name)
+            visibility = row.operator(
+                VOXTART_OT_character_toggle_visibility.bl_idname,
+                text=part.name,
+                icon="HIDE_OFF" if part.visible else "HIDE_ON",
+            )
+            visibility.slot = slot
             if slot != "ROOT":
                 remove = row.operator(VOXTART_OT_character_remove_part.bl_idname, text="", icon="X")
                 remove.slot = slot
+
         if recipe.parts:
             box.label(text="Parts snap through compatible opposite-facing joints.", icon="CONSTRAINT")
 
@@ -382,6 +423,7 @@ _CLASSES = (
     VOXTART_OT_character_assign_active,
     VOXTART_OT_character_rebuild,
     VOXTART_OT_character_remove_part,
+    VOXTART_OT_character_toggle_visibility,
     VOXTART_OT_character_clear,
     VOXTART_PT_character_editor,
 )
@@ -429,6 +471,7 @@ __all__ = [
     "CHARACTER_OBJECT_ID_PROPERTY",
     "CHARACTER_RECIPE_PROPERTY",
     "CHARACTER_SLOT_PROPERTY",
+    "VOXTART_OT_character_toggle_visibility",
     "register",
     "unregister",
 ]

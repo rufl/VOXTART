@@ -747,6 +747,9 @@ assignment, slot replacement, and character cleanup.
   replace or remove non-root slots without losing the saved recipe;
 - clear the generated character and its recipe without affecting unrelated
   scene objects.
+- toggle each assigned slot's visibility without removing the part from the
+  recipe; hidden variants persist through rebuild and retain their slot and
+  parent metadata.
 
 The editor requires a `Root` part before socketed children. A child slot must
 have its canonical parent (`Torso` mounts to `Root`; head, limbs, and
