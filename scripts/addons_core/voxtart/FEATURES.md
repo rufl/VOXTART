@@ -247,7 +247,8 @@ The bundled Blender runtime retains its own `license/license.md`,
   Favorites persist as scene metadata and follow a color when its HSV value is
   edited.
 - Swatch headers show the active color's display-space HEX value and material
-  kind; hover cards expose the same metadata and the pin/unpin action.
+  kind. Hovering either a regular or pinned swatch opens the same metadata card,
+  including the color slot and the pin/unpin gesture.
 
 
 ### Goxel-style voxel editing

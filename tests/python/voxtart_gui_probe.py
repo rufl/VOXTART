@@ -62,6 +62,12 @@ SCENE_SCREENSHOT = Path(
         str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_scene{SCREENSHOT.suffix}")),
     )
 )
+PALETTE_HINT_SCREENSHOT = Path(
+    os.environ.get(
+        "VOXTART_GUI_PALETTE_HINT_SCREENSHOT",
+        str(SCREENSHOT.with_name(f"{SCREENSHOT.stem}_palette_hint{SCREENSHOT.suffix}")),
+    )
+)
 GUI_SAVE_PATH = Path(
     os.environ.get(
         "VOXTART_GUI_SAVE_PATH",
@@ -720,6 +726,8 @@ def _finish_mouse_clicks():
                 "palette_favorite": STATE.get("palette_favorite", False),
                 "color_wheel": STATE.get("color_wheel", False),
                 "color_wheel_hints": STATE.get("color_wheel_hints", False),
+                "palette_hints": STATE.get("palette_hints", False),
+                "palette_hint_screenshot": STATE.get("palette_hint_screenshot", ""),
                 "topbar_toolbar_hints": STATE.get("topbar_toolbar_hints", False),
                 "grid_shortcut": STATE.get("grid_shortcut", False),
                 "dock_drawers": STATE.get("dock_drawers", False),
@@ -3040,6 +3048,39 @@ def _probe():
         metadata = voxel_editor._editor_palette_metadata(editor, palette_index)
         if not metadata[0].startswith("#") or metadata[1] != "Diffuse":
             return _fail(f"VOXTART palette swatch metadata is incomplete: {metadata!r}")
+        palette_hover_event = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(palette_bounds[0] + palette_bounds[2]) * 0.5,
+            mouse_region_y=(palette_bounds[1] + palette_bounds[3]) * 0.5,
+        )
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            palette_hover_result = editor.modal(bpy.context, palette_hover_event)
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+        palette_hint_content = voxel_editor._editor_palette_tooltip_content(
+            editor,
+            palette_index,
+        )
+        if (
+            "RUNNING_MODAL" not in palette_hover_result
+            or editor.palette_hover != palette_index
+            or palette_hint_content
+            != (
+                f"Color {palette_index + 1}",
+                f"{metadata[0]} · {metadata[1]}",
+                "Alt/Right-click to pin",
+                False,
+            )
+        ):
+            return _fail(f"VOXTART palette hover card was incomplete: {palette_hint_content!r}")
         favorite_event = SimpleNamespace(
             type="RIGHTMOUSE",
             value="PRESS",
@@ -3091,6 +3132,51 @@ def _probe():
             or favorite_panel[2] <= favorite_panel[0]
         ):
             return _fail("VOXTART pinned swatch was not a selectable palette shortcut")
+        favorite_hover_event = SimpleNamespace(
+            type="MOUSEMOVE",
+            value="NOTHING",
+            ctrl=False,
+            shift=False,
+            alt=False,
+            mouse_region_x=(favorite_bounds[0] + favorite_bounds[2]) * 0.5,
+            mouse_region_y=(favorite_bounds[1] + favorite_bounds[3]) * 0.5,
+        )
+        PALETTE_HINT_SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            favorite_hover_result = editor.modal(bpy.context, favorite_hover_event)
+            voxel_editor._draw_editor_overlay(editor, bpy.context)
+            bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=10)
+            palette_hint_screenshot_result = bpy.ops.screen.screenshot(
+                filepath=str(PALETTE_HINT_SCREENSHOT)
+            )
+        favorite_hint_content = voxel_editor._editor_palette_tooltip_content(
+            editor,
+            palette_index,
+        )
+        if (
+            "RUNNING_MODAL" not in favorite_hover_result
+            or editor.palette_hover != palette_index
+            or favorite_hint_content
+            != (
+                f"Color {palette_index + 1}",
+                f"{metadata[0]} · {metadata[1]}",
+                "Pinned · right-click to unpin",
+                True,
+            )
+            or "FINISHED" not in palette_hint_screenshot_result
+            or not PALETTE_HINT_SCREENSHOT.is_file()
+        ):
+            return _fail(
+                f"VOXTART pinned palette hover card was incomplete: "
+                f"{favorite_hint_content!r}, screenshot={palette_hint_screenshot_result!r}"
+            )
+        STATE["palette_hints"] = True
+        STATE["palette_hint_screenshot"] = str(PALETTE_HINT_SCREENSHOT)
         STATE["palette_favorite"] = True
 
         STATE["palette_selection"] = True

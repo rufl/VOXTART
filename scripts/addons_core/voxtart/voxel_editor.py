@@ -1280,6 +1280,18 @@ def _editor_palette_metadata(editor, index: int):
     return hex_color, material_kind, favorite
 
 
+def _editor_palette_tooltip_content(editor, index: int):
+    hex_color, material_kind, favorite = _editor_palette_metadata(editor, index)
+    return (
+        f"Color {index + 1}",
+        f"{hex_color} · {material_kind}",
+        "Pinned · right-click to unpin" if favorite else "Alt/Right-click to pin",
+        favorite,
+    )
+
+
+
+
 
 
 def _editor_color_wheel_hsv(editor):
@@ -2086,9 +2098,8 @@ def _draw_editor_palette(editor, context) -> None:
                         float(region.height) - tooltip_height - 8.0 * scale,
                     ),
                 )
-                hovered_hex, hovered_kind, hovered_favorite = _editor_palette_metadata(
-                    editor,
-                    hovered_index,
+                hovered_title, hovered_metadata, hovered_gesture, hovered_favorite = (
+                    _editor_palette_tooltip_content(editor, hovered_index)
                 )
                 _draw_editor_panel(
                     tooltip_x,
@@ -2100,23 +2111,21 @@ def _draw_editor_palette(editor, context) -> None:
                     radius=9.0 * scale,
                 )
                 _draw_editor_text(
-                    f"Color {hovered_index + 1}",
+                    hovered_title,
                     tooltip_x + 12.0 * scale,
                     tooltip_y + 48.0 * scale,
                     13.0,
                     _THEME["text"],
                 )
                 _draw_editor_text(
-                    f"{hovered_hex} · {hovered_kind}",
+                    hovered_metadata,
                     tooltip_x + 12.0 * scale,
                     tooltip_y + 28.0 * scale,
                     10.0,
                     _THEME["accent"] if hovered_favorite else _THEME["text_muted"],
                 )
                 _draw_editor_text(
-                    "Pinned · right-click to unpin"
-                    if hovered_favorite
-                    else "Alt/Right-click to pin",
+                    hovered_gesture,
                     tooltip_x + 12.0 * scale,
                     tooltip_y + 12.0 * scale,
                     10.0,
