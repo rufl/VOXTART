@@ -563,6 +563,83 @@ def _editor_cursor(editor, event=None) -> str:
         "SELECT": "CROSSHAIR",
     }.get(_editor_input_mode(editor), "CROSSHAIR")
 
+
+def _editor_bounds_contains(bounds, x: float, y: float) -> bool:
+    return (
+        bounds is not None
+        and bounds[0] <= x <= bounds[2]
+        and bounds[1] <= y <= bounds[3]
+    )
+
+
+def _editor_help_panel_bounds(region):
+    scale = ui_style.ui_scale()
+    width = float(getattr(region, "width", 0.0))
+    height = float(getattr(region, "height", 0.0))
+    panel_width = min(390.0 * scale, max(300.0 * scale, width - 112.0 * scale))
+    panel_height = min(220.0 * scale, max(196.0 * scale, height - 96.0 * scale))
+    panel_x = min(84.0 * scale, max(16.0 * scale, width - panel_width - 16.0 * scale))
+    panel_y = 96.0 * scale
+    if panel_y + panel_height > height - 40.0 * scale:
+        panel_y = max(40.0 * scale, height - panel_height - 40.0 * scale)
+    return (
+        panel_x,
+        panel_y,
+        panel_x + panel_width,
+        panel_y + panel_height,
+    )
+
+
+def _editor_ui_surface_at(editor, context, event) -> bool:
+    region = getattr(context, "region", None)
+    if region is None:
+        return False
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    width = float(getattr(region, "width", 0.0))
+    height = float(getattr(region, "height", 0.0))
+    if not (0.0 <= x <= width and 0.0 <= y <= height):
+        return True
+    scale = ui_style.ui_scale()
+    if y >= height - 48.0 * scale or y <= 36.0 * scale:
+        return True
+    scene = getattr(editor, "scene", None)
+    scene_get = getattr(scene, "get", None)
+    if not callable(scene_get):
+        return False
+    if bool(scene_get(EDITOR_MENU_PROPERTY, False)):
+        menu_panel = _editor_menu_layout(region)[0]
+        if _editor_bounds_contains(menu_panel, x, y):
+            return True
+    if bool(scene_get(EDITOR_OPTIONS_PROPERTY, False)):
+        options_panel = _editor_options_layout(region)[0]
+        if _editor_bounds_contains(options_panel, x, y):
+            return True
+    for layout in _editor_floating_layouts(editor, context).values():
+        panel = layout.get("panel")
+        if panel is not None and panel[2] > panel[0] and panel[3] > panel[1]:
+            if _editor_bounds_contains(panel, x, y):
+                return True
+    dock_layout = _editor_dock_layout(editor, region)
+    for panel_info in dock_layout["panels"].values():
+        if _editor_bounds_contains(panel_info.get("bounds"), x, y):
+            return True
+    for drawer in dock_layout["drawers"].values():
+        if _editor_bounds_contains(drawer, x, y):
+            return True
+    if bool(scene_get(EDITOR_HELP_PROPERTY, False)):
+        if _editor_bounds_contains(_editor_help_panel_bounds(region), x, y):
+            return True
+    if bool(scene_get(EDITOR_DETAILS_PROPERTY, False)) and y <= 84.0 * scale:
+        return True
+    if (
+        bool(scene_get(EDITOR_DETAILS_PROPERTY, False))
+        or bool(scene_get(EDITOR_ADVANCED_PROPERTY, False))
+    ) and height - 84.0 * scale <= y <= height - 56.0 * scale:
+        return True
+    return False
+
+
 def _editor_view_hud_layout(editor, region):
     scale = ui_style.ui_scale()
     width = float(getattr(region, "width", 0.0))
@@ -4329,14 +4406,9 @@ def _draw_editor_help(editor, context) -> None:
     if region is None:
         return
     scale = ui_style.ui_scale()
-    width = float(region.width)
-    height = float(region.height)
-    panel_width = min(390.0 * scale, max(300.0 * scale, width - 112.0 * scale))
-    panel_height = min(220.0 * scale, max(196.0 * scale, height - 96.0 * scale))
-    panel_x = min(84.0 * scale, max(16.0 * scale, width - panel_width - 16.0 * scale))
-    panel_y = 96.0 * scale
-    if panel_y + panel_height > height - 40.0 * scale:
-        panel_y = max(40.0 * scale, height - panel_height - 40.0 * scale)
+    panel_x, panel_y, panel_right, panel_top = _editor_help_panel_bounds(region)
+    panel_width = panel_right - panel_x
+    panel_height = panel_top - panel_y
     _draw_editor_panel(
         panel_x,
         panel_y,
@@ -5985,13 +6057,21 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         else:
             self._cancel_stroke(context)
         self._finish_handler()
+        _set_editor_cursor(context, "DEFAULT")
         _request_redraw(self, context, force=True)
         return {"FINISHED"} if result is None else result
 
     def modal(self, context, event):
         from . import desktop_ui, mcp
 
-        _set_editor_cursor(context, _editor_cursor(self, event))
+        ui_surface = (
+            event.type in {"MOUSEMOVE", "LEFTMOUSE", "RIGHTMOUSE"}
+            and _editor_ui_surface_at(self, context, event)
+        )
+        _set_editor_cursor(
+            context,
+            "DEFAULT" if ui_surface else _editor_cursor(self, event),
+        )
         if mcp.handle_chat_text_event(event):
             _request_redraw(self, context, force=True)
             return {"RUNNING_MODAL"}
@@ -6352,11 +6432,21 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.last_hit = None
                 self.preview_cells = ()
                 return {"RUNNING_MODAL"}
+            if _editor_ui_surface_at(self, context, event):
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "DEFAULT")
+                return {"RUNNING_MODAL"}
         if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "PRESS":
             toolbar_item = _editor_toolbar_item_at(self, context, event)
             if toolbar_item is not None:
                 if event.type == "LEFTMOUSE":
                     self._activate_toolbar_tool(context, toolbar_item)
+                return {"RUNNING_MODAL"}
+            if _editor_ui_surface_at(self, context, event):
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "DEFAULT")
                 return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
             self.last_hit = self._ray_hit(context, event)
@@ -6648,7 +6738,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             "POST_VIEW",
         )
         context.window_manager.modal_handler_add(self)
-        _set_editor_cursor(context, _editor_cursor(self))
+        _set_editor_cursor(context, "DEFAULT")
         return {"RUNNING_MODAL"}
 
 

@@ -486,6 +486,7 @@ def _run_gui_probe() -> None:
             or payload.get("initial_minimal") is not True
             or payload.get("floating_panel_drag") is not True
             or payload.get("shell_panel_drag") is not True
+            or payload.get("ui_click_guard") is not True
             or payload.get("native_chrome_hidden") is not True
             or payload.get("area_types") != ["VIEW_3D"]
             or payload.get("window_fullscreen") is not False

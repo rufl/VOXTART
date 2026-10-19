@@ -166,6 +166,17 @@ def _shell_panel_hit(state, x: float, y: float) -> str | None:
             return name
     return None
 
+
+def _set_shell_cursor(context, cursor: str) -> None:
+    window = getattr(context, "window", None)
+    if window is None:
+        return
+    try:
+        window.cursor_set(cursor)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return
+
+
 def _draw_rect(x: float, y: float, width: float, height: float, color) -> None:
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
     batch = batch_for_shader(
@@ -1373,6 +1384,7 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             bpy.types.SpaceView3D.draw_handler_remove(_ACTIVE_HANDLE, "WINDOW")
         _ACTIVE_HANDLE = None
         _ACTIVE_STATE = None
+        _set_shell_cursor(context, "DEFAULT")
         from . import desktop_ui
 
         try:
@@ -1640,7 +1652,9 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
         if key == "character:export":
             _run_operator(scene, lambda: bpy.ops.voxtart.export_game_rig("INVOKE_DEFAULT"), "Choose a rig export path")
             return
+
     def modal(self, context, event):
+        _set_shell_cursor(context, "DEFAULT")
         area = _ACTIVE_AREA or getattr(context, "area", None)
         if area is not None:
             area.tag_redraw()
@@ -1691,6 +1705,7 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                     offset_y + y - origin_y,
                 )
                 state.hovered = None
+                _set_shell_cursor(context, "HAND")
                 return {"RUNNING_MODAL"}
             panel = _shell_panel_hit(state, x, y)
             if panel is not None:
@@ -1704,6 +1719,10 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                         (key for key, bounds in tuple(state.targets) if _inside(x, y, bounds)),
                         None,
                     )
+            _set_shell_cursor(
+                context,
+                "HAND" if panel is not None or hovered is not None else "DEFAULT",
+            )
             if state.hovered != hovered:
                 state.hovered = hovered
                 if area is not None:
@@ -1727,6 +1746,7 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                 state.panel_drag_origin = (x, y)
                 state.panel_drag_offset = _shell_panel_offset(state, panel)
                 state.hovered = None
+                _set_shell_cursor(context, "HAND")
                 _set_status(context.scene, f"{panel.title()} panel moving")
                 return {"RUNNING_MODAL"}
             chat_action = _chat_action_at(state, width, height, x, y)
@@ -1735,11 +1755,13 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                     mcp.set_chat_input_focus(True)
                 else:
                     self._activate(context, chat_action)
+                _set_shell_cursor(context, "HAND")
                 return {"RUNNING_MODAL"}
             mcp.set_chat_input_focus(False)
             for key, bounds in tuple(state.targets):
                 if _inside(x, y, bounds):
                     self._activate(context, key)
+                    _set_shell_cursor(context, "HAND")
                     return {"RUNNING_MODAL"}
         return {"PASS_THROUGH"}
 
@@ -1769,6 +1791,7 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             "POST_PIXEL",
         )
         context.window_manager.modal_handler_add(self)
+        _set_shell_cursor(context, "DEFAULT")
         context.area.tag_redraw()
         return {"RUNNING_MODAL"}
 

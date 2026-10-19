@@ -738,6 +738,7 @@ def _finish_mouse_clicks():
                 "dock_hints": STATE.get("dock_hints", False),
                 "menu_surface": STATE.get("menu_surface", False),
                 "dock_snap": STATE.get("dock_snap", False),
+                "ui_click_guard": STATE.get("ui_click_guard", False),
                 "floating_panel_drag": STATE.get("floating_panel_drag", False),
                 "product_controls": STATE.get("product_controls", False),
                 "project_control": STATE.get("project_control", False),
@@ -4016,6 +4017,45 @@ def _probe():
                 return _fail("More tools did not restore the beginner editor toolbar")
         STATE["advanced_tools_toggle"] = True
         STATE["native_ui_lock"] = not desktop_ui.native_chrome_visible(scene)
+        guard_before_voxels = dict(operators._load_asset(obj).voxels)
+        toolbar_panel = voxel_editor._editor_toolbar_layout_positioned(editor, region)["panel"]
+        guard_points = (
+            (24.0, float(region.height) - 24.0),
+            (toolbar_panel[0] + 4.0, toolbar_panel[1] + 4.0),
+            (-4.0, -4.0),
+        )
+        for point in guard_points:
+            guard_press = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=point[0],
+                mouse_region_y=point[1],
+            )
+            guard_release = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="RELEASE",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=point[0],
+                mouse_region_y=point[1],
+            )
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                guard_press_result = editor.modal(bpy.context, guard_press)
+                editor.modal(bpy.context, guard_release)
+            if "RUNNING_MODAL" not in guard_press_result:
+                return _fail(f"UI guard did not consume click at {point!r}")
+        if dict(operators._load_asset(obj).voxels) != guard_before_voxels:
+            return _fail("UI click guard changed voxels outside the paintable viewport")
+        STATE["ui_click_guard"] = True
         bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
         left_point, right_point, left_cell, right_cell = _viewport_hits(editor, obj, area, region)
         STATE.update(
