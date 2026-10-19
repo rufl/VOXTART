@@ -528,6 +528,23 @@ class BlenderRegistrationTest(unittest.TestCase):
             character_editor_ui.VOXTART_OT_character_toggle_visibility.bl_idname,
             "voxtart.character_toggle_visibility",
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_bind_animation"),
+            character_editor_ui.VOXTART_OT_character_bind_animation,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_unbind_animation"),
+            character_editor_ui.VOXTART_OT_character_unbind_animation,
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_bind_animation.bl_idname,
+            "voxtart.character_bind_animation",
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_unbind_animation.bl_idname,
+            "voxtart.character_unbind_animation",
+        )
+
 
         scene = bpy.context.scene
         self.assertEqual(scene.voxtart_character_name, "VOXTART Character")
@@ -608,6 +625,8 @@ class BlenderRegistrationTest(unittest.TestCase):
         scene = bpy.context.scene
         previous_gallery_path = scene.voxtart_blob_gallery_path
         before_names = {obj.name for obj in bpy.data.objects}
+        previous_animation_target = scene.voxtart_animation_target
+
         for property_name in (
             character_editor_ui.CHARACTER_RECIPE_PROPERTY,
             character_editor_ui.CHARACTER_ID_PROPERTY,
@@ -695,6 +714,75 @@ class BlenderRegistrationTest(unittest.TestCase):
                 self.assertTrue(shown_torso["voxtart_character_visible"])
 
 
+                target_data = bpy.data.armatures.new("VOXTART Charameld Target Data")
+                target = bpy.data.objects.new("VOXTART Charameld Target", target_data)
+                scene.collection.objects.link(target)
+                for selected in tuple(bpy.context.selected_objects):
+                    selected.select_set(False)
+                target.select_set(True)
+                bpy.context.view_layer.objects.active = target
+                bpy.ops.object.mode_set(mode="EDIT")
+                root_bone = target_data.edit_bones.new("root")
+                root_bone.head = (0.0, 0.0, 0.0)
+                root_bone.tail = (0.0, 1.0, 0.0)
+                spine_bone = target_data.edit_bones.new("spine")
+                spine_bone.head = (0.0, 1.0, 0.0)
+                spine_bone.tail = (0.0, 2.0, 0.0)
+                spine_bone.parent = root_bone
+                bpy.ops.object.mode_set(mode="OBJECT")
+                scene.voxtart_animation_target = target.name
+                self.assertEqual(
+                    bpy.ops.voxtart.character_bind_animation(),
+                    {"FINISHED"},
+                )
+                bound_recipe = CharacterRecipe.decode(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY]
+                )
+                self.assertEqual(bound_recipe.settings["animation_target"], target.name)
+                self.assertEqual(
+                    bound_recipe.settings["animation_bindings"],
+                    {"ROOT": "root", "TORSO": "spine"},
+                )
+                bound_by_slot = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                self.assertIs(bound_by_slot["ROOT"].parent, target)
+                self.assertEqual(bound_by_slot["ROOT"].parent_type, "BONE")
+                self.assertEqual(bound_by_slot["ROOT"].parent_bone, "root")
+                self.assertIs(bound_by_slot["TORSO"].parent, target)
+                self.assertEqual(bound_by_slot["TORSO"].parent_type, "BONE")
+                self.assertEqual(bound_by_slot["TORSO"].parent_bone, "spine")
+                self.assertEqual(
+                    bound_by_slot["TORSO"]["voxtart_animation_armature"],
+                    target.name,
+                )
+
+                self.assertEqual(bpy.ops.voxtart.character_rebuild(), {"FINISHED"})
+                rebuilt_bound = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                self.assertIs(rebuilt_bound["TORSO"].parent, target)
+                self.assertEqual(rebuilt_bound["TORSO"].parent_bone, "spine")
+                self.assertEqual(
+                    bpy.ops.voxtart.character_unbind_animation(),
+                    {"FINISHED"},
+                )
+                unbound_recipe = CharacterRecipe.decode(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY]
+                )
+                self.assertNotIn("animation_target", unbound_recipe.settings)
+                unbound_by_slot = {
+                    str(obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY)): obj
+                    for obj in bpy.data.objects
+                    if obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                }
+                self.assertIsNone(unbound_by_slot["ROOT"].parent)
+                self.assertIs(unbound_by_slot["TORSO"].parent, unbound_by_slot["ROOT"])
+
                 self.assertEqual(
                     bpy.ops.voxtart.character_remove_part(slot="TORSO"),
                     {"FINISHED"},
@@ -762,6 +850,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         finally:
             _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
             scene.voxtart_blob_gallery_path = previous_gallery_path
+            scene.voxtart_animation_target = previous_animation_target
             for property_name in (
                 character_editor_ui.CHARACTER_RECIPE_PROPERTY,
                 character_editor_ui.CHARACTER_ID_PROPERTY,

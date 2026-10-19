@@ -18,6 +18,8 @@ from .character_editor import (
     CharacterPart,
     CharacterRecipe,
 )
+from .animation import canonical_bone_role
+
 from .operators import ASSET_PROPERTY
 
 
@@ -37,6 +39,18 @@ _SLOT_ITEMS = (
     ("LEG_R", "Leg R", "Right leg mounted to the torso."),
     ("ACCESSORY", "Accessory", "Optional accessory mounted to the torso."),
 )
+
+_CHARACTER_ANIMATION_ROLES = {
+    "ROOT": ("root", "pelvis"),
+    "TORSO": ("chest", "spine", "pelvis", "root"),
+    "HEAD": ("head", "neck"),
+    "ARM_L": ("upper_arm_l", "shoulder_l", "forearm_l", "hand_l"),
+    "ARM_R": ("upper_arm_r", "shoulder_r", "forearm_r", "hand_r"),
+    "LEG_L": ("upper_leg_l", "lower_leg_l", "foot_l"),
+    "LEG_R": ("upper_leg_r", "lower_leg_r", "foot_r"),
+    "ACCESSORY": ("chest", "spine", "head", "pelvis"),
+}
+
 
 
 def _gallery(context):
@@ -106,6 +120,81 @@ def _root_location(recipe: CharacterRecipe, context: bpy.types.Context) -> tuple
     recipe.settings["root_location"] = list(location)
     return location
 
+def _animation_target_object(context, name: str = "") -> bpy.types.Object:
+    target_name = str(
+        name or getattr(context.scene, "voxtart_animation_target", "") or ""
+    ).strip()
+    target = bpy.data.objects.get(target_name) if target_name else None
+    if target is None or target.type != "ARMATURE":
+        raise ValueError("choose an animation target armature before binding the character")
+    return target
+
+
+def _animation_bone_for_slot(target: bpy.types.Object, slot: str) -> str:
+    roles = _CHARACTER_ANIMATION_ROLES.get(slot)
+    if roles is None:
+        raise ValueError(f"unsupported character animation slot: {slot}")
+    for role in roles:
+        matches = sorted(
+            (
+                bone.name
+                for bone in target.data.bones
+                if canonical_bone_role(bone.name) == role
+            ),
+            key=lambda name: (name.casefold(), name),
+        )
+        if matches:
+            return matches[0]
+    raise ValueError(
+        f"target armature has no compatible bone for character slot {slot}"
+    )
+
+
+def _animation_bindings_for_target(
+    recipe: CharacterRecipe, target: bpy.types.Object
+) -> dict[str, str]:
+    return {
+        part.slot: _animation_bone_for_slot(target, part.slot)
+        for part in recipe.ordered_parts()
+    }
+
+
+def _bind_created_to_animation_target(
+    context: bpy.types.Context,
+    recipe: CharacterRecipe,
+    created: dict[str, bpy.types.Object],
+) -> None:
+    target_name = str(recipe.settings.get("animation_target", "") or "").strip()
+    if not target_name:
+        return
+    target = _animation_target_object(context, target_name)
+    raw_bindings = recipe.settings.get("animation_bindings")
+    required_slots = tuple(created)
+    if not isinstance(raw_bindings, dict) or any(
+        slot not in raw_bindings for slot in required_slots
+    ):
+        raw_bindings = _animation_bindings_for_target(recipe, target)
+        recipe.settings["animation_bindings"] = dict(raw_bindings)
+    bindings = {str(slot): str(name).strip() for slot, name in raw_bindings.items()}
+    world_matrices = {
+        slot: obj.matrix_world.copy() for slot, obj in created.items()
+    }
+    for obj in created.values():
+        obj.parent = None
+    for slot, obj in created.items():
+        bone_name = bindings.get(slot, "")
+        if not bone_name or target.data.bones.get(bone_name) is None:
+            raise ValueError(
+                f"target armature binding for character slot {slot} is invalid"
+            )
+        obj.parent = target
+        obj.parent_type = "BONE"
+        obj.parent_bone = bone_name
+        obj.matrix_world = world_matrices[slot]
+        obj["voxtart_animation_armature"] = target.name
+        obj["voxtart_animation_bone"] = bone_name
+
+
 
 def _remove_objects_with_id(character_id: str) -> None:
     for obj in tuple(bpy.data.objects):
@@ -169,6 +258,8 @@ def _rebuild_character(context: bpy.types.Context, recipe: CharacterRecipe) -> t
             obj.hide_viewport = not part.visible
             obj.hide_render = not part.visible
             obj.hide_set(not part.visible)
+        _bind_created_to_animation_target(context, recipe, created)
+
 
     except Exception:
         _remove_created(created)
@@ -333,6 +424,57 @@ class VOXTART_OT_character_toggle_visibility(bpy.types.Operator):
         self.report({'INFO'}, f"{state} {self.slot}")
         return {'FINISHED'}
 
+
+class VOXTART_OT_character_bind_animation(bpy.types.Operator):
+    bl_idname = "voxtart.character_bind_animation"
+    bl_label = "Bind Character to Target Rig"
+    bl_description = "Parent assembled character parts to compatible bones on the selected animation target"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        try:
+            recipe = _load_recipe(scene)
+            if not recipe.parts:
+                self.report({'ERROR'}, "assign at least one character part first")
+                return {'CANCELLED'}
+            target = _animation_target_object(context)
+            recipe.settings["animation_target"] = target.name
+            recipe.settings["animation_bindings"] = _animation_bindings_for_target(
+                recipe, target
+            )
+            _rebuild_character(context, recipe)
+            _save_recipe(scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Bound {recipe.name} to {target.name}")
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_unbind_animation(bpy.types.Operator):
+    bl_idname = "voxtart.character_unbind_animation"
+    bl_label = "Unbind Character from Target Rig"
+    bl_description = "Restore socketed character parenting and remove animation-target binding"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        scene = context.scene
+        try:
+            recipe = _load_recipe(scene)
+            if not str(recipe.settings.get("animation_target", "") or "").strip():
+                self.report({'ERROR'}, "character is not bound to an animation target")
+                return {'CANCELLED'}
+            recipe.settings.pop("animation_target", None)
+            recipe.settings.pop("animation_bindings", None)
+            _rebuild_character(context, recipe)
+            _save_recipe(scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Unbound {recipe.name} from its animation target")
+        return {'FINISHED'}
+
 class VOXTART_OT_character_clear(bpy.types.Operator):
     bl_idname = "voxtart.character_clear"
     bl_label = "Clear Character"
@@ -415,7 +557,28 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
                 remove.slot = slot
 
         if recipe.parts:
+            animation_box = layout.box()
+            bound_target = str(recipe.settings.get("animation_target", "") or "").strip()
+            if bound_target:
+                animation_box.label(text=f"Animation rig: {bound_target}", icon="ARMATURE_DATA")
+                animation_box.operator(
+                    VOXTART_OT_character_unbind_animation.bl_idname,
+                    text="Unbind Animation Rig",
+                    icon="UNLINKED",
+                )
+            else:
+                animation_box.label(
+                    text="Bind parts to the selected animation target.",
+                    icon="ARMATURE_DATA",
+                )
+                animation_box.operator(
+                    VOXTART_OT_character_bind_animation.bl_idname,
+                    text="Bind Animation Rig",
+                    icon="CONSTRAINT",
+                )
             box.label(text="Parts snap through compatible opposite-facing joints.", icon="CONSTRAINT")
+
+
 
 
 _CLASSES = (
@@ -424,9 +587,12 @@ _CLASSES = (
     VOXTART_OT_character_rebuild,
     VOXTART_OT_character_remove_part,
     VOXTART_OT_character_toggle_visibility,
+    VOXTART_OT_character_bind_animation,
+    VOXTART_OT_character_unbind_animation,
     VOXTART_OT_character_clear,
     VOXTART_PT_character_editor,
 )
+
 
 
 def register() -> None:
@@ -471,7 +637,9 @@ __all__ = [
     "CHARACTER_OBJECT_ID_PROPERTY",
     "CHARACTER_RECIPE_PROPERTY",
     "CHARACTER_SLOT_PROPERTY",
+    "VOXTART_OT_character_bind_animation",
     "VOXTART_OT_character_toggle_visibility",
+    "VOXTART_OT_character_unbind_animation",
     "register",
     "unregister",
 ]

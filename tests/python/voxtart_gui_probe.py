@@ -676,6 +676,8 @@ def _finish_mouse_clicks():
                 "hierarchy_roundtrip": STATE.get("hierarchy_roundtrip", False),
                 "kitbash_roundtrip": STATE.get("kitbash_roundtrip", False),
                 "character_editor_roundtrip": STATE.get("character_editor_roundtrip", False),
+                "charameld_animation_surface": STATE.get("charameld_animation_surface", False),
+
                 "character_native_ui_blocked": STATE.get("character_native_ui_blocked", False),
                 "mcp_roundtrip": STATE.get("mcp_roundtrip", False),
                 "minecraft_roundtrip": STATE.get("minecraft_roundtrip", False),
@@ -2208,6 +2210,11 @@ def _probe():
         ):
             return _fail("VOXTART Spriteform sequence surface is not registered")
         STATE["sprite_sequence_surface"] = True
+        if not hasattr(bpy.types, "VOXTART_OT_character_bind_animation") or not hasattr(
+            bpy.types, "VOXTART_OT_character_unbind_animation"
+        ):
+            return _fail("VOXTART Charameld animation surface is not registered")
+        STATE["charameld_animation_surface"] = True
         existing = bpy.data.objects.get("P0 GUI Asset")
         if existing is not None:
             bpy.data.objects.remove(existing, do_unlink=True)

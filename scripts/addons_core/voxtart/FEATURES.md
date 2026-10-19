@@ -750,6 +750,9 @@ assignment, slot replacement, and character cleanup.
 - toggle each assigned slot's visibility without removing the part from the
   recipe; hidden variants persist through rebuild and retain their slot and
   parent metadata.
+- bind the assembled parts to the selected animation target; slot roles map
+  deterministically to compatible bones, persist in the recipe, survive
+  rebuilds, and can be unbound to restore socket parenting.
 
 The editor requires a `Root` part before socketed children. A child slot must
 have its canonical parent (`Torso` mounts to `Root`; head, limbs, and
