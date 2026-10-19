@@ -701,6 +701,7 @@ def _finish_mouse_clicks():
                 "beginner_toolbar_after_first_edit": STATE.get("beginner_toolbar_after_first_edit", False),
                 "grid_toggle": STATE.get("grid_toggle", False),
                 "options_menu": STATE.get("options_menu", False),
+                "menu_option_hints": STATE.get("menu_option_hints", False),
                 "region_info": STATE.get("region_info", []),
                 "details_toggle": STATE.get("details_toggle", False),
                 "help_toggle": STATE.get("help_toggle", False),
@@ -3458,6 +3459,46 @@ def _probe():
             if scene.get(voxel_editor.EDITOR_OPTIONS_PROPERTY) is not True:
                 return _fail("VOXTART editor Options control did not open extra controls")
             option_entries = dict(voxel_editor._editor_options_layout(region)[1])
+            option_hint_contract = {
+                "OPTIONS_GRID": (
+                    "Grid",
+                    "Show or hide the bounded voxel grid.",
+                    "G",
+                ),
+                "OPTIONS_DETAILS": (
+                    "Hints",
+                    "Show helpful block and layer details.",
+                    "",
+                ),
+                "OPTIONS_MORE_TOOLS": (
+                    "Advanced tools",
+                    "Show every VOXTART tool.",
+                    "",
+                ),
+            }
+            for option_action, expected_hint in option_hint_contract.items():
+                option_bounds = option_entries.get(option_action)
+                if option_bounds is None:
+                    return _fail(f"VOXTART Options menu omitted {option_action}")
+                option_hover_event = SimpleNamespace(
+                    type="MOUSEMOVE",
+                    value="NOTHING",
+                    ctrl=False,
+                    shift=False,
+                    alt=False,
+                    mouse_region_x=(option_bounds[0] + option_bounds[2]) * 0.5,
+                    mouse_region_y=(option_bounds[1] + option_bounds[3]) * 0.5,
+                )
+                option_hover_result = editor.modal(bpy.context, option_hover_event)
+                voxel_editor._draw_editor_overlay(editor, bpy.context)
+                if (
+                    "RUNNING_MODAL" not in option_hover_result
+                    or editor.topbar_hover != option_action
+                    or voxel_editor._editor_options_hint(option_action) != expected_hint
+                ):
+                    return _fail(
+                        f"VOXTART Options hover hint was incomplete: {option_action}"
+                    )
             grid_bounds = option_entries.get("OPTIONS_GRID")
             if grid_bounds is None:
                 return _fail("VOXTART editor Options menu did not expose the grid toggle")
@@ -3582,6 +3623,77 @@ def _probe():
                 or overlay.show_axis_y
             ):
                 return _fail("VOXTART grid did not close after advanced tools testing")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "MENU")
+        if scene.get(voxel_editor.EDITOR_MENU_PROPERTY) is not True:
+            return _fail("VOXTART editor Menu control did not open the command surface")
+        menu_hint_contract = {
+            "MENU_PROJECT": ("Home", "Go home to your projects.", ""),
+            "MENU_SAVE": ("Save", "Save your block world.", ""),
+            "MENU_UNDO": ("Undo", "Undo your last change.", "Ctrl+Z"),
+            "MENU_REDO": ("Redo", "Bring back the change you just undid.", "Ctrl+Y"),
+            "MENU_GRID": ("Grid", "Show or hide the bounded voxel grid.", "G"),
+            "MENU_DETAILS": ("Edit info", "Show helpful block and layer details.", ""),
+            "MENU_DOCK_LEFT": (
+                "Left drawer",
+                "Show or hide the left panel drawer.",
+                "",
+            ),
+            "MENU_DOCK_RIGHT": (
+                "Right drawer",
+                "Show or hide the right panel drawer.",
+                "",
+            ),
+            "MENU_MORE_TOOLS": ("Advanced tools", "Show every VOXTART tool.", ""),
+            "MENU_HELP": ("Help", "Show the simple steps.", ""),
+        }
+        menu_entries = {
+            action: bounds
+            for action, _label, _icon, bounds in voxel_editor._editor_menu_layout(region)[1]
+        }
+        for menu_action, expected_hint in menu_hint_contract.items():
+            menu_bounds = menu_entries.get(menu_action)
+            if menu_bounds is None:
+                return _fail(f"VOXTART Menu omitted {menu_action}")
+            menu_hover_event = SimpleNamespace(
+                type="MOUSEMOVE",
+                value="NOTHING",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(menu_bounds[0] + menu_bounds[2]) * 0.5,
+                mouse_region_y=(menu_bounds[1] + menu_bounds[3]) * 0.5,
+            )
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                menu_hover_result = editor.modal(bpy.context, menu_hover_event)
+                voxel_editor._draw_editor_overlay(editor, bpy.context)
+            if (
+                "RUNNING_MODAL" not in menu_hover_result
+                or editor.topbar_hover != menu_action
+                or voxel_editor._editor_menu_hint(menu_action) != expected_hint
+            ):
+                return _fail(f"VOXTART Menu hover hint was incomplete: {menu_action}")
+        with bpy.context.temp_override(
+            window=window,
+            screen=screen,
+            area=area,
+            region=region,
+        ):
+            editor._activate_topbar_action(bpy.context, "MENU")
+        if scene.get(voxel_editor.EDITOR_MENU_PROPERTY) is not False:
+            return _fail("VOXTART editor Menu control did not close the command surface")
+        editor.topbar_hover = None
+        STATE["menu_option_hints"] = True
         STATE["details_toggle"] = True
         STATE["options_menu"] = True
         STATE["product_controls"] = True

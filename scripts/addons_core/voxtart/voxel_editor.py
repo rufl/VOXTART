@@ -1746,25 +1746,53 @@ def _draw_editor_menu(editor, context) -> None:
 def _draw_editor_topbar_tooltip(editor, context) -> None:
     action = getattr(editor, "topbar_hover", None)
     region = getattr(context, "region", None)
-    if action is None or region is None:
+    scene = getattr(context, "scene", None)
+    if action is None or region is None or scene is None:
         return
     scale = ui_style.ui_scale()
     bounds = next(
         (item_bounds for item, item_bounds in _editor_topbar_action_bounds(region) if item == action),
         None,
     )
-    if bounds is None:
-        return
-    help_visible = bool(context.scene.get(EDITOR_HELP_PROPERTY))
-    title = _editor_topbar_label(action, help_visible=help_visible)
-    history = tuple(getattr(editor, "history", ()))
-    history_index = int(getattr(editor, "history_index", -1))
-    if action == "UNDO" and history_index <= 0:
-        description = "Nothing to undo yet."
-    elif action == "REDO" and not (0 <= history_index < len(history) - 1):
-        description = "Nothing to redo yet."
+    popup_action = False
+    if bounds is not None:
+        help_visible = bool(scene.get(EDITOR_HELP_PROPERTY))
+        title = _editor_topbar_label(action, help_visible=help_visible)
+        history = tuple(getattr(editor, "history", ()))
+        history_index = int(getattr(editor, "history_index", -1))
+        if action == "UNDO" and history_index <= 0:
+            description = "Nothing to undo yet."
+        elif action == "REDO" and not (0 <= history_index < len(history) - 1):
+            description = "Nothing to redo yet."
+        else:
+            description = _editor_topbar_hint(action)
+        shortcut = _EDITOR_TOPBAR_SHORTCUTS.get(action, "")
     else:
-        description = _editor_topbar_hint(action)
+        hint = _editor_options_hint(action)
+        if hint is not None and bool(scene.get(EDITOR_OPTIONS_PROPERTY)):
+            bounds = next(
+                (
+                    item_bounds
+                    for item, item_bounds in _editor_options_layout(region)[1]
+                    if item == action
+                ),
+                None,
+            )
+        else:
+            hint = _editor_menu_hint(action)
+            if hint is not None and bool(scene.get(EDITOR_MENU_PROPERTY)):
+                bounds = next(
+                    (
+                        item_bounds
+                        for item, _label, _icon, item_bounds in _editor_menu_layout(region)[1]
+                        if item == action
+                    ),
+                    None,
+                )
+        if bounds is None or hint is None:
+            return
+        title, description, shortcut = hint
+        popup_action = True
     lines = ui_style.wrap_text(
         description,
         11.0,
@@ -1772,7 +1800,6 @@ def _draw_editor_topbar_tooltip(editor, context) -> None:
     )[:2]
     if not lines:
         lines = ("Choose this control to continue.",)
-    shortcut = _EDITOR_TOPBAR_SHORTCUTS.get(action, "")
     shortcut_width = _editor_text_width(shortcut, 10.0) + 16.0 * scale if shortcut else 0.0
     tooltip_width = min(
         float(region.width) - 16.0 * scale,
@@ -1783,10 +1810,21 @@ def _draw_editor_topbar_tooltip(editor, context) -> None:
         ),
     )
     tooltip_height = (54.0 + max(0, len(lines) - 1) * 14.0) * scale
-    tooltip_x = min(
-        max(8.0 * scale, bounds[0]),
-        float(region.width) - tooltip_width - 8.0 * scale,
-    )
+    if popup_action:
+        left_x = bounds[0] - tooltip_width - 10.0 * scale
+        right_x = bounds[2] + 10.0 * scale
+        if left_x >= 8.0 * scale:
+            tooltip_x = min(left_x, float(region.width) - tooltip_width - 8.0 * scale)
+        else:
+            tooltip_x = min(
+                max(8.0 * scale, right_x),
+                float(region.width) - tooltip_width - 8.0 * scale,
+            )
+    else:
+        tooltip_x = min(
+            max(8.0 * scale, bounds[0]),
+            float(region.width) - tooltip_width - 8.0 * scale,
+        )
     tooltip_y = max(8.0 * scale, bounds[1] - tooltip_height - 10.0 * scale)
     _draw_editor_panel(
         tooltip_x,
@@ -2847,6 +2885,33 @@ _EDITOR_TOPBAR_HINTS = {
     "DOCK_LEFT": "Show or hide the left panel drawer.",
     "DOCK_RIGHT": "Show or hide the right panel drawer.",
 }
+_EDITOR_OPTIONS_HINTS = {
+    "OPTIONS_GRID": ("Grid", "Show or hide the bounded voxel grid.", "G"),
+    "OPTIONS_DETAILS": ("Hints", "Show helpful block and layer details.", ""),
+    "OPTIONS_MORE_TOOLS": ("Advanced tools", "Show every VOXTART tool.", ""),
+}
+
+
+_EDITOR_MENU_HINTS = {
+    "MENU_PROJECT": ("Home", "Go home to your projects.", ""),
+    "MENU_SAVE": ("Save", "Save your block world.", ""),
+    "MENU_UNDO": ("Undo", "Undo your last change.", "Ctrl+Z"),
+    "MENU_REDO": ("Redo", "Bring back the change you just undid.", "Ctrl+Y"),
+    "MENU_GRID": ("Grid", "Show or hide the bounded voxel grid.", "G"),
+    "MENU_DETAILS": ("Edit info", "Show helpful block and layer details.", ""),
+    "MENU_DOCK_LEFT": ("Left drawer", "Show or hide the left panel drawer.", ""),
+    "MENU_DOCK_RIGHT": ("Right drawer", "Show or hide the right panel drawer.", ""),
+    "MENU_MORE_TOOLS": ("Advanced tools", "Show every VOXTART tool.", ""),
+    "MENU_HELP": ("Help", "Show the simple steps.", ""),
+}
+
+
+def _editor_options_hint(action):
+    return _EDITOR_OPTIONS_HINTS.get(action)
+
+
+def _editor_menu_hint(action):
+    return _EDITOR_MENU_HINTS.get(action)
 
 
 _EDITOR_TOPBAR_LABELS = {
@@ -4237,6 +4302,7 @@ def _draw_editor_overlay(editor, context) -> None:
     }.get(mode, mode.title())
     _draw_editor_topbar(editor, context)
     _draw_editor_options_menu(editor, context)
+    _draw_editor_menu(editor, context)
     _draw_editor_dock_panels(editor, context)
     _draw_editor_palette(editor, context)
     _draw_editor_dock_tooltip(editor, context)
@@ -4429,7 +4495,6 @@ def _draw_editor_overlay(editor, context) -> None:
     )
     _draw_editor_round_rect(23.0 * scale, 17.0 * scale, 6.0 * scale, 6.0 * scale, status_accent, radius=3.0 * scale)
     _draw_editor_text(status_display, 38.0 * scale, 15.0 * scale, 11.0, status_text)
-    _draw_editor_menu(editor, context)
 
 
 class VOXTART_OT_voxel_editor(bpy.types.Operator):

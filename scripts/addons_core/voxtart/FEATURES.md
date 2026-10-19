@@ -41,6 +41,8 @@ shelf reserves its own lane before the left drawer instead of covering panel
 content. The left and right drawers contain draggable **Layers**, **History**, and
 **Colors** panels; dragging a panel across the canvas snaps it to the nearest
 drawer and keeps its ordering.
+Hovering a **More** or **Menu** row opens the same compact action hint with
+its description and shortcut when one exists.
 Blender's native chrome remains hidden throughout the product surface. The
 editor starts with four
 simple tools — **Add block**, **Erase block**, **Color block**, and
