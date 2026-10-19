@@ -1037,6 +1037,7 @@ def _editor_tool_options_action_at(context, event):
 def _editor_topbar_action_bounds(region):
     width = float(getattr(region, "width", 0.0))
     scale = ui_style.ui_scale()
+    menu_width = 68.0
     actions = (
         ("UNDO", 78.0),
         ("REDO", 78.0),
@@ -1044,19 +1045,36 @@ def _editor_topbar_action_bounds(region):
         ("SAVE", 68.0),
         ("HELP", 80.0),
         ("OPTIONS", 90.0),
-        ("MENU", 68.0),
         ("DOCK_LEFT", 48.0),
         ("DOCK_RIGHT", 48.0),
     )
-    base_total_width = sum(item[1] for item in actions) + 6.0 * (len(actions) - 1)
+    base_total_width = (
+        menu_width
+        + 6.0
+        + sum(item[1] for item in actions)
+        + 6.0 * (len(actions) - 1)
+    )
     scale = min(scale, max(0.5, (width - 24.0) / base_total_width))
-    right = width - 12.0 * scale
     gap = 6.0 * scale
-    total_width = sum(item[1] * scale for item in actions) + gap * (len(actions) - 1)
-    cursor = max(8.0 * scale, right - total_width)
     top = float(getattr(region, "height", 0.0)) - 42.0 * scale
-    bounds = []
+    bounds = [
+        (
+            "MENU",
+            (
+                8.0 * scale,
+                top,
+                (8.0 + menu_width) * scale,
+                top + 30.0 * scale,
+            ),
+        )
+    ]
+    right = width - 12.0 * scale
+    total_width = sum(item[1] * scale for item in actions) + gap * (len(actions) - 1)
+    total_width += menu_width * scale + gap
+    cursor = max(8.0 * scale, right - total_width)
     for action, action_width in actions:
+        if action == "DOCK_LEFT":
+            cursor += menu_width * scale + gap
         scaled_width = action_width * scale
         bounds.append((action, (cursor, top, cursor + scaled_width, top + 30.0 * scale)))
         cursor += scaled_width + gap
@@ -1668,17 +1686,25 @@ def _draw_editor_topbar(editor, context) -> None:
         asset_name = asset_name[len("VOXTART "):]
     asset_summary = f"{asset_name[:30]}  ·  {len(editor.asset.voxels)} blocks"
     _draw_editor_rect(0.0, bar_y, width, bar_height, _THEME["chrome"])
-    _draw_editor_icon("cube", 28.0 * scale, bar_y + 24.0 * scale, 20.0 * scale, _THEME["accent"])
+    topbar_icon_x = 92.0 * scale
+    topbar_text_x = 116.0 * scale
+    _draw_editor_icon(
+        "cube",
+        topbar_icon_x,
+        bar_y + 24.0 * scale,
+        20.0 * scale,
+        _THEME["accent"],
+    )
     _draw_editor_text(
         asset_summary,
-        54.0 * scale,
+        topbar_text_x,
         bar_y + 28.0 * scale,
         12.0,
         _THEME["text"],
     )
     _draw_editor_text(
         "Build mode",
-        54.0 * scale,
+        topbar_text_x,
         bar_y + 12.0 * scale,
         10.0,
         _THEME["text_muted"],
@@ -1720,7 +1746,7 @@ def _draw_editor_topbar(editor, context) -> None:
             else _THEME["warning"]
         )
         workspace_pill_width = 96.0 * scale
-        workspace_x = 54.0 * scale + _editor_text_width(asset_summary, 12.0) + 16.0 * scale
+        workspace_x = topbar_text_x + _editor_text_width(asset_summary, 12.0) + 16.0 * scale
         project_x = next(
             bounds[0]
             for action, bounds in _editor_topbar_action_bounds(region)
@@ -6080,6 +6106,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             _request_redraw(self, context, force=True)
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
+            popup_action = _editor_menu_action_at(context, event)
+            if popup_action is None:
+                popup_action = _editor_options_action_at(context, event)
+            if popup_action is not None:
+                self._activate_topbar_action(context, popup_action)
+                return {"RUNNING_MODAL"}
             floating_panel = _editor_floating_panel_hit(self, context, event)
             if floating_panel is not None:
                 self._begin_panel_drag(context, event, floating_panel)
@@ -6170,6 +6202,22 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.tool_options_hover = None
                 _set_editor_cursor(context, "HAND")
                 return {"RUNNING_MODAL"}
+            popup_action = _editor_menu_action_at(context, event)
+            if popup_action is None:
+                popup_action = _editor_options_action_at(context, event)
+            if popup_action is not None:
+                self.chat_hover = None
+                self.view_hud_hover = None
+                self.tool_options_hover = None
+                self.dock_hover = None
+                self.color_wheel_hover = None
+                self.topbar_hover = popup_action
+                self.palette_hover = None
+                self.toolbar_hover = None
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
             floating_panel = _editor_floating_panel_hit(self, context, event)
             if floating_panel is not None:
                 self.chat_hover = None
@@ -6209,17 +6257,6 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self.preview_cells = ()
                 _set_editor_cursor(context, "HAND")
                 _request_redraw(self, context)
-                return {"RUNNING_MODAL"}
-            menu_hit = _editor_menu_action_at(context, event)
-            if menu_hit is not None:
-                self.dock_hover = None
-                self.color_wheel_hover = None
-                self.topbar_hover = menu_hit
-                self.palette_hover = None
-                self.toolbar_hover = None
-                self.last_hit = None
-                self.preview_cells = ()
-                _set_editor_cursor(context, "HAND")
                 return {"RUNNING_MODAL"}
             tool_options_hit = (
                 None

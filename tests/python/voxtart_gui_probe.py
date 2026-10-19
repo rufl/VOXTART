@@ -2261,13 +2261,13 @@ def _probe():
         STATE["save_control"] = True
 
         if tuple(action for action, _bounds in voxel_editor._editor_topbar_action_bounds(region)) != (
+            "MENU",
             "UNDO",
             "REDO",
             "PROJECT",
             "SAVE",
             "HELP",
             "OPTIONS",
-            "MENU",
             "DOCK_LEFT",
             "DOCK_RIGHT",
         ):
@@ -2285,6 +2285,8 @@ def _probe():
         if scene.get(voxel_editor.EDITOR_GRID_PROPERTY) is not False:
             return _fail("VOXTART editor did not default to a hidden grid")
         topbar_bounds = dict(voxel_editor._editor_topbar_action_bounds(region))
+        if topbar_bounds["MENU"][0] >= topbar_bounds["UNDO"][0]:
+            return _fail("VOXTART sandwich menu did not move to the left side of the main bar")
         if "UNDO" not in topbar_bounds or "DOCK_LEFT" not in topbar_bounds:
             return _fail("VOXTART editor did not expose topbar hint targets")
 
