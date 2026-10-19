@@ -792,6 +792,8 @@ the same bounded MCP tools used by external clients, so a model can inspect,
 create, and edit VOXTART assets. **Image** attaches up to four local PNG, JPEG,
 WebP, or GIF references as standard multimodal data URLs; an image-only send
 uses the reference as the starting point for a voxel request.
+The editor's **Image**, **Prompt**, and **Send** controls expose compact hover
+cards; **Prompt** and **Send** explain the `Enter` path when the field is focused.
 
 The bridge is opt-in and localhost-only. The MCP panel owns start/stop and the
 bearer-token handoff; scene mutations stay disabled until the user enables

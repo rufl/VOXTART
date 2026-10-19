@@ -2914,6 +2914,29 @@ def _editor_menu_hint(action):
     return _EDITOR_MENU_HINTS.get(action)
 
 
+_EDITOR_CHAT_HINTS = {
+    "chat:image": (
+        "Image",
+        "Attach a reference image for the local model.",
+        "",
+    ),
+    "chat:field": (
+        "Prompt",
+        "Ask the local model to create or change VOXTART content.",
+        "Enter",
+    ),
+    "chat:send": (
+        "Send",
+        "Send the prompt to the local model.",
+        "Enter",
+    ),
+}
+
+
+def _editor_chat_hint(action):
+    return _EDITOR_CHAT_HINTS.get(action)
+
+
 _EDITOR_TOPBAR_LABELS = {
     "UNDO": "Undo",
     "REDO": "Redo",
@@ -4277,12 +4300,96 @@ def _draw_editor_chat_prompt(editor, context) -> None:
     draw_button("chat:send", "Send", accent=True)
 
 
+def _draw_editor_chat_tooltip(editor, context, layout, scale) -> None:
+    action = getattr(editor, "chat_hover", None)
+    hint = _editor_chat_hint(action)
+    region = getattr(context, "region", None)
+    bounds = layout.get(action) if action is not None else None
+    if hint is None or region is None or bounds is None:
+        return
+    title, description, shortcut = hint
+    lines = ui_style.wrap_text(
+        description,
+        11.0,
+        min(316.0 * scale, float(region.width) - 40.0 * scale),
+    )[:2]
+    if not lines:
+        lines = ("Choose this control to continue.",)
+    shortcut_width = (
+        _editor_text_width(shortcut, 10.0) + 16.0 * scale
+        if shortcut
+        else 0.0
+    )
+    tooltip_width = min(
+        float(region.width) - 16.0 * scale,
+        max(
+            240.0 * scale,
+            _editor_text_width(title, 13.0) + shortcut_width + 38.0 * scale,
+            max((_editor_text_width(line, 11.0) for line in lines), default=0.0)
+            + 24.0 * scale,
+        ),
+    )
+    tooltip_height = (54.0 + max(0, len(lines) - 1) * 14.0) * scale
+    tooltip_x = min(
+        max(8.0 * scale, bounds[0]),
+        float(region.width) - tooltip_width - 8.0 * scale,
+    )
+    tooltip_y = min(
+        max(8.0 * scale, bounds[3] + 10.0 * scale),
+        float(region.height) - tooltip_height - 8.0 * scale,
+    )
+    _draw_editor_panel(
+        tooltip_x,
+        tooltip_y,
+        tooltip_width,
+        tooltip_height,
+        _THEME["panel"],
+        border=_THEME["border"],
+        radius=9.0 * scale,
+    )
+    title_y = tooltip_y + tooltip_height - 20.0 * scale
+    _draw_editor_text(
+        title,
+        tooltip_x + 12.0 * scale,
+        title_y,
+        13.0,
+        _THEME["text"],
+    )
+    if shortcut:
+        pill_x = tooltip_x + tooltip_width - shortcut_width - 10.0 * scale
+        _draw_editor_round_rect(
+            pill_x,
+            title_y - 3.0 * scale,
+            shortcut_width,
+            18.0 * scale,
+            _THEME["accent_fill"],
+            radius=8.0 * scale,
+        )
+        _draw_editor_text(
+            shortcut,
+            pill_x + 8.0 * scale,
+            title_y + 1.0 * scale,
+            10.0,
+            _THEME["text"],
+        )
+    for index, line in enumerate(lines):
+        _draw_editor_text(
+            line,
+            tooltip_x + 12.0 * scale,
+            tooltip_y + 11.0 * scale + (len(lines) - index - 1) * 14.0 * scale,
+            11.0,
+            _THEME["text_muted"],
+        )
+
+
 def _draw_editor_overlay(editor, context) -> None:
     region = getattr(context, "region", None)
     if region is None:
         return
     scale = ui_style.ui_scale()
     scene = context.scene
+    from . import mcp
+
     mode = _editor_input_mode(editor)
     shape = _scene_shape(scene)
     first_run = bool(scene.get(FIRST_RUN_HINT_PROPERTY))
@@ -4311,6 +4418,8 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_tool_options(editor, context)
     _draw_editor_topbar_tooltip(editor, context)
     _draw_editor_chat_prompt(editor, context)
+    chat_layout = mcp.chat_layout(float(region.width), float(region.height), scale=scale)
+    _draw_editor_chat_tooltip(editor, context, chat_layout, scale)
     context_label = f"{mode_label}  ·  {shape.title()} brush" if details else mode_label
     context_shortcut = {
         "ADD": "B",

@@ -493,6 +493,7 @@ def _run_gui_probe() -> None:
             or payload.get("options_menu") is not True
             or payload.get("menu_surface") is not True
             or payload.get("menu_option_hints") is not True
+            or payload.get("chat_prompt_hints") is not True
             or payload.get("viewport_hud") is not True
             or payload.get("viewport_hud_hints") is not True
             or payload.get("tool_options") is not True

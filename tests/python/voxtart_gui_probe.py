@@ -702,6 +702,7 @@ def _finish_mouse_clicks():
                 "grid_toggle": STATE.get("grid_toggle", False),
                 "options_menu": STATE.get("options_menu", False),
                 "menu_option_hints": STATE.get("menu_option_hints", False),
+                "chat_prompt_hints": STATE.get("chat_prompt_hints", False),
                 "region_info": STATE.get("region_info", []),
                 "details_toggle": STATE.get("details_toggle", False),
                 "help_toggle": STATE.get("help_toggle", False),
@@ -2319,6 +2320,56 @@ def _probe():
                 return _fail(f"Could not capture Menu screenshot: {menu_screenshot_result!r}")
             editor._activate_topbar_action(bpy.context, "MENU")
         STATE["menu_surface"] = True
+        chat_layout = mcp.chat_layout(
+            float(region.width),
+            float(region.height),
+            scale=voxel_editor.ui_style.ui_scale(),
+        )
+        chat_hint_contract = {
+            "chat:image": (
+                "Image",
+                "Attach a reference image for the local model.",
+                "",
+            ),
+            "chat:field": (
+                "Prompt",
+                "Ask the local model to create or change VOXTART content.",
+                "Enter",
+            ),
+            "chat:send": (
+                "Send",
+                "Send the prompt to the local model.",
+                "Enter",
+            ),
+        }
+        for chat_action, expected_hint in chat_hint_contract.items():
+            chat_bounds = chat_layout.get(chat_action)
+            if chat_bounds is None:
+                return _fail(f"VOXTART Ask VOXTART prompt omitted {chat_action}")
+            chat_hover_event = SimpleNamespace(
+                type="MOUSEMOVE",
+                value="NOTHING",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=(chat_bounds[0] + chat_bounds[2]) * 0.5,
+                mouse_region_y=(chat_bounds[1] + chat_bounds[3]) * 0.5,
+            )
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                chat_hover_result = editor.modal(bpy.context, chat_hover_event)
+                voxel_editor._draw_editor_overlay(editor, bpy.context)
+            if (
+                "RUNNING_MODAL" not in chat_hover_result
+                or editor.chat_hover != chat_action
+                or voxel_editor._editor_chat_hint(chat_action) != expected_hint
+            ):
+                return _fail(f"VOXTART Ask VOXTART hover hint was incomplete: {chat_action}")
+        STATE["chat_prompt_hints"] = True
         tool_layout = voxel_editor._editor_tool_options_layout(editor, region)
         tool_entries = {
             action: bounds
