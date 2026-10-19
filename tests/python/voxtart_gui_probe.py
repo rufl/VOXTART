@@ -2223,6 +2223,15 @@ def _probe():
         ):
             return _fail("VOXTART Charameld animation surface is not registered")
         STATE["charameld_animation_surface"] = True
+        if not all(
+            hasattr(bpy.types, name)
+            for name in (
+                "VOXTART_OT_creature_generate",
+                "VOXTART_PT_creature_builder",
+            )
+        ):
+            return _fail("VOXTART creature builder surface is not registered")
+        STATE["creature_builder_surface"] = True
         existing = bpy.data.objects.get("P0 GUI Asset")
         if existing is not None:
             bpy.data.objects.remove(existing, do_unlink=True)

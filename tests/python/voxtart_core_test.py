@@ -35,7 +35,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_formats  # noqa: E402
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
-from voxtart import character_editor, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import character_editor, creature, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
 from voxtart import metrics, provenance  # noqa: E402
 
 
@@ -45,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 112
+EXPECTED_TESTS = 115
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -4668,6 +4668,50 @@ class Sprite2DEndToEndTest(unittest.TestCase):
             evidence=evidence,
         )
         self.assertEqual(blocked_by_evidence.skipped_free_cells, ((-1, 0, 0),))
+
+class CreatureGraphTest(unittest.TestCase):
+    def test_templates_round_trip_and_build_deterministically(self):
+        for template in creature.CREATURE_TEMPLATES:
+            recipe = creature.template_recipe(template)
+            restored = creature.CreatureRecipe.decode(recipe.encode())
+            self.assertEqual(restored.to_dict(), recipe.to_dict())
+            first = creature.build_voxel_asset(recipe, palette=PALETTE[:1])
+            second = creature.build_voxel_asset(restored, palette=PALETTE[:1])
+            self.assertEqual(first.asset.content_digest, second.asset.content_digest)
+            self.assertEqual(first.joints, second.joints)
+            self.assertGreater(len(first.asset.voxels), 0)
+            self.assertTrue(first.asset.part_assignments)
+            self.assertTrue({"TORSO", "HEAD"}.issubset(set(first.asset.part_assignments.values())))
+            self.assertEqual(len(first.asset.sockets), len(first.joints))
+            self.assertTrue(all(sum(abs(axis) for axis in socket.normal) == 1 for socket in first.asset.sockets))
+
+    def test_custom_graph_sweeps_labels_and_auto_joints(self):
+        recipe = creature.CreatureRecipe(
+            name="Custom Creature",
+            nodes=(
+                creature.CreatureNode("base", (0.0, 0.0, 0.0), 1.0, "ROOT"),
+                creature.CreatureNode("tip", (3.0, 0.0, 0.0), 0.7, "HEAD"),
+            ),
+            edges=(creature.CreatureEdge("body", "base", "tip", "TORSO", "body"),),
+        )
+        result = creature.build_voxel_asset(recipe, palette=PALETTE[:1])
+        self.assertGreater(len(result.asset.voxels), 1)
+        self.assertEqual(set(result.asset.part_assignments.values()), {"TORSO"})
+        self.assertEqual({record.name for record in result.joints}, {"base", "tip"})
+        self.assertEqual([record.socket_index for record in result.joints], [0, 1])
+
+    def test_recipe_validation_and_sweep_limits(self):
+        with self.assertRaises(ValueError):
+            creature.CreatureRecipe(
+                nodes=(creature.CreatureNode("root", (0.0, 0.0, 0.0)),),
+                edges=(creature.CreatureEdge("broken", "root", "missing", "ROOT"),),
+            )
+        with self.assertRaises(ValueError):
+            creature.template_recipe("SPIDER")
+        recipe = creature.template_recipe("BIPED")
+        with self.assertRaises(ValueError):
+            creature.build_voxel_asset(recipe, max_voxels=1)
+
 
 if __name__ == "__main__":
     program = unittest.main(exit=False)

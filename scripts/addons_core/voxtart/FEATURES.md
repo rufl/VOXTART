@@ -727,6 +727,31 @@ The project shell exposes **Snap active to target** for the common two-object
 handoff; the full Zoo Gallery/sidebar remains the authoring surface for named
 joints, socket metadata, and compatibility feedback.
 
+### Creature Builder
+
+The **Creature Builder** is the first graph-authored creature workflow. It
+uses a compact, versioned `voxtart.creature` recipe and a deterministic
+node/edge voxel sweeper, following the useful Dust3D pattern of turning
+radius-bearing graph bones into low-poly volume.
+
+- choose the built-in `Biped` or `Quadruped` template from the VOXTART sidebar
+  or the 3D View object menu;
+- generate a labeled voxel asset without hand-placing every limb;
+- preserve semantic part labels such as `TORSO`, `HEAD`, `ARM_L`, `LEG_FL`,
+  and `TAIL` in `VoxelAsset.part_assignments`;
+- generate named `VoxelSocket` joints for roots, heads, hands/paws, feet, and
+  tails, with role and target-bone metadata for later assembly/animation;
+- save the generated creature directly into the Zoo Gallery as a socketed,
+  reusable asset;
+- keep the canonical graph recipe and joint records on the generated object
+  for deterministic rebuilds and downstream tools.
+
+The graph core lives in `creature.py` and is Blender-independent, so templates
+and custom recipes can be validated and built in system-Python tests. The
+current first slice intentionally favors deterministic templates over a
+free-form node canvas; interactive graph editing can consume the same recipe
+contract without changing generated asset semantics.
+
 ### Voxel Character Editor
 
 The **Voxel Character Editor** assembles a reusable character recipe from

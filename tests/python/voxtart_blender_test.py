@@ -29,11 +29,11 @@ if str(SOURCE_ROOT) not in sys.path:
     sys.path.insert(0, str(SOURCE_ROOT))
 
 import voxtart as addon  # noqa: E402
-from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, lasso_blob, mcp, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
+from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_ui, creature, creature_ui, desktop_branding, desktop_shell, desktop_splash, desktop_ui, lasso_blob, mcp, optimizer_ui, operators, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor  # noqa: E402
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterPart, CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
-EXPECTED_TESTS = 34
+EXPECTED_TESTS = 35
 
 
 def _gallery_entry(name, blob_id, normal):
@@ -586,6 +586,87 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertTrue(scene.voxtart_character_auto_snap)
         self.assertEqual(scene.voxtart_character_animation_slot, "ROOT")
         self.assertEqual(scene.voxtart_character_animation_bone, "")
+    def test_creature_builder_registration_and_generation(self):
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_creature_generate"),
+            creature_ui.VOXTART_OT_creature_generate,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_PT_creature_builder"),
+            creature_ui.VOXTART_PT_creature_builder,
+        )
+        self.assertEqual(
+            creature_ui.VOXTART_OT_creature_generate.bl_idname,
+            "voxtart.creature_generate",
+        )
+        scene = bpy.context.scene
+        self.assertEqual(scene.voxtart_creature_template, "BIPED")
+        self.assertEqual(scene.voxtart_creature_name, "VOXTART Biped")
+        self.assertAlmostEqual(scene.voxtart_creature_grid_size, 1.0)
+        self.assertTrue(scene.voxtart_creature_save_to_gallery)
+        before_names = {obj.name for obj in bpy.data.objects}
+        previous_gallery_path = scene.voxtart_blob_gallery_path
+        previous_selected = scene.voxtart_blob_gallery_selected
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                scene.voxtart_blob_gallery_path = directory
+                self.assertEqual(
+                    bpy.ops.voxtart.creature_generate(
+                        template="BIPED",
+                        name="Test Biped",
+                        grid_size=1.0,
+                        save_to_gallery=True,
+                    ),
+                    {"FINISHED"},
+                )
+                biped = bpy.context.active_object
+                self.assertIsNotNone(biped)
+                self.assertEqual(biped[creature_ui.CREATURE_TEMPLATE_PROPERTY], "BIPED")
+                asset = operators._load_asset(biped)
+                self.assertGreater(len(asset.voxels), 0)
+                self.assertGreater(len(asset.sockets), 0)
+                self.assertIn("HEAD", set(asset.part_assignments.values()))
+                recipe = creature.CreatureRecipe.decode(
+                    biped[creature_ui.CREATURE_RECIPE_PROPERTY]
+                )
+                self.assertEqual(recipe.template, "BIPED")
+                records = json.loads(biped[creature_ui.CREATURE_JOINTS_PROPERTY])
+                self.assertEqual(len(records), len(asset.sockets))
+                self.assertTrue(scene.voxtart_blob_gallery_selected)
+                entries, errors = BlobGallery(Path(directory)).scan("", "", False)
+                self.assertEqual(errors, ())
+                self.assertEqual(len(entries), 1)
+                self.assertEqual(entries[0].name, "Test Biped")
+                self.assertEqual(
+                    {joint.name for joint in entries[0].joints},
+                    {record["name"] for record in records},
+                )
+
+                self.assertEqual(
+                    bpy.ops.voxtart.creature_generate(
+                        template="QUADRUPED",
+                        name="Test Quadruped",
+                        grid_size=1.0,
+                        save_to_gallery=False,
+                    ),
+                    {"FINISHED"},
+                )
+                quadruped = bpy.context.active_object
+                self.assertEqual(
+                    quadruped[creature_ui.CREATURE_TEMPLATE_PROPERTY],
+                    "QUADRUPED",
+                )
+                self.assertEqual(
+                    creature.CreatureRecipe.decode(
+                        quadruped[creature_ui.CREATURE_RECIPE_PROPERTY]
+                    ).template,
+                    "QUADRUPED",
+                )
+        finally:
+            _remove_objects(obj for obj in bpy.data.objects if obj.name not in before_names)
+            scene.voxtart_blob_gallery_path = previous_gallery_path
+            scene.voxtart_blob_gallery_selected = previous_selected
+
     def test_optimizer_registration_and_defaults(self):
         self.assertIs(
             getattr(bpy.types, "VOXTART_OT_optimize_mesh"),
