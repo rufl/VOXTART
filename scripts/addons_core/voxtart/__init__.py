@@ -21,7 +21,7 @@ bl_info = {
 }
 
 def register():
-    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, skeleton_wizard, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
+    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
     operators.register()
     formats_ui.register()
     export_ui.register()
@@ -39,7 +39,6 @@ def register():
     desktop_ui.register()
     desktop_shell.register()
     animation.register()
-    skeleton_wizard.register()
     blob_gallery_ui.register()
     character_editor_ui.register()
     optimizer_ui.register()
@@ -51,7 +50,7 @@ def register():
 
 
 def unregister():
-    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, skeleton_wizard, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
+    from . import animation, blob_gallery_ui, character_editor_ui, desktop_shell, desktop_ui, bloformer_ui, export_ui, formats_ui, goxel_ui, layers_ui, lasso_blob, mcp, minecraft_ui, operators, optimizer_ui, palette_ui, reconstruct_ui, scene_hierarchy_ui, shading_ui, spritesheet_export_ui, stacking_ui, tiler_ui, ux, viewport_workflow_ui, voxel_editor
     mcp.unregister()
     shading_ui.unregister()
     minecraft_ui.unregister()
@@ -60,7 +59,6 @@ def unregister():
     optimizer_ui.unregister()
     character_editor_ui.unregister()
     blob_gallery_ui.unregister()
-    skeleton_wizard.unregister()
     animation.unregister()
     desktop_shell.unregister()
     desktop_ui.unregister()

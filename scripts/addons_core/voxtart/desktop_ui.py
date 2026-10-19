@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""VOXTART-owned desktop landing panel and startup workspace controls."""
+"""VOXTART startup workspace controls."""
 
 import bpy
 from . import operators
@@ -10,10 +10,10 @@ from .operators import ASSET_PROPERTY
 from .voxel import VoxelAsset
 from .voxel_editor import (
     EDITOR_GRID_PROPERTY,
+    EDITOR_MINIMAL_PROPERTY,
     EDITOR_MODE_PROPERTY,
     EDITOR_SHAPE_PROPERTY,
     EDITOR_WORKSPACE_PROPERTY,
-    FIRST_RUN_HINT_PROPERTY,
 )
 
 
@@ -104,8 +104,8 @@ def _ensure_default_pyramid(context):
     )
     if existing is not None:
         _activate_object(existing)
-        if FIRST_RUN_HINT_PROPERTY not in context.scene:
-            context.scene[FIRST_RUN_HINT_PROPERTY] = True
+        if EDITOR_MINIMAL_PROPERTY not in context.scene:
+            context.scene[EDITOR_MINIMAL_PROPERTY] = True
         return existing
     if bpy.data.objects:
         return None
@@ -123,7 +123,7 @@ def _ensure_default_pyramid(context):
     ):
         if hasattr(context.scene, property_name):
             setattr(context.scene, property_name, value)
-    context.scene[FIRST_RUN_HINT_PROPERTY] = True
+    context.scene[EDITOR_MINIMAL_PROPERTY] = True
     return obj
 
 
@@ -322,87 +322,8 @@ def open_asset_editor() -> bool:
     return _open_editor_for_object(_find_asset_object())
 
 
-class VOXTART_PT_desktop_home(bpy.types.Panel):
-    """The friendly first screen for the VOXTART editor."""
 
-    bl_label = "Start Here"
-    bl_idname = "VOXTART_PT_desktop_home"
-    bl_space_type = "VIEW_3D"
-    bl_region_type = "UI"
-    bl_category = "Tool"
-    bl_order = -100
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        active = getattr(context, "active_object", None)
-        has_mesh = active is not None and active.type == "MESH"
-        has_asset = has_mesh and ASSET_PROPERTY in active
-        layout.scale_y = 1.2
-
-        intro = layout.box()
-        intro.label(text="What do you want to make?", icon="INFO")
-        intro.label(text=f"Working on: {active.name}" if active else "Start with blocks or open something.")
-
-        make = layout.box()
-        make.label(text="Make blocks", icon="CUBE")
-        new_asset = make.operator("voxtart.add_voxel_cube", text="Make blocks", icon="CUBE")
-        new_asset.size = scene.voxtart_cube_size
-        new_asset.grid_size = scene.voxtart_grid_size
-        make.label(text="Start with a tiny block world.")
-
-        open_box = layout.box()
-        open_box.label(text="Open or translate", icon="FILE_FOLDER")
-        open_box.operator("voxtart.import_asset", text="Open a block model", icon="IMPORT")
-        open_box.operator("voxtart.import_voxel_format", text="Open a voxel file", icon="FILE_3D")
-        open_box.operator("voxtart.import_blockbench", text="Open a Blockbench model", icon="MESH_CUBE")
-        image_reconstruct = open_box.operator(
-            "voxtart.reconstruct_image",
-            text="Turn an image into blocks",
-            icon="IMAGE_DATA",
-        )
-        image_reconstruct.pixels_per_voxel = getattr(
-            scene,
-            "voxtart_reconstruction_pixels_per_voxel",
-            2,
-        )
-        character = layout.box()
-        character.label(text="Make a character", icon="ARMATURE_DATA")
-        character.label(
-            text="Select a mesh to enable character actions." if not has_mesh else "Use the active mesh as your character base.",
-            icon="INFO" if not has_mesh else "CHECKMARK",
-        )
-        character_controls = character.column()
-        character_controls.enabled = has_mesh
-        character_controls.operator("voxtart.prepare_character", text="Make a character", icon="ARMATURE_DATA")
-        character_controls.operator("voxtart.character_rebuild", text="Build it again", icon="FILE_REFRESH")
-        character_controls.operator("voxtart.export_game_rig", text="Save for a game", icon="EXPORT")
-
-        more = layout.box()
-        more.label(text="More ways to build", icon="MODIFIER")
-        more.label(
-            text="Turn a shape into blocks first." if not has_mesh else (
-                "Pick a block model for block-only tools." if not has_asset else "Your block model is ready."
-            ),
-            icon="INFO" if not has_asset else "CHECKMARK",
-        )
-        voxelize_row = more.row()
-        voxelize_row.enabled = has_mesh
-        voxelize = voxelize_row.operator("voxtart.voxelize_active", text="Turn a shape into blocks", icon="MOD_REMESH")
-        voxelize.grid_size = scene.voxtart_grid_size
-        voxelize.mode = scene.voxtart_voxelizer_mode
-        voxelize.shell_thickness = scene.voxtart_voxelizer_shell_thickness
-        asset_tools = more.column()
-        asset_tools.enabled = has_asset
-        asset_tools.operator("voxtart.optimize_mesh", text="Make it lighter", icon="MOD_DECIM")
-        asset_tools.operator("voxtart.bloformer", text="Squish or stretch blocks", icon="MOD_DISPLACE")
-        asset_tools.operator("voxtart.tiler_convert", text="Turn pixels into blocks", icon="TEXTURE")
-
-        footer = layout.box()
-        footer.label(text="Need more choices?", icon="PREFERENCES")
-        footer.label(text="Use More tools if you need extra controls.")
-
-_CLASSES = (VOXTART_PT_desktop_home,)
+_CLASSES = ()
 
 
 def configure_palette_color_management(scene) -> None:
@@ -554,8 +475,6 @@ __all__ = [
     "DESKTOP_MODE_PROPERTY",
     "DESKTOP_NATIVE_CHROME_PROPERTY",
     "DESKTOP_VERSION_PROPERTY",
-    "FIRST_RUN_HINT_PROPERTY",
-    "VOXTART_PT_desktop_home",
     "configure_palette_color_management",
     "configure_viewport_shading",
     "native_chrome_visible",

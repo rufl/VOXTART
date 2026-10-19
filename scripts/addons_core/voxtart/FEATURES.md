@@ -36,11 +36,12 @@ their `Ctrl+Z` and `Ctrl+Y` shortcuts; **More** opens a small menu: **Grid**
 draws a bounded 3D box around the active asset, with one line per voxel
 interval, and `G` toggles it directly (`Shift+G` keeps the Select- or Scene-mode
 move transform); **Hints** shows helpful
-**Advanced tools** expands VOXTART's own tool strip. In Edit, the vertical tool
-shelf reserves its own lane before the left drawer instead of covering panel
-content. The left and right drawers contain draggable **Layers**, **History**, and
-**Colors** panels; dragging a panel across the canvas snaps it to the nearest
-drawer and keeps its ordering.
+**Advanced tools** expands VOXTART's own tool strip. In Edit, the vertical
+**TOOLS** shelf reserves its own lane before the left drawer instead of covering
+panel content. Every visible panel has a draggable header: the **TOOLS** shelf,
+**VIEWPORT** HUD, **TOOL OPTIONS** card, **ASK VOXTART** prompt, and the
+**Colors**, **Layers**, and **History** drawers. Drawer panels still snap to the
+nearest side when released; floating panels keep their new position.
 Hovering a **More** or **Menu** row opens the same compact action hint with
 its description and shortcut when one exists.
 Blender's native chrome remains hidden throughout the product surface. The
@@ -69,13 +70,14 @@ Each new unsaved project opens with an editable light-yellow stepped pyramid:
 framed with breathing room in the viewport so the user can immediately place,
 erase, paint, or select voxels with the VOXTART editor.
 The starter asset also seeds a compact eight-color palette with the light-yellow swatch selected, so the visible strip is useful before any palette setup.
-The first editor session shows a **Start here** card with three plain-language
-steps, a visible **Colors** strip, and only the beginner actions: **Add block**,
-**Erase block**, **Color block**, and **Select blocks**. The card disappears
-after the first changed edit, which also reports the action and its block count
-with an undo reminder. The top-bar **Help** guide can reopen the same basics
-later, including how to orbit, undo, and redo a change.
-The editor top bar, color strip, toolbar, and first-run card share rounded
+The first editor session starts in a minimal state: only the beginner actions
+— **Add block**, **Erase block**, **Color block**, and **Select blocks** — and
+the essential Colors drawer are enabled. There is no onboarding card or wizard.
+The minimal state ends after the first changed edit, which also reports the
+action and its block count with an undo reminder. The top-bar **Help** guide
+can reopen the same basics later, including how to orbit, undo, and redo a
+change.
+The editor top bar, color strip, toolbar, and floating panels share rounded
 panels and accent borders so the editing surface reads as one focused product
 workspace.
 
@@ -175,7 +177,7 @@ Remote palette sources and the broader palette-library workflow remain advanced
 paths.
 Rounded controls expose direct paths for creating, importing, voxelizing,
 refreshing, painting, optimizing, exporting, and character work after the
-first-run path; hovering a control shows its label and available shortcut.
+initial minimal path; hovering a control shows its label and available shortcut.
 On Windows, the host window is branded **VoxTart** and uses the voxel-cake
 icon at `assets/voxtart.ico`.
 The launcher migrates both new and existing isolated preference directories

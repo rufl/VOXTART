@@ -7,7 +7,7 @@
 The shell is a secondary project surface reached from the editor's Project
 control. It keeps Blender hidden by default and exposes the product's project,
 palette, asset, and advanced-workflow controls without making them part of the
-first-run editor path.
+minimal editor path.
 """
 
 from __future__ import annotations
@@ -22,9 +22,9 @@ from . import ui_style
 from .operators import ASSET_PROPERTY
 from .palette import DEFAULT_PALETTE, scene_linear_to_srgb
 from .voxel_editor import (
+    EDITOR_MINIMAL_PROPERTY,
     EDITOR_MODE_PROPERTY,
     EDITOR_SHAPE_PROPERTY,
-    FIRST_RUN_HINT_PROPERTY,
     EDITOR_TOOLBAR_ITEMS,
     BEGINNER_TOOLBAR_ITEMS,
     visible_editor_toolbar_items,
@@ -88,7 +88,83 @@ class _ShellState:
         self.hovered = None
         self.mouse_x = 0.0
         self.mouse_y = 0.0
+        self.panels = {}
+        self.panel_offsets = {}
+        self.panel_dragging = None
+        self.panel_drag_origin = (0.0, 0.0)
+        self.panel_drag_offset = (0.0, 0.0)
 
+_SHELL_PANEL_HEADER_HEIGHT = 34.0
+
+
+def _shell_panel_offset(state, name: str) -> tuple[float, float]:
+    offset = (getattr(state, "panel_offsets", {}) or {}).get(name, (0.0, 0.0))
+    try:
+        return float(offset[0]), float(offset[1])
+    except (IndexError, TypeError, ValueError):
+        return 0.0, 0.0
+
+
+def _shell_position_panel(state, name: str, bounds, width: float, height: float):
+    x0, y0, x1, y1 = (float(value) for value in bounds)
+    panel_width = x1 - x0
+    panel_height = y1 - y0
+    offset_x, offset_y = _shell_panel_offset(state, name)
+    min_x = 8.0
+    min_y = 8.0
+    max_x = max(min_x, width - panel_width - 8.0)
+    max_y = max(min_y, height - panel_height - 8.0)
+    positioned_x = min(max(min_x, x0 + offset_x), max_x)
+    positioned_y = min(max(min_y, y0 + offset_y), max_y)
+    positioned = (
+        positioned_x,
+        positioned_y,
+        positioned_x + panel_width,
+        positioned_y + panel_height,
+    )
+    state.panels[name] = positioned
+    return positioned
+
+
+def _translate_shell_bounds(bounds, dx: float, dy: float):
+    return (
+        bounds[0] + dx,
+        bounds[1] + dy,
+        bounds[2] + dx,
+        bounds[3] + dy,
+    )
+
+
+def _shell_chat_layout(state, width: float, height: float):
+    from . import mcp
+
+    base = mcp.chat_layout(width, height)
+    panel = base["panel"]
+    positioned = _shell_position_panel(state, "CHAT", panel, width, height)
+    dx = positioned[0] - panel[0]
+    dy = positioned[1] - panel[1]
+    return {
+        key: _translate_shell_bounds(bounds, dx, dy)
+        for key, bounds in base.items()
+    }
+
+
+def _shell_panel_header_bounds(name: str, bounds):
+    header_height = 8.0 if name == "CHAT" else _SHELL_PANEL_HEADER_HEIGHT
+    return (
+        bounds[0],
+        max(bounds[1], bounds[3] - header_height),
+        bounds[2],
+        bounds[3],
+    )
+
+
+def _shell_panel_hit(state, x: float, y: float) -> str | None:
+    for name, bounds in tuple(getattr(state, "panels", {}).items()):
+        header = _shell_panel_header_bounds(name, bounds)
+        if _inside(x, y, header):
+            return name
+    return None
 
 def _draw_rect(x: float, y: float, width: float, height: float, color) -> None:
     shader = gpu.shader.from_builtin("UNIFORM_COLOR")
@@ -768,17 +844,25 @@ def _shell_toolbar_active(scene, item) -> bool:
         and str(getattr(scene, EDITOR_SHAPE_PROPERTY, "VOXEL")) == value
     )
 
-def _draw_shell_toolbar(state, context, height: float) -> None:
+def _draw_shell_toolbar(state, context, width: float, height: float) -> None:
     items = visible_editor_toolbar_items(context.scene)
     beginner = items is BEGINNER_TOOLBAR_ITEMS
     toolbar_width = _SHELL_BEGINNER_TOOLBAR_WIDTH if beginner else _SHELL_TOOLBAR_WIDTH
-    panel_x = _LEFT_WIDTH + 12.0
-    panel_y = _BOTTOMBAR_HEIGHT + 12.0
-    panel_top = height - _TOPBAR_HEIGHT - 12.0
-    panel_height = max(80.0, panel_top - panel_y)
-    _draw_round_rect(panel_x, panel_y, toolbar_width, panel_height, _PANEL, 10.0)
+    base_x = _LEFT_WIDTH + 12.0
+    base_y = _BOTTOMBAR_HEIGHT + 12.0
+    base_top = height - _TOPBAR_HEIGHT - 12.0
+    base_height = max(80.0, base_top - base_y)
+    panel_x, panel_y, panel_right, panel_top = _shell_position_panel(
+        state,
+        "TOOLS",
+        (base_x, base_y, base_x + toolbar_width, base_y + base_height),
+        width,
+        height,
+    )
+    panel_width = panel_right - panel_x
+    _draw_round_rect(panel_x, panel_y, panel_width, panel_top - panel_y, _PANEL, 10.0)
     _draw_line(
-        _rounded_points(panel_x, panel_y, toolbar_width, panel_height, 10.0),
+        _rounded_points(panel_x, panel_y, panel_width, panel_top - panel_y, 10.0),
         _BORDER,
     )
     _draw_text("TOOLS", panel_x + 12.0, panel_top - 25.0, 11, _MUTED)
@@ -797,7 +881,7 @@ def _draw_shell_toolbar(state, context, height: float) -> None:
         - separator_count * separator_gap,
     )
     button_height = min(36.0, max(22.0, available / max(1, item_count)))
-    button_width = toolbar_width - 16.0
+    button_width = panel_width - 16.0
     cursor = content_top
     for item in items:
         if item is None:
@@ -834,12 +918,12 @@ def _draw_topbar(state, context, width: float, height: float) -> None:
 
 
     mode = _active_mode(context.scene)
-    first_run = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY))
+    minimal = bool(context.scene.get(EDITOR_MINIMAL_PROPERTY))
     nav_items = [
         ("BUILD", "Make", 98),
         ("PAINT", "Color", 98),
     ]
-    if not first_run:
+    if not minimal:
         nav_items.append(("CHARACTER", "Character", 118))
     nav_x = project_x + project_width + 20
     for key, label, button_width in nav_items:
@@ -851,45 +935,57 @@ def _draw_topbar(state, context, width: float, height: float) -> None:
 
 
 def _draw_left_panel(state, context, width: float, height: float) -> None:
-    panel_top = height - _TOPBAR_HEIGHT
-    panel_height = height - _TOPBAR_HEIGHT - _BOTTOMBAR_HEIGHT
-    _draw_rect(0, _BOTTOMBAR_HEIGHT, _LEFT_WIDTH, panel_height, _PANEL)
-    x = 16
+    panel_x, panel_y, panel_right, panel_top = _shell_position_panel(
+        state,
+        "LEFT",
+        (0.0, _BOTTOMBAR_HEIGHT, _LEFT_WIDTH, height - _TOPBAR_HEIGHT),
+        width,
+        height,
+    )
+    panel_width = panel_right - panel_x
+    panel_height = panel_top - panel_y
+    _draw_rect(panel_x, panel_y, panel_width, panel_height, _PANEL)
+    x = panel_x + 16
     _draw_text("PROJECT", x, panel_top - 28, 11, _MUTED)
     _draw_text(_project_name()[:24], x, panel_top - 55, 15, _TEXT)
-    _draw_line(((x, panel_top - 68), (_LEFT_WIDTH - 16, panel_top - 68)), _BORDER)
+    _draw_line(((x, panel_top - 68), (panel_right - 16, panel_top - 68)), _BORDER)
 
     _draw_text("WORKSPACES", x, panel_top - 94, 11, _MUTED)
     mode = _active_mode(context.scene)
-    first_run = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY))
+    minimal = bool(context.scene.get(EDITOR_MINIMAL_PROPERTY))
     rows = (
         (("project:blocks", "Blocks", "BUILD"),)
-        if first_run
+        if minimal
         else (
             ("project:blocks", "Blocks", "BUILD"),
             ("project:characters", "Characters", "CHARACTER"),
             ("project:layers", "Layers", "PAINT"),
         )
     )
+    button_width = panel_width - 32
     for index, (key, label, row_mode) in enumerate(rows):
         y = panel_top - 126 - index * 32
-        _draw_button(state, key, label, x, y, _LEFT_WIDTH - 32, 28, active=mode == row_mode)
+        _draw_button(state, key, label, x, y, button_width, 28, active=mode == row_mode)
 
-    quick_y = panel_top - (180 if first_run else 240)
-    _draw_text("START HERE" if first_run else "QUICK ACTIONS", x, quick_y, 11, _MUTED)
-    _draw_button(state, "home:make", "Make blocks", x, quick_y - 38, _LEFT_WIDTH - 32, 32, accent=True)
-    if not first_run:
-        _draw_button(state, "home:open", "Open something", x, quick_y - 76, _LEFT_WIDTH - 32, 32)
-    _draw_text("You can undo every change.", x, _BOTTOMBAR_HEIGHT + 18, 10, _MUTED)
-
+    quick_y = panel_top - (180 if minimal else 240)
+    _draw_text("ACTIONS", x, quick_y, 11, _MUTED)
+    _draw_button(state, "home:make", "Make blocks", x, quick_y - 38, button_width, 32, accent=True)
+    if not minimal:
+        _draw_button(state, "home:open", "Open something", x, quick_y - 76, button_width, 32)
+    _draw_text("You can undo every change.", x, panel_y + 18, 10, _MUTED)
 
 
 def _draw_right_panel(state, context, width: float, height: float) -> None:
-    x0 = width - _RIGHT_WIDTH
-    panel_top = height - _TOPBAR_HEIGHT
-    panel_height = height - _TOPBAR_HEIGHT - _BOTTOMBAR_HEIGHT
-    _draw_rect(x0, _BOTTOMBAR_HEIGHT, _RIGHT_WIDTH, panel_height, _PANEL)
-    x = x0 + 16
+    panel_x, panel_y, panel_right, panel_top = _shell_position_panel(
+        state,
+        "RIGHT",
+        (width - _RIGHT_WIDTH, _BOTTOMBAR_HEIGHT, width, height - _TOPBAR_HEIGHT),
+        width,
+        height,
+    )
+    panel_width = panel_right - panel_x
+    _draw_rect(panel_x, panel_y, panel_width, panel_top - panel_y, _PANEL)
+    x = panel_x + 16
     _draw_text("COLORS", x, panel_top - 28, 11, _MUTED)
     _draw_text("Choose a color", x, panel_top - 53, 15, _TEXT)
 
@@ -913,6 +1009,7 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         _register_tooltip(state, f"palette:{index}", f"Color slot {index + 1}")
         state.targets.append((f"palette:{index}", (sx, sy, sx + swatch_size, sy + swatch_size)))
 
+    button_width = panel_width - 32
     parts_y = start_y - 4 * (swatch_size + gap) - 26
     for key, label, offset in (
         ("palette:import", "Load a palette", 64),
@@ -925,15 +1022,7 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
         ("scene:sync", "Sync scene", -146),
         ("kitbash:snap", "Join pieces", -176),
     ):
-        _draw_button(
-            state,
-            key,
-            label,
-            x,
-            parts_y + offset,
-            _RIGHT_WIDTH - 32,
-            28,
-        )
+        _draw_button(state, key, label, x, parts_y + offset, button_width, 28)
     parts_y -= 236
     _draw_text("YOUR MODELS", x, parts_y, 11, _MUTED)
     _draw_text("Block models in this project", x, parts_y - 25, 13, _TEXT)
@@ -948,12 +1037,13 @@ def _draw_right_panel(state, context, width: float, height: float) -> None:
                 f"{index + 1}. {obj.name[:21]}",
                 x,
                 y,
-                _RIGHT_WIDTH - 32,
+                button_width,
                 28,
                 active=obj == active,
             )
     else:
         _draw_text("Make blocks or open a model to see it here.", x, parts_y - 52, 12, _MUTED)
+
 
 
 def _draw_bottom_bar(context, width: float, height: float) -> None:
@@ -1025,11 +1115,10 @@ def _draw_bottom_bar(context, width: float, height: float) -> None:
     )
     _draw_text(asset_summary, summary_x + 14.0, 10.0, 11, _TEXT)
 
-def _chat_action_at(width: float, height: float, x: float, y: float) -> str | None:
-    from . import mcp
 
+def _chat_action_at(state, width: float, height: float, x: float, y: float) -> str | None:
     for action in ("chat:image", "chat:field", "chat:send"):
-        bounds = mcp.chat_layout(width, height).get(action)
+        bounds = _shell_chat_layout(state, width, height).get(action)
         if bounds is not None and _inside(x, y, bounds):
             return action
     return None
@@ -1038,7 +1127,7 @@ def _chat_action_at(width: float, height: float, x: float, y: float) -> str | No
 def _draw_chat_prompt(state, context, width: float, height: float) -> None:
     from . import mcp
 
-    layout = mcp.chat_layout(width, height)
+    layout = _shell_chat_layout(state, width, height)
     panel_x, panel_y, panel_right, panel_top = layout["panel"]
     panel_width = panel_right - panel_x
     _draw_round_rect(panel_x, panel_y, panel_width, panel_top - panel_y, _PANEL, 12.0)
@@ -1120,8 +1209,17 @@ def _draw_home(state, context, width: float, height: float) -> None:
     center_width = center_right - center_left
     card_width = min(720.0, center_width - 80.0)
     card_height = 300.0
-    card_x = center_left + (center_width - card_width) / 2.0
-    card_y = _BOTTOMBAR_HEIGHT + (height - _TOPBAR_HEIGHT - _BOTTOMBAR_HEIGHT - card_height) / 2.0
+    base_card_x = center_left + (center_width - card_width) / 2.0
+    base_card_y = _BOTTOMBAR_HEIGHT + (height - _TOPBAR_HEIGHT - _BOTTOMBAR_HEIGHT - card_height) / 2.0
+    card_x, card_y, card_right, card_top = _shell_position_panel(
+        state,
+        "CENTER",
+        (base_card_x, base_card_y, base_card_x + card_width, base_card_y + card_height),
+        width,
+        height,
+    )
+    card_width = card_right - card_x
+    card_height = card_top - card_y
 
     _draw_round_rect(card_x, card_y, card_width, card_height, _BG, 14.0)
     _draw_line(_rounded_points(card_x, card_y, card_width, card_height, 14.0), _BORDER)
@@ -1133,7 +1231,7 @@ def _draw_home(state, context, width: float, height: float) -> None:
         ("home:make", "Make blocks", "Build a tiny world", True),
         ("home:open", "Open a model", "Bring in something", False),
     ]
-    if not context.scene.get(FIRST_RUN_HINT_PROPERTY):
+    if not context.scene.get(EDITOR_MINIMAL_PROPERTY):
         cards.append(("mode:CHARACTER", "Make a character", "Shape and animate it", False))
     button_width = (card_width - 64 - button_gap * (len(cards) - 1)) / len(cards)
     for index, (key, title, subtitle, accent) in enumerate(cards):
@@ -1168,13 +1266,25 @@ def _draw_mode(state, context, width: float, height: float) -> None:
         "PAINT": ("Color your blocks", "Pick a color, then click a block to paint it."),
         "CHARACTER": ("Make a character", "Start with blocks, then build it in small steps."),
     }[mode]
-    _draw_text(title, center_left + 42, height - _TOPBAR_HEIGHT - 54, 25, _TEXT)
-    _draw_text(subtitle, center_left + 42, height - _TOPBAR_HEIGHT - 78, 13, _MUTED)
 
-    card_x = center_left + 42
-    card_y = _BOTTOMBAR_HEIGHT + 52
     card_width = min(560.0, center_width - 84.0)
     card_height = 340.0 if mode == "BUILD" else (360.0 if mode == "CHARACTER" else 250.0)
+    base_card_x = center_left + 42
+    base_card_y = _BOTTOMBAR_HEIGHT + 52
+    card_x, card_y, card_right, card_top = _shell_position_panel(
+        state,
+        "CENTER",
+        (base_card_x, base_card_y, base_card_x + card_width, base_card_y + card_height),
+        width,
+        height,
+    )
+    card_width = card_right - card_x
+    card_height = card_top - card_y
+    offset_x = card_x - base_card_x
+    offset_y = card_y - base_card_y
+    _draw_text(title, center_left + 42 + offset_x, height - _TOPBAR_HEIGHT - 54 + offset_y, 25, _TEXT)
+    _draw_text(subtitle, center_left + 42 + offset_x, height - _TOPBAR_HEIGHT - 78 + offset_y, 13, _MUTED)
+
     _draw_round_rect(card_x, card_y, card_width, card_height, _BG, 12.0)
     _draw_line(_rounded_points(card_x, card_y, card_width, card_height, 12.0), _BORDER)
     active = _active_asset(context)
@@ -1189,13 +1299,7 @@ def _draw_mode(state, context, width: float, height: float) -> None:
             "CHARACTER": "Prepare a character, then add parts and animation.",
         }[mode]
     )
-    _draw_text(
-        mode_hint,
-        card_x + 24,
-        card_y + card_height - 78,
-        11,
-        _MUTED,
-    )
+    _draw_text(mode_hint, card_x + 24, card_y + card_height - 78, 11, _MUTED)
 
     button_gap = 12
     button_width = (card_width - 48 - button_gap) / 2.0
@@ -1227,11 +1331,14 @@ def _draw_mode(state, context, width: float, height: float) -> None:
         _draw_button(state, "character:rebuild", "Build again", right, row_four, button_width, 34)
 
 
+
+
 def _draw_shell(state, context) -> None:
     width = context.region.width
     height = context.region.height
     state.targets = []
     state.tooltips = {}
+    state.panels = {}
     gpu.state.blend_set("ALPHA")
     try:
         _draw_rect(0, 0, width, height, _THEME["canvas"])
@@ -1240,7 +1347,7 @@ def _draw_shell(state, context) -> None:
         _draw_right_panel(state, context, width, height)
         mode = _active_mode(context.scene)
         if mode != "HOME":
-            _draw_shell_toolbar(state, context, height)
+            _draw_shell_toolbar(state, context, width, height)
         _draw_bottom_bar(context, width, height)
         if mode == "HOME":
             _draw_home(state, context, width, height)
@@ -1547,17 +1654,49 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
         region = getattr(context, "region", None)
         width = float(getattr(region, "width", getattr(area, "width", 0.0)))
         height = float(getattr(region, "height", getattr(area, "height", 0.0)))
+        state = _ACTIVE_STATE
+
         if event.type == "ESC":
+            if state is not None and state.panel_dragging is not None:
+                name = state.panel_dragging
+                state.panel_offsets[name] = state.panel_drag_offset
+                state.panel_dragging = None
+                state.hovered = None
+                _set_status(context.scene, "Panel move cancelled")
+                return {"RUNNING_MODAL"}
             _set_status(context.scene, "VOXTART stays open")
             return {"RUNNING_MODAL"}
+
+        if event.type == "LEFTMOUSE" and event.value == "RELEASE":
+            if state is not None and state.panel_dragging is not None:
+                state.panel_dragging = None
+                state.hovered = None
+                _set_status(context.scene, "Panel moved")
+                return {"RUNNING_MODAL"}
+            return {"PASS_THROUGH"}
+
         if event.type == "MOUSEMOVE":
-            state = _ACTIVE_STATE
-            if state is not None:
-                x = event.mouse_region_x
-                y = event.mouse_region_y
-                state.mouse_x = x
-                state.mouse_y = y
-                chat_action = _chat_action_at(width, height, x, y)
+            if state is None:
+                return {"PASS_THROUGH"}
+            x = float(getattr(event, "mouse_region_x", 0.0))
+            y = float(getattr(event, "mouse_region_y", 0.0))
+            state.mouse_x = x
+            state.mouse_y = y
+            if state.panel_dragging is not None:
+                name = state.panel_dragging
+                origin_x, origin_y = state.panel_drag_origin
+                offset_x, offset_y = state.panel_drag_offset
+                state.panel_offsets[name] = (
+                    offset_x + x - origin_x,
+                    offset_y + y - origin_y,
+                )
+                state.hovered = None
+                return {"RUNNING_MODAL"}
+            panel = _shell_panel_hit(state, x, y)
+            if panel is not None:
+                hovered = None
+            else:
+                chat_action = _chat_action_at(state, width, height, x, y)
                 if chat_action is not None:
                     hovered = chat_action
                 else:
@@ -1565,23 +1704,32 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
                         (key for key, bounds in tuple(state.targets) if _inside(x, y, bounds)),
                         None,
                     )
-                if state.hovered != hovered:
-                    state.hovered = hovered
-                    if area is not None:
-                        area.tag_redraw()
+            if state.hovered != hovered:
+                state.hovered = hovered
+                if area is not None:
+                    area.tag_redraw()
             return {"PASS_THROUGH"}
+
         if event.value == "PRESS" and not event.shift and not event.ctrl and not event.alt:
             mode = {"B": "BUILD", "P": "PAINT", "C": "CHARACTER"}.get(event.type)
             if mode is not None:
                 self._activate(context, f"mode:{mode}")
                 return {"RUNNING_MODAL"}
+
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
-            state = _ACTIVE_STATE
             if state is None:
                 return {"PASS_THROUGH"}
-            x = event.mouse_region_x
-            y = event.mouse_region_y
-            chat_action = _chat_action_at(width, height, x, y)
+            x = float(getattr(event, "mouse_region_x", 0.0))
+            y = float(getattr(event, "mouse_region_y", 0.0))
+            panel = _shell_panel_hit(state, x, y)
+            if panel is not None:
+                state.panel_dragging = panel
+                state.panel_drag_origin = (x, y)
+                state.panel_drag_offset = _shell_panel_offset(state, panel)
+                state.hovered = None
+                _set_status(context.scene, f"{panel.title()} panel moving")
+                return {"RUNNING_MODAL"}
+            chat_action = _chat_action_at(state, width, height, x, y)
             if chat_action is not None:
                 if chat_action == "chat:field":
                     mcp.set_chat_input_focus(True)
@@ -1608,7 +1756,7 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
         _ACTIVE_STATE = _ShellState()
         context.scene[SHELL_OPEN_PROPERTY] = True
         if SHELL_MODE_PROPERTY not in context.scene:
-            has_starter = bool(context.scene.get(FIRST_RUN_HINT_PROPERTY)) or any(
+            has_starter = bool(context.scene.get(EDITOR_MINIMAL_PROPERTY)) or any(
                 bool(obj.get("voxtart_default_pyramid")) for obj in bpy.data.objects
             )
             context.scene[SHELL_MODE_PROPERTY] = "BUILD" if has_starter else "HOME"

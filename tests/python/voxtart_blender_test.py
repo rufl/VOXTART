@@ -1955,12 +1955,8 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(scene.voxtart_editor_workspace, "EDIT")
         self.assertTrue(scene.get(desktop_ui.DESKTOP_MODE_PROPERTY))
         self.assertEqual(bpy.context.window.workspace.name, "VOXTART")
-        self.assertIs(
-            getattr(bpy.types, "VOXTART_PT_desktop_home"),
-            desktop_ui.VOXTART_PT_desktop_home,
-        )
-        self.assertEqual(desktop_ui.VOXTART_PT_desktop_home.bl_label, "Start Here")
-        self.assertEqual(desktop_ui.VOXTART_PT_desktop_home.bl_category, "Tool")
+        self.assertFalse(hasattr(bpy.types, "VOXTART_PT_desktop_home"))
+        self.assertFalse(hasattr(desktop_ui, "VOXTART_PT_desktop_home"))
         self.assertIs(
             getattr(bpy.types, "VOXTART_OT_desktop_shell"),
             desktop_shell.VOXTART_OT_desktop_shell,

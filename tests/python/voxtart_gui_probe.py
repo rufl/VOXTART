@@ -364,8 +364,8 @@ def _check_left_click():
                 f"Palette material node did not use the selected color: "
                 f"actual={actual_color!r}, expected={expected_color!r}"
             )
-        if STATE["scene"].get(voxel_editor.FIRST_RUN_HINT_PROPERTY) is not False:
-            return _fail("First-edit guidance did not close after a changed edit")
+        if STATE["scene"].get(voxel_editor.EDITOR_MINIMAL_PROPERTY) is not False:
+            return _fail("Initial minimal mode did not close after a changed edit")
         editor = STATE["editor"]
         if not editor.status.startswith("Added ") or "Ctrl+Z" not in editor.status:
             return _fail(f"First-edit feedback is not actionable: {editor.status!r}")
@@ -666,6 +666,7 @@ def _finish_mouse_clicks():
                 "shell_optimize": STATE.get("shell_optimize", False),
                 "shell_hints": STATE.get("shell_hints", False),
                 "shell_chat_hints": STATE.get("shell_chat_hints", False),
+                "shell_panel_drag": STATE.get("shell_panel_drag", False),
                 "portable_roundtrip": STATE.get("portable_roundtrip", False),
                 "mesh_export": STATE.get("mesh_export", False),
                 "palette_import": STATE.get("palette_import", False),
@@ -689,7 +690,7 @@ def _finish_mouse_clicks():
                 "starter_pyramid": STATE.get("starter_pyramid", 0),
                 "starter_palette": STATE.get("starter_palette", 0),
                 "startup_editor": STATE.get("startup_editor", False),
-                "first_run_hint": STATE.get("first_run_hint", False),
+                "initial_minimal": STATE.get("initial_minimal", False),
                 "first_edit_feedback": STATE.get("first_edit_feedback", ""),
                 "native_chrome_hidden": STATE.get("native_chrome_hidden", False),
                 "selection_workflow": STATE.get("selection_workflow", False),
@@ -737,6 +738,7 @@ def _finish_mouse_clicks():
                 "dock_hints": STATE.get("dock_hints", False),
                 "menu_surface": STATE.get("menu_surface", False),
                 "dock_snap": STATE.get("dock_snap", False),
+                "floating_panel_drag": STATE.get("floating_panel_drag", False),
                 "product_controls": STATE.get("product_controls", False),
                 "project_control": STATE.get("project_control", False),
                 "escape_keeps_ui": STATE.get("escape_keeps_ui", False),
@@ -842,7 +844,14 @@ def _probe():
         STATE["starter_palette"] = len(starter_asset.palette)
         STATE["area_types"] = [area.type for area in screen.areas]
         STATE["startup_editor"] = voxel_editor._ACTIVE_EDITOR is not None
-        STATE["first_run_hint"] = bool(scene.get(voxel_editor.FIRST_RUN_HINT_PROPERTY))
+        STATE["initial_minimal"] = (
+            bool(scene.get(voxel_editor.EDITOR_MINIMAL_PROPERTY))
+            and not bool(scene.get(voxel_editor.EDITOR_ADVANCED_PROPERTY))
+            and not bool(scene.get(voxel_editor.EDITOR_OPTIONS_PROPERTY))
+            and not bool(scene.get(voxel_editor.EDITOR_MENU_PROPERTY))
+            and scene.get(voxel_editor.EDITOR_DOCK_LEFT_PROPERTY) is False
+            and scene.get(voxel_editor.EDITOR_DOCK_RIGHT_PROPERTY) is True
+        )
         STATE["native_chrome_hidden"] = not bool(scene.get(desktop_ui.DESKTOP_NATIVE_CHROME_PROPERTY))
         if scene.get(desktop_ui.DESKTOP_WINDOW_FULLSCREEN_PROPERTY):
             return _fail("VOXTART startup hid the Windows title bar controls")
@@ -868,8 +877,8 @@ def _probe():
             return _fail("VOXTART startup did not enable flat palette material shading")
         if not STATE["startup_editor"]:
             return _fail("VOXTART startup did not open the voxel editor")
-        if not STATE["first_run_hint"]:
-            return _fail("VOXTART startup did not enable first-edit guidance")
+        if not STATE["initial_minimal"]:
+            return _fail("VOXTART startup did not enable the initial minimal interface")
         with bpy.context.temp_override(
             window=window,
             screen=screen,
@@ -906,7 +915,7 @@ def _probe():
                 return _fail(f"Desktop shell chat bar is not centered: {chat_panel!r}")
             STATE["chatbox_surface"] = True
             if any(key == "mode:CHARACTER" for key, _bounds in shell_state.targets):
-                return _fail("First-run shell exposed premature Character navigation")
+                return _fail("Initial minimal shell exposed premature Character navigation")
             shell_toolbar_count = sum(key.startswith("tool:") for key, _bounds in shell_state.targets)
             toolbar_items = voxel_editor.visible_editor_toolbar_items(scene)
             expected_toolbar_count = sum(item is not None for item in toolbar_items)
@@ -916,7 +925,7 @@ def _probe():
                 "Color block",
                 "Select blocks",
             ):
-                return _fail("First-run toolbar did not expose plain beginner labels")
+                return _fail("Initial minimal toolbar did not expose plain beginner labels")
             if shell_toolbar_count != expected_toolbar_count:
                 return _fail(
                     f"Desktop shell toolbar target count mismatch: "
@@ -927,7 +936,7 @@ def _probe():
                 for key, bounds in shell_state.targets
                 if key.startswith("tool:")
             ]
-            maximum_width = 136.0 if STATE["first_run_hint"] else 52.0
+            maximum_width = 136.0
             if not shell_toolbar_widths or max(shell_toolbar_widths) > maximum_width:
                 return _fail(f"Desktop shell toolbar is not compact: {shell_toolbar_widths!r}")
             if any(key == "shell:close" for key, _bounds in shell_state.targets):
@@ -1007,6 +1016,86 @@ def _probe():
                     )
             STATE["shell_hints"] = True
             STATE["shell_chat_hints"] = True
+            shell_panel_names = {"LEFT", "RIGHT", "TOOLS", "CENTER", "CHAT"}
+            if not shell_panel_names.issubset(shell_state.panels):
+                return _fail(
+                    f"Desktop shell panel registry is incomplete: {shell_state.panels!r}"
+                )
+            shell_panel_deltas = {
+                "LEFT": (24.0, 0.0),
+                "RIGHT": (-24.0, 0.0),
+                "TOOLS": (24.0, 0.0),
+                "CENTER": (24.0, 0.0),
+                "CHAT": (-24.0, 0.0),
+            }
+            for panel_name, (delta_x, delta_y) in shell_panel_deltas.items():
+                before_bounds = tuple(shell_state.panels[panel_name])
+                before_offset = desktop_shell._shell_panel_offset(shell_state, panel_name)
+                header_x = (before_bounds[0] + before_bounds[2]) * 0.5
+                header_height = (
+                    8.0 if panel_name == "CHAT" else desktop_shell._SHELL_PANEL_HEADER_HEIGHT
+                )
+                header_y = before_bounds[3] - min(
+                    header_height * 0.5,
+                    (before_bounds[3] - before_bounds[1]) * 0.5,
+                )
+                panel_press = SimpleNamespace(
+                    type="LEFTMOUSE",
+                    value="PRESS",
+                    ctrl=False,
+                    shift=False,
+                    alt=False,
+                    mouse_region_x=header_x,
+                    mouse_region_y=header_y,
+                )
+                panel_move = SimpleNamespace(
+                    type="MOUSEMOVE",
+                    value="NOTHING",
+                    ctrl=False,
+                    shift=False,
+                    alt=False,
+                    mouse_region_x=header_x + delta_x,
+                    mouse_region_y=header_y + delta_y,
+                )
+                panel_release = SimpleNamespace(
+                    type="LEFTMOUSE",
+                    value="RELEASE",
+                    ctrl=False,
+                    shift=False,
+                    alt=False,
+                    mouse_region_x=header_x + delta_x,
+                    mouse_region_y=header_y + delta_y,
+                )
+                panel_press_result = desktop_shell.VOXTART_OT_desktop_shell.modal(
+                    shell_hint_operator,
+                    bpy.context,
+                    panel_press,
+                )
+                panel_move_result = desktop_shell.VOXTART_OT_desktop_shell.modal(
+                    shell_hint_operator,
+                    bpy.context,
+                    panel_move,
+                )
+                panel_release_result = desktop_shell.VOXTART_OT_desktop_shell.modal(
+                    shell_hint_operator,
+                    bpy.context,
+                    panel_release,
+                )
+                desktop_shell._draw_shell(shell_state, bpy.context)
+                after_offset = desktop_shell._shell_panel_offset(shell_state, panel_name)
+                after_bounds = tuple(shell_state.panels[panel_name])
+                if (
+                    "RUNNING_MODAL" not in panel_press_result
+                    or "RUNNING_MODAL" not in panel_move_result
+                    or "RUNNING_MODAL" not in panel_release_result
+                    or after_offset == before_offset
+                    or after_bounds == before_bounds
+                ):
+                    return _fail(
+                        f"Desktop shell panel drag did not move {panel_name}: "
+                        f"{before_offset!r} -> {after_offset!r}"
+                    )
+            STATE["shell_panel_drag"] = True
 
             area.tag_redraw()
             bpy.ops.wm.redraw_timer(type="DRAW_WIN_SWAP", iterations=2)
@@ -1436,7 +1525,7 @@ def _probe():
                     selected.select_set(False)
                 native_object.select_set(True)
                 bpy.context.view_layer.objects.active = native_object
-                scene[voxel_editor.FIRST_RUN_HINT_PROPERTY] = False
+                scene[voxel_editor.EDITOR_MINIMAL_PROPERTY] = False
                 desktop_shell._set_mode(scene, "HOME")
                 desktop_shell._draw_shell(shell_state, bpy.context)
                 if not any(key == "mode:CHARACTER" for key, _bounds in shell_state.targets):
@@ -3480,6 +3569,80 @@ def _probe():
             return _fail("VOXTART editor panel drag did not snap Layers to the right drawer")
         STATE["dock_drawers"] = True
         STATE["dock_snap"] = True
+        floating_panel_deltas = {
+            "TOOLBAR": (20.0, 0.0),
+            "VIEWPORT": (20.0, 0.0),
+            "TOOL_OPTIONS": (20.0, 0.0),
+            "CHAT": (-20.0, 0.0),
+        }
+        floating_context = SimpleNamespace(region=region)
+        for panel_name, (delta_x, delta_y) in floating_panel_deltas.items():
+            before_layout = voxel_editor._editor_floating_layouts(editor, floating_context)[panel_name]
+            before_bounds = tuple(before_layout["panel"])
+            before_offset = tuple(editor.panel_positions.get(panel_name, (0.0, 0.0)))
+            if before_bounds[2] <= before_bounds[0] or before_bounds[3] <= before_bounds[1]:
+                return _fail(f"VOXTART floating panel has invalid bounds: {panel_name}")
+            panel_x = (before_bounds[0] + before_bounds[2]) * 0.5
+            header_height = (
+                8.0 * voxel_editor.ui_style.ui_scale()
+                if panel_name == "CHAT"
+                else voxel_editor.EDITOR_FLOATING_HEADER_HEIGHT * voxel_editor.ui_style.ui_scale()
+            )
+            panel_y = before_bounds[3] - min(
+                header_height * 0.5,
+                (before_bounds[3] - before_bounds[1]) * 0.5,
+            )
+            floating_press = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="PRESS",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=panel_x,
+                mouse_region_y=panel_y,
+            )
+            floating_move = SimpleNamespace(
+                type="MOUSEMOVE",
+                value="NOTHING",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=panel_x + delta_x,
+                mouse_region_y=panel_y + delta_y,
+            )
+            floating_release = SimpleNamespace(
+                type="LEFTMOUSE",
+                value="RELEASE",
+                ctrl=False,
+                shift=False,
+                alt=False,
+                mouse_region_x=panel_x + delta_x,
+                mouse_region_y=panel_y + delta_y,
+            )
+            with bpy.context.temp_override(
+                window=window,
+                screen=screen,
+                area=area,
+                region=region,
+            ):
+                floating_press_result = editor.modal(bpy.context, floating_press)
+                floating_move_result = editor.modal(bpy.context, floating_move)
+                floating_release_result = editor.modal(bpy.context, floating_release)
+            after_layout = voxel_editor._editor_floating_layouts(editor, floating_context)[panel_name]
+            after_bounds = tuple(after_layout["panel"])
+            after_offset = tuple(editor.panel_positions.get(panel_name, (0.0, 0.0)))
+            if (
+                "RUNNING_MODAL" not in floating_press_result
+                or "RUNNING_MODAL" not in floating_move_result
+                or "RUNNING_MODAL" not in floating_release_result
+                or after_offset == before_offset
+                or after_bounds == before_bounds
+            ):
+                return _fail(
+                    f"VOXTART floating panel drag did not move {panel_name}: "
+                    f"{before_offset!r} -> {after_offset!r}"
+                )
+        STATE["floating_panel_drag"] = True
         with bpy.context.temp_override(
             window=window,
             screen=screen,

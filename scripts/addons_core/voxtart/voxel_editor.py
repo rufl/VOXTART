@@ -85,7 +85,6 @@ EDITOR_WORKSPACE_PROPERTY = "voxtart_editor_workspace"
 EDITOR_SELECTION_PROPERTY = COMPONENT_SELECTION_PROPERTY
 EDITOR_CLIPBOARD_PROPERTY = "voxtart_editor_clipboard"
 EDITOR_STROKE_PROPERTY = "voxtart_editor_stroke_recovery"
-FIRST_RUN_HINT_PROPERTY = "voxtart_first_run_hint"
 EDITOR_DETAILS_PROPERTY = "voxtart_editor_details"
 EDITOR_HELP_PROPERTY = "voxtart_editor_help"
 EDITOR_ADVANCED_PROPERTY = "voxtart_editor_advanced_tools"
@@ -94,11 +93,21 @@ EDITOR_GRID_PROPERTY = "voxtart_editor_grid"
 EDITOR_MENU_PROPERTY = "voxtart_editor_menu_open"
 EDITOR_PALETTE_FAVORITES_PROPERTY = "voxtart_editor_palette_favorites"
 
+EDITOR_MINIMAL_PROPERTY = "voxtart_editor_minimal"
+EDITOR_PANEL_POSITIONS_PROPERTY = "voxtart_editor_panel_positions"
 EDITOR_DOCK_LEFT_PROPERTY = "voxtart_editor_dock_left"
 EDITOR_DOCK_RIGHT_PROPERTY = "voxtart_editor_dock_right"
 EDITOR_DOCK_PANEL_WIDTH = 252.0
 EDITOR_DOCK_PANEL_GAP = 8.0
 EDITOR_DOCK_PANELS = ("PALETTE", "LAYERS", "HISTORY")
+EDITOR_FLOATING_PANELS = ("TOOLBAR", "VIEWPORT", "TOOL_OPTIONS", "CHAT")
+EDITOR_FLOATING_HEADER_HEIGHT = 34.0
+_EDITOR_FLOATING_LABELS = {
+    "TOOLBAR": "TOOLS",
+    "VIEWPORT": "VIEWPORT",
+    "TOOL_OPTIONS": "TOOL OPTIONS",
+    "CHAT": "ASK VOXTART",
+}
 _EDITOR_DOCK_HINTS = {
     "PALETTE": ("Colors", "Choose a swatch or edit its material."),
     "LAYERS": ("Layers", "Drag this panel or click a layer to activate it."),
@@ -108,6 +117,131 @@ _EDITOR_DOCK_HINTS = {
 
 def _editor_dock_hint(name):
     return _EDITOR_DOCK_HINTS.get(name)
+
+
+def _editor_panel_positions(scene) -> dict[str, tuple[float, float]]:
+    raw = scene.get(EDITOR_PANEL_POSITIONS_PROPERTY, "{}") if scene is not None else "{}"
+    if not isinstance(raw, str):
+        return {}
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    if not isinstance(decoded, dict):
+        return {}
+    positions = {}
+    for name in EDITOR_FLOATING_PANELS:
+        value = decoded.get(name)
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            try:
+                positions[name] = (float(value[0]), float(value[1]))
+            except (TypeError, ValueError):
+                continue
+    return positions
+
+
+def _store_editor_panel_positions(editor) -> None:
+    scene = getattr(editor, "scene", None)
+    if scene is None:
+        return
+    positions = getattr(editor, "panel_positions", {}) or {}
+    scene[EDITOR_PANEL_POSITIONS_PROPERTY] = json.dumps(
+        {
+            name: [round(float(offset[0]), 3), round(float(offset[1]), 3)]
+            for name, offset in positions.items()
+            if name in EDITOR_FLOATING_PANELS and len(offset) == 2
+        },
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _translate_editor_bounds(bounds, dx: float, dy: float):
+    return (
+        bounds[0] + dx,
+        bounds[1] + dy,
+        bounds[2] + dx,
+        bounds[3] + dy,
+    )
+
+
+def _translate_editor_layout(layout, dx: float, dy: float):
+    translated = dict(layout)
+    if "panel" in translated:
+        translated["panel"] = _translate_editor_bounds(translated["panel"], dx, dy)
+    if "cube" in translated:
+        translated["cube"] = _translate_editor_bounds(translated["cube"], dx, dy)
+    if "entries" in translated:
+        translated["entries"] = tuple(
+            (*entry[:-1], _translate_editor_bounds(entry[-1], dx, dy))
+            for entry in translated["entries"]
+            if len(entry) >= 2
+        )
+    for key in ("chat:image", "chat:field", "chat:send"):
+        if key in translated:
+            translated[key] = _translate_editor_bounds(translated[key], dx, dy)
+    return translated
+
+
+def _position_editor_layout(editor, name: str, region, layout):
+    panel = layout.get("panel")
+    if panel is None:
+        return layout
+    scale = ui_style.ui_scale()
+    width = float(getattr(region, "width", 0.0))
+    height = float(getattr(region, "height", 0.0))
+    panel_width = panel[2] - panel[0]
+    panel_height = panel[3] - panel[1]
+    offset = (getattr(editor, "panel_positions", {}) or {}).get(name, (0.0, 0.0))
+    try:
+        requested_x = panel[0] + float(offset[0])
+        requested_y = panel[1] + float(offset[1])
+    except (TypeError, ValueError, IndexError):
+        requested_x = panel[0]
+        requested_y = panel[1]
+    min_x = 8.0 * scale
+    min_y = 8.0 * scale
+    max_x = max(min_x, width - panel_width - 8.0 * scale)
+    max_y = max(min_y, height - panel_height - 8.0 * scale)
+    x0 = min(max(min_x, requested_x), max_x)
+    y0 = min(max(min_y, requested_y), max_y)
+    return _translate_editor_layout(layout, x0 - panel[0], y0 - panel[1])
+
+
+def _editor_floating_layouts(editor, context):
+    region = getattr(context, "region", None)
+    if region is None:
+        return {}
+    return {
+        "TOOLBAR": _editor_toolbar_layout_positioned(editor, region),
+        "VIEWPORT": _editor_view_hud_layout(editor, region),
+        "TOOL_OPTIONS": _editor_tool_options_layout(editor, region),
+        "CHAT": _editor_chat_layout(editor, region),
+    }
+
+
+def _editor_floating_panel_header_bounds(name: str, panel, scale: float):
+    header_height = 8.0 * scale if name == "CHAT" else EDITOR_FLOATING_HEADER_HEIGHT * scale
+    return (
+        panel[0],
+        max(panel[1], panel[3] - header_height),
+        panel[2],
+        panel[3],
+    )
+
+
+def _editor_floating_panel_hit(editor, context, event):
+    x = float(getattr(event, "mouse_region_x", -1.0))
+    y = float(getattr(event, "mouse_region_y", -1.0))
+    scale = ui_style.ui_scale()
+    for name, layout in _editor_floating_layouts(editor, context).items():
+        panel = layout.get("panel")
+        if panel is None:
+            continue
+        header = _editor_floating_panel_header_bounds(name, panel, scale)
+        if header[0] <= x <= header[2] and header[1] <= y <= header[3]:
+            return name
+    return None
 
 
 EDITOR_VIEW_HUD_WIDTH = 190.0
@@ -414,6 +548,7 @@ def _editor_cursor(editor, event=None) -> str:
         or getattr(editor, "color_wheel_hover", None) is not None
         or getattr(editor, "dock_hover", None) is not None
         or getattr(editor, "dock_dragging", None) is not None
+        or getattr(editor, "panel_dragging", None) is not None
         or getattr(editor, "view_hud_hover", None) is not None
         or getattr(editor, "tool_options_hover", None) is not None
     ):
@@ -507,11 +642,16 @@ def _editor_view_hud_layout(editor, region):
             ),
         )
     )
-    return {
-        "panel": (x0, y0, x1, y1),
-        "cube": cube,
-        "entries": tuple(entries),
-    }
+    return _position_editor_layout(
+        editor,
+        "VIEWPORT",
+        region,
+        {
+            "panel": (x0, y0, x1, y1),
+            "cube": cube,
+            "entries": tuple(entries),
+        },
+    )
 
 
 def _editor_view_hud_action_at(context, event):
@@ -572,8 +712,29 @@ def _editor_toolbar_layout(height: float, scene=None):
         entries.append((item, (x + 8.0 * scale, y, x + 8.0 * scale + button_width, y + button_height)))
         cursor = y - gap
     bottom = cursor + gap
-    panel = (x, bottom - 8.0 * scale, button_width + 16.0 * scale, top - bottom + 16.0 * scale)
+    panel = (
+        x,
+        bottom - 8.0 * scale,
+        button_width + 16.0 * scale,
+        top - bottom + 16.0 * scale + EDITOR_FLOATING_HEADER_HEIGHT * scale,
+    )
     return panel, tuple(entries)
+
+
+def _editor_toolbar_layout_positioned(editor, region):
+    panel, entries = _editor_toolbar_layout(region.height, editor.scene)
+    panel_bounds = (
+        panel[0],
+        panel[1],
+        panel[0] + panel[2],
+        panel[1] + panel[3],
+    )
+    return _position_editor_layout(
+        editor,
+        "TOOLBAR",
+        region,
+        {"panel": panel_bounds, "entries": entries},
+    )
 
 
 def _editor_toolbar_item_at(editor, context, event):
@@ -584,7 +745,7 @@ def _editor_toolbar_item_at(editor, context, event):
         return None
     x = float(getattr(event, "mouse_region_x", -1.0))
     y = float(getattr(event, "mouse_region_y", -1.0))
-    for item, bounds in _editor_toolbar_layout(region.height, editor.scene)[1]:
+    for item, bounds in _editor_toolbar_layout_positioned(editor, region)["entries"]:
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
             return item
     return None
@@ -612,11 +773,12 @@ def _editor_tool_options_layout(editor, region):
             "shape_item": shape_item,
             "workspace": workspace,
         }
-    toolbar_panel, _toolbar_entries = (
-        _editor_toolbar_layout(height, editor.scene)
+    toolbar_layout = (
+        _editor_toolbar_layout_positioned(editor, region)
         if workspace == "EDIT"
-        else ((0.0, 0.0, 0.0, 0.0), ())
+        else {"panel": (0.0, 0.0, 0.0, 0.0), "entries": ()}
     )
+    toolbar_panel = toolbar_layout["panel"]
     dock_layout = _editor_dock_layout(editor, region)
     left_panel_right = max(
         (
@@ -767,13 +929,18 @@ def _editor_tool_options_layout(editor, region):
         elif shape == "FACE" or mode == "ATTACH":
             add("TOOL_DEPTH_DOWN", "−", panel_x_units + 76.0, panel_y_units + 20.0, panel_x_units + 100.0)
             add("TOOL_DEPTH_UP", "+", panel_x_units + 106.0, panel_y_units + 20.0, panel_x_units + 130.0)
-    return {
-        "panel": panel,
-        "entries": tuple(entries),
-        "mode_item": mode_item,
-        "shape_item": shape_item,
-        "workspace": workspace,
-    }
+    return _position_editor_layout(
+        editor,
+        "TOOL_OPTIONS",
+        region,
+        {
+            "panel": panel,
+            "entries": tuple(entries),
+            "mode_item": mode_item,
+            "shape_item": shape_item,
+            "workspace": workspace,
+        },
+    )
 
 
 def _editor_tool_options_action_at(context, event):
@@ -962,19 +1129,30 @@ def _editor_topbar_action_at(context, event):
             return action
     return None
 
-def _editor_chat_action_at(context, event) -> str | None:
-    region = getattr(context, "region", None)
-    if region is None:
-        return None
+
+def _editor_chat_layout(editor, region):
     from . import mcp
 
+    return _position_editor_layout(
+        editor,
+        "CHAT",
+        region,
+        mcp.chat_layout(
+            float(region.width),
+            float(region.height),
+            scale=ui_style.ui_scale(),
+        ),
+    )
+
+
+def _editor_chat_action_at(context, event) -> str | None:
+    region = getattr(context, "region", None)
+    editor = _ACTIVE_EDITOR
+    if region is None or editor is None:
+        return None
     x = float(getattr(event, "mouse_region_x", -1.0))
     y = float(getattr(event, "mouse_region_y", -1.0))
-    for action, bounds in mcp.chat_layout(
-        float(region.width),
-        float(region.height),
-        scale=ui_style.ui_scale(),
-    ).items():
+    for action, bounds in _editor_chat_layout(editor, region).items():
         if action == "panel":
             continue
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
@@ -982,6 +1160,8 @@ def _editor_chat_action_at(context, event) -> str | None:
     return None
 
 
+def _editor_floating_panel_label(name: str) -> str:
+    return _EDITOR_FLOATING_LABELS.get(name, name)
 
 
 
@@ -1127,7 +1307,7 @@ def _editor_dock_layout(editor, region):
         if side == "LEFT":
             x0 = 8.0 * scale
             if _scene_workspace(editor.scene) == "EDIT":
-                toolbar_panel, _toolbar_entries = _editor_toolbar_layout(height, editor.scene)
+                toolbar_panel = _editor_toolbar_layout_positioned(editor, region)["panel"]
                 x0 = max(x0, toolbar_panel[2] + 12.0 * scale)
         else:
             x0 = width - dock_width - 8.0 * scale
@@ -3120,14 +3300,26 @@ def _draw_editor_toolbar(editor, context) -> None:
     if region is None:
         return
     scale = ui_style.ui_scale()
-    panel, entries = _editor_toolbar_layout(region.height, context.scene)
+    layout = _editor_toolbar_layout_positioned(editor, region)
+    panel = layout["panel"]
+    entries = layout["entries"]
     try:
         gpu.state.blend_set("ALPHA")
         _draw_editor_panel(
-            *panel,
+            panel[0],
+            panel[1],
+            panel[2] - panel[0],
+            panel[3] - panel[1],
             _THEME["panel"],
             border=_THEME["border"],
             radius=10.0 * scale,
+        )
+        _draw_editor_text(
+            "TOOLS",
+            panel[0] + 12.0 * scale,
+            panel[3] - 24.0 * scale,
+            10.0,
+            _THEME["text_muted"],
         )
         for item, bounds in entries:
             x0, y0, x1, y1 = bounds
@@ -4210,7 +4402,7 @@ def _draw_editor_chat_prompt(editor, context) -> None:
     from . import mcp
 
     scale = ui_style.ui_scale()
-    layout = mcp.chat_layout(float(region.width), float(region.height), scale=scale)
+    layout = _editor_chat_layout(editor, region)
     panel_x, panel_y, panel_right, panel_top = layout["panel"]
     panel_width = panel_right - panel_x
     _draw_editor_panel(
@@ -4392,7 +4584,6 @@ def _draw_editor_overlay(editor, context) -> None:
 
     mode = _editor_input_mode(editor)
     shape = _scene_shape(scene)
-    first_run = bool(scene.get(FIRST_RUN_HINT_PROPERTY))
     show_help = bool(scene.get(EDITOR_HELP_PROPERTY))
     details = bool(scene.get(EDITOR_DETAILS_PROPERTY))
 
@@ -4418,7 +4609,7 @@ def _draw_editor_overlay(editor, context) -> None:
     _draw_editor_tool_options(editor, context)
     _draw_editor_topbar_tooltip(editor, context)
     _draw_editor_chat_prompt(editor, context)
-    chat_layout = mcp.chat_layout(float(region.width), float(region.height), scale=scale)
+    chat_layout = _editor_chat_layout(editor, region)
     _draw_editor_chat_tooltip(editor, context, chat_layout, scale)
     context_label = f"{mode_label}  ·  {shape.title()} brush" if details else mode_label
     context_shortcut = {
@@ -4473,48 +4664,6 @@ def _draw_editor_overlay(editor, context) -> None:
             10.0,
             _THEME["text_muted"],
         )
-    if first_run and not show_help:
-        card_x = 84.0 * scale
-        card_y = max(100.0 * scale, float(region.height) - 200.0 * scale)
-        card_width = max(320.0 * scale, min(560.0 * scale, float(region.width) - card_x - 24.0 * scale))
-        card_height = 110.0 * scale
-        _draw_editor_panel(
-            card_x,
-            card_y,
-            card_width,
-            card_height,
-            _THEME["panel"],
-            border=_THEME["accent_soft"],
-            radius=12.0 * scale,
-        )
-        _draw_editor_text(
-            "START HERE",
-            card_x + 14.0 * scale,
-            card_y + 88.0 * scale,
-            11.0,
-            _THEME["accent"],
-        )
-        for offset, line in enumerate(
-            (
-                "1  Pick a color",
-                "2  Click a block to add one",
-                "3  Right-click to remove one",
-            )
-        ):
-            _draw_editor_text(
-                line,
-                card_x + 14.0 * scale,
-                card_y + 68.0 * scale - offset * 19.0 * scale,
-                11.0,
-                _THEME["text"],
-            )
-        _draw_editor_text(
-            "Oops? Use Undo.",
-            card_x + 14.0 * scale,
-            card_y + 12.0 * scale,
-            10.0,
-            _THEME["text_muted"],
-        )
     if show_help:
         _draw_editor_help(editor, context)
     if bool(scene.get(EDITOR_DETAILS_PROPERTY)):
@@ -4553,8 +4702,6 @@ def _draw_editor_overlay(editor, context) -> None:
     status = str(getattr(editor, "status", "Ready") or "Ready")
     status_display = status if len(status) <= 72 else f"{status[:69]}..."
     status_lower = status_display.lower()
-    if first_run and not show_help and status_lower.startswith("ready"):
-        return
     if any(
         fragment in status_lower
         for fragment in ("locked", "invalid", "nothing", "empty", "aim at", "cancelled", "discarded", "no block")
@@ -4860,7 +5007,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self.preview_cells = ()
         if report.changed:
             self._record_history(_history_label(report))
-            self.scene[FIRST_RUN_HINT_PROPERTY] = False
+            self.scene[EDITOR_MINIMAL_PROPERTY] = False
             changed = report.added + report.removed + report.painted
             unit = "block" if changed == 1 else "blocks"
             verb = {
@@ -5779,6 +5926,41 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
 
 
 
+    def _begin_panel_drag(self, context, event, name: str) -> None:
+        self.panel_dragging = name
+        self.panel_drag_x = float(getattr(event, "mouse_region_x", 0.0))
+        self.panel_drag_y = float(getattr(event, "mouse_region_y", 0.0))
+        self.panel_drag_origin = (self.panel_drag_x, self.panel_drag_y)
+        self.panel_drag_offset = tuple(
+            (getattr(self, "panel_positions", {}) or {}).get(name, (0.0, 0.0))
+        )
+        self.status = f"{_editor_floating_panel_label(name).title()} panel moving"
+        _request_redraw(self, context, force=True)
+
+    def _update_panel_drag(self, context, event) -> None:
+        name = getattr(self, "panel_dragging", None)
+        if name is None:
+            return
+        x = float(getattr(event, "mouse_region_x", 0.0))
+        y = float(getattr(event, "mouse_region_y", 0.0))
+        origin_x, origin_y = self.panel_drag_origin
+        offset_x, offset_y = self.panel_drag_offset
+        self.panel_positions[name] = (
+            offset_x + x - origin_x,
+            offset_y + y - origin_y,
+        )
+        _store_editor_panel_positions(self)
+        self.panel_drag_x = x
+        self.panel_drag_y = y
+        _request_redraw(self, context)
+
+    def _finish_panel_drag(self, context) -> None:
+        if getattr(self, "panel_dragging", None) is None:
+            return
+        self.panel_dragging = None
+        self.status = "Panel moved"
+        _request_redraw(self, context, force=True)
+
     def _finish(self, context, result=None):
         self.toolbar_hover = None
         self.topbar_hover = None
@@ -5787,6 +5969,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         self.tool_options_hover = None
         self.dock_hover = None
         self.dock_dragging = None
+        self.panel_dragging = None
         try:
             from . import mcp
 
@@ -5817,6 +6000,11 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             _request_redraw(self, context, force=True)
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
+            floating_panel = _editor_floating_panel_hit(self, context, event)
+            if floating_panel is not None:
+                self._begin_panel_drag(context, event, floating_panel)
+                mcp.set_chat_input_focus(False)
+                return {"RUNNING_MODAL"}
             chat_action = _editor_chat_action_at(context, event)
             if chat_action is not None:
                 if chat_action == "chat:field":
@@ -5840,6 +6028,14 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self.status = view_status
             return {"RUNNING_MODAL"}
         if event.type == "ESC" and event.value == "PRESS":
+            if getattr(self, "panel_dragging", None) is not None:
+                name = self.panel_dragging
+                self.panel_positions[name] = self.panel_drag_offset
+                _store_editor_panel_positions(self)
+                self.panel_dragging = None
+                self.status = "Panel drag cancelled"
+                _request_redraw(self, context, force=True)
+                return {"RUNNING_MODAL"}
             if getattr(self, "dock_dragging", None) is not None:
                 self.dock_dragging = None
                 self.dock_hover = None
@@ -5887,6 +6083,27 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self._begin_transform("MOVE")
                 return {"RUNNING_MODAL"}
         if event.type == "MOUSEMOVE":
+            if getattr(self, "panel_dragging", None) is not None:
+                self._update_panel_drag(context, event)
+                self.chat_hover = None
+                self.view_hud_hover = None
+                self.tool_options_hover = None
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
+            floating_panel = _editor_floating_panel_hit(self, context, event)
+            if floating_panel is not None:
+                self.chat_hover = None
+                self.view_hud_hover = None
+                self.tool_options_hover = None
+                self.dock_hover = None
+                self.color_wheel_hover = None
+                self.topbar_hover = None
+                self.palette_hover = None
+                self.toolbar_hover = None
+                self.last_hit = None
+                self.preview_cells = ()
+                _set_editor_cursor(context, "HAND")
+                return {"RUNNING_MODAL"}
             self.chat_hover = _editor_chat_action_at(context, event)
             self.view_hud_hover = None
             self.tool_options_hover = None
@@ -6000,6 +6217,10 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
         if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "PRESS":
             if event.type == "LEFTMOUSE":
                 mcp.set_chat_input_focus(False)
+            floating_panel = _editor_floating_panel_hit(self, context, event)
+            if floating_panel is not None:
+                self._begin_panel_drag(context, event, floating_panel)
+                return {"RUNNING_MODAL"}
             menu_action = _editor_menu_action_at(context, event)
             if menu_action is not None:
                 if event.type == "LEFTMOUSE":
@@ -6181,6 +6402,10 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self._apply_at_cursor(context, event)
             return {"RUNNING_MODAL"}
         if event.type in {"LEFTMOUSE", "RIGHTMOUSE"} and event.value == "RELEASE":
+            if event.type == "LEFTMOUSE" and getattr(self, "panel_dragging", None) is not None:
+                self._finish_panel_drag(context)
+                _set_editor_cursor(context, _editor_cursor(self, event))
+                return {"RUNNING_MODAL"}
             if event.type == "LEFTMOUSE" and getattr(self, "dock_dragging", None) is not None:
                 self._finish_dock_drag(context, event)
                 _set_editor_cursor(context, _editor_cursor(self, event))
@@ -6306,6 +6531,12 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self._last_recovery_write = 0.0
             self._load_state(context)
             recovered = self._recover_interrupted_state()
+            self.panel_dragging = None
+            self.panel_drag_x = 0.0
+            self.panel_drag_y = 0.0
+            self.panel_drag_origin = (0.0, 0.0)
+            self.panel_drag_offset = (0.0, 0.0)
+            self.panel_positions = _editor_panel_positions(self.scene)
             operators._update_visual_overlays(self.obj, self.asset)
             recovery_status = getattr(self, "status", "")
             self._load_clipboard()
@@ -6333,6 +6564,10 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             self._last_redraw = 0.0
             self._preview_handle = None
             self._reset_transform()
+            if EDITOR_MINIMAL_PROPERTY not in self.scene:
+                self.scene[EDITOR_MINIMAL_PROPERTY] = True
+            if EDITOR_PANEL_POSITIONS_PROPERTY not in self.scene:
+                _store_editor_panel_positions(self)
             self._reset_scene_transform()
             self.dragging = False
             self.toolbar_hover = None
@@ -6381,9 +6616,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 recovery_status
                 if (recovered or recovery_status)
                 else (
-                    "Ready — click a face to add a block"
-                    if bool(self.scene.get(FIRST_RUN_HINT_PROPERTY))
-                    else "Ready"
+                    "Ready"
                 )
             )
             self.mirrors = (
@@ -6614,7 +6847,7 @@ __all__ = [
     "EDITOR_WORKSPACE_ITEMS",
     "EDITOR_WORKSPACES",
     "EDITOR_WORKSPACE_PROPERTY",
-    "FIRST_RUN_HINT_PROPERTY",
+    "EDITOR_MINIMAL_PROPERTY",
     "VOXTART_OT_voxel_editor",
     "VOXTART_PT_voxel_editor",
     "register",

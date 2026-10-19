@@ -16,7 +16,7 @@ import bpy
 required_types = (
     "VOXTART_OT_voxel_editor",
     "VOXTART_OT_palette_select",
-    "VOXTART_PT_desktop_home",
+    "VOXTART_OT_desktop_shell",
 )
 missing = [name for name in required_types if not hasattr(bpy.types, name)]
 if missing:
