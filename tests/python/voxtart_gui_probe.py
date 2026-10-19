@@ -2217,6 +2217,8 @@ def _probe():
                 "VOXTART_OT_character_unbind_animation",
                 "VOXTART_OT_character_set_animation_bone",
                 "VOXTART_OT_character_clear_animation_bone",
+                "VOXTART_OT_character_import_recipe",
+                "VOXTART_OT_character_export_recipe",
             )
         ):
             return _fail("VOXTART Charameld animation surface is not registered")

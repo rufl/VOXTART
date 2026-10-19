@@ -560,6 +560,22 @@ class BlenderRegistrationTest(unittest.TestCase):
             character_editor_ui.VOXTART_OT_character_clear_animation_bone.bl_idname,
             "voxtart.character_clear_animation_bone",
         )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_import_recipe"),
+            character_editor_ui.VOXTART_OT_character_import_recipe,
+        )
+        self.assertIs(
+            getattr(bpy.types, "VOXTART_OT_character_export_recipe"),
+            character_editor_ui.VOXTART_OT_character_export_recipe,
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_import_recipe.bl_idname,
+            "voxtart.character_import_recipe",
+        )
+        self.assertEqual(
+            character_editor_ui.VOXTART_OT_character_export_recipe.bl_idname,
+            "voxtart.character_export_recipe",
+        )
 
 
 
@@ -655,6 +671,9 @@ class BlenderRegistrationTest(unittest.TestCase):
         try:
             with tempfile.TemporaryDirectory() as directory:
                 scene.voxtart_blob_gallery_path = directory
+                recipe_path = Path(directory) / "hero.character.json"
+                invalid_recipe_path = Path(directory) / "invalid.character.json"
+
                 gallery = BlobGallery(Path(directory))
                 gallery.save(_gallery_entry("Native Root", "native_root", (0, 0, 1)))
                 gallery.save(_gallery_entry("Native Torso", "native_torso", (0, 0, -1)))
@@ -667,6 +686,20 @@ class BlenderRegistrationTest(unittest.TestCase):
                     bpy.ops.voxtart.character_assign_blob(slot="TORSO", blob_id="native_torso"),
                     {"FINISHED"},
                 )
+                self.assertEqual(
+                    bpy.ops.voxtart.character_export_recipe(
+                        filepath=str(recipe_path)
+                    ),
+                    {"FINISHED"},
+                )
+                exported_recipe = CharacterRecipe.decode(
+                    recipe_path.read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    {part.slot for part in exported_recipe.parts},
+                    {"ROOT", "TORSO"},
+                )
+
 
                 character_id = str(scene[character_editor_ui.CHARACTER_ID_PROPERTY])
                 generated = {
@@ -855,6 +888,44 @@ class BlenderRegistrationTest(unittest.TestCase):
                         if obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY) == "TORSO"
                     ),
                     (),
+                )
+                self.assertEqual(
+                    bpy.ops.voxtart.character_import_recipe(
+                        filepath=str(recipe_path)
+                    ),
+                    {"FINISHED"},
+                )
+                imported_recipe = CharacterRecipe.decode(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY]
+                )
+                self.assertEqual(
+                    {part.slot for part in imported_recipe.parts},
+                    {"ROOT", "TORSO"},
+                )
+                self.assertTrue(
+                    any(
+                        obj.get(character_editor_ui.CHARACTER_SLOT_PROPERTY) == "TORSO"
+                        and obj.get(character_editor_ui.CHARACTER_OBJECT_ID_PROPERTY) == character_id
+                        for obj in bpy.data.objects
+                    )
+                )
+
+                invalid_recipe_path.write_text(
+                    CharacterRecipe(
+                        parts=[CharacterPart("TORSO", "native_torso")]
+                    ).encode(),
+                    encoding="utf-8",
+                )
+                previous_imported_recipe = scene[
+                    character_editor_ui.CHARACTER_RECIPE_PROPERTY
+                ]
+                with self.assertRaises(RuntimeError):
+                    bpy.ops.voxtart.character_import_recipe(
+                        filepath=str(invalid_recipe_path)
+                    )
+                self.assertEqual(
+                    scene[character_editor_ui.CHARACTER_RECIPE_PROPERTY],
+                    previous_imported_recipe,
                 )
 
                 self.assertEqual(bpy.ops.voxtart.character_clear(), {"FINISHED"})

@@ -9,9 +9,13 @@ from dataclasses import replace
 
 import json
 import uuid
+from pathlib import Path
+
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, StringProperty
+from bpy_extras.io_utils import ExportHelper, ImportHelper
+
 
 from .character_editor import (
     CHARACTER_SLOTS,
@@ -29,6 +33,7 @@ CHARACTER_SLOT_PROPERTY = "voxtart_character_slot"
 CHARACTER_BLOB_PROPERTY = "voxtart_character_blob_id"
 CHARACTER_ANIMATION_SLOT_PROPERTY = "voxtart_character_animation_slot"
 CHARACTER_ANIMATION_BONE_PROPERTY = "voxtart_character_animation_bone"
+CHARACTER_FILE_EXTENSION = ".character.json"
 
 
 _SLOT_ITEMS = (
@@ -409,6 +414,55 @@ class VOXTART_OT_character_remove_part(bpy.types.Operator):
 
 
 
+
+class VOXTART_OT_character_import_recipe(bpy.types.Operator, ImportHelper):
+    bl_idname = "voxtart.character_import_recipe"
+    bl_label = "Import Character Recipe"
+    bl_description = "Load a portable VOXTART character recipe and rebuild its gallery parts"
+    bl_options = {'REGISTER', 'UNDO'}
+    filename_ext = CHARACTER_FILE_EXTENSION
+    filter_glob: StringProperty(
+        default=f"*{CHARACTER_FILE_EXTENSION}",
+        options={'HIDDEN'},
+    )
+
+    def execute(self, context):
+        try:
+            recipe = CharacterRecipe.decode(
+                Path(self.filepath).read_text(encoding="utf-8")
+            )
+            if not recipe.parts or recipe.get("ROOT") is None:
+                raise ValueError("character recipe must contain a Root part")
+            _rebuild_character(context, recipe)
+            _save_recipe(context.scene, recipe)
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Imported character recipe {recipe.name}")
+        return {'FINISHED'}
+
+
+class VOXTART_OT_character_export_recipe(bpy.types.Operator, ExportHelper):
+    bl_idname = "voxtart.character_export_recipe"
+    bl_label = "Export Character Recipe"
+    bl_description = "Save the current VOXTART character recipe as a portable JSON file"
+    bl_options = {'REGISTER', 'UNDO'}
+    filename_ext = CHARACTER_FILE_EXTENSION
+    filter_glob: StringProperty(
+        default=f"*{CHARACTER_FILE_EXTENSION}",
+        options={'HIDDEN'},
+    )
+
+    def execute(self, context):
+        try:
+            recipe = _load_recipe(context.scene)
+            Path(self.filepath).write_text(recipe.encode() + "\n", encoding="utf-8")
+        except (OSError, TypeError, ValueError, RuntimeError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
+        self.report({'INFO'}, f"Exported character recipe {recipe.name}")
+        return {'FINISHED'}
+
 class VOXTART_OT_character_toggle_visibility(bpy.types.Operator):
     bl_idname = "voxtart.character_toggle_visibility"
     bl_label = "Toggle Character Part Visibility"
@@ -612,6 +666,17 @@ class VOXTART_PT_character_editor(bpy.types.Panel):
         row = layout.row(align=True)
         row.operator(VOXTART_OT_character_rebuild.bl_idname, text="Rebuild", icon="FILE_REFRESH")
         row.operator(VOXTART_OT_character_clear.bl_idname, text="Clear", icon="TRASH")
+        recipe_row = layout.row(align=True)
+        recipe_row.operator(
+            VOXTART_OT_character_import_recipe.bl_idname,
+            text="Import Recipe",
+            icon="IMPORT",
+        )
+        recipe_row.operator(
+            VOXTART_OT_character_export_recipe.bl_idname,
+            text="Export Recipe",
+            icon="EXPORT",
+        )
 
         active = layout.operator(VOXTART_OT_character_assign_active.bl_idname, text="Use Active Blob", icon="EYEDROPPER")
         active.slot = scene.voxtart_character_slot
@@ -718,6 +783,8 @@ _CLASSES = (
     VOXTART_OT_character_assign_active,
     VOXTART_OT_character_rebuild,
     VOXTART_OT_character_remove_part,
+    VOXTART_OT_character_import_recipe,
+    VOXTART_OT_character_export_recipe,
     VOXTART_OT_character_toggle_visibility,
     VOXTART_OT_character_bind_animation,
     VOXTART_OT_character_unbind_animation,
@@ -726,6 +793,7 @@ _CLASSES = (
     VOXTART_OT_character_clear,
     VOXTART_PT_character_editor,
 )
+
 
 
 def register() -> None:
@@ -779,12 +847,15 @@ __all__ = [
     "CHARACTER_ANIMATION_BONE_PROPERTY",
     "CHARACTER_ANIMATION_SLOT_PROPERTY",
     "CHARACTER_BLOB_PROPERTY",
+    "CHARACTER_FILE_EXTENSION",
     "CHARACTER_ID_PROPERTY",
     "CHARACTER_OBJECT_ID_PROPERTY",
     "CHARACTER_RECIPE_PROPERTY",
     "CHARACTER_SLOT_PROPERTY",
     "VOXTART_OT_character_bind_animation",
     "VOXTART_OT_character_clear_animation_bone",
+    "VOXTART_OT_character_export_recipe",
+    "VOXTART_OT_character_import_recipe",
     "VOXTART_OT_character_set_animation_bone",
     "VOXTART_OT_character_toggle_visibility",
     "VOXTART_OT_character_unbind_animation",

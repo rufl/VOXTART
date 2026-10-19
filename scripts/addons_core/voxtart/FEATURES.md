@@ -756,6 +756,9 @@ assignment, slot replacement, and character cleanup.
 - override an automatic slot-to-bone choice from the Character Editor and
   reset it to deterministic role matching; overrides persist in the character
   recipe and are reapplied on rebuild.
+- import and export the versioned `voxtart.character` recipe as a portable
+  `.character.json` file; imports rebuild from the local Blob Gallery and
+  reject recipes without a `Root` part.
 
 The editor requires a `Root` part before socketed children. A child slot must
 have its canonical parent (`Torso` mounts to `Root`; head, limbs, and
