@@ -14,6 +14,15 @@ the following sources:
    https://download.blender.org/source/blender-5.2.2.tar.xz
    Commit: d13f752e3b9c4f8c261cda552b1021f8bcc0382c
 
+3. The offline anyCreature engine is vendored from:
+   https://github.com/Ariescar/anyCreature
+   Version: 1.3.2
+   Commit: 88041c1efb316370dd78963f422decd854fd9067
+   The selected source is included under third_party/anyCreature with its MIT
+   notice in LICENSES/anyCreature-MIT.txt. The Windows Node.js runtime used
+   to execute it is identified, hashed, and licensed in
+   third_party/VOXTART-VENDOR.lock and LICENSES/LicenseRef-Node.js.txt.
+
 The exact upstream baseline, library revision, and release checksums are
 recorded in UPSTREAM.lock. The source tree includes the tools used to build
 the VoxTart launcher and to apply its native branding. The source offer is

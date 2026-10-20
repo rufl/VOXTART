@@ -35,7 +35,7 @@ if str(SOURCE_ROOT) not in sys.path:
 from voxtart import asset_placer, blob, blob_gallery, bloformer, blockbench_formats  # noqa: E402
 from voxtart import edit, game_rig, io as asset_io, kitbash, layers, mcp_protocol, pick  # noqa: E402
 from voxtart import mesh_optimize, meshing, minecraft_formats, minecraft_nbt  # noqa: E402
-from voxtart import character_editor, creature, creature_presets, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
+from voxtart import anycreature, character_editor, creature, creature_presets, depth_observations, geometry_skeleton, guide_prior, image_intake, optimize, optimizer, palette, palette_reduce, reconstruct, scene_assembly, scene_hierarchy, shading, spritesheet, stacking, symmetry, sprite_pipeline, sprite_sequence, tiler, voxel, voxel_brush, voxel_formats, voxelizer, volume_ops  # noqa: E402
 from voxtart import metrics, provenance  # noqa: E402
 
 
@@ -45,7 +45,7 @@ PALETTE = [
     (0.2, 0.6, 0.3, 1.0),
     (0.8, 0.8, 0.8, 1.0),
 ]
-EXPECTED_TESTS = 117
+EXPECTED_TESTS = 118
 
 
 class VoxelBrushTest(unittest.TestCase):
@@ -187,6 +187,32 @@ class VoxelCoreTest(unittest.TestCase):
             voxel.PaletteMaterial(metallic=1.1)
         with self.assertRaises(ValueError):
             voxel.PaletteMaterial.from_preset("UNKNOWN")
+        with self.assertRaises(ValueError):
+            voxel.PaletteMaterial(kind="UNKNOWN")
+        for preset in ("DIFFUSE", "METAL", "EMISSIVE", "CUSTOM"):
+            self.assertEqual(voxel.PaletteMaterial.from_preset(preset).kind, preset)
+        with self.assertRaises(ValueError):
+            voxel.PaletteMaterial(alpha=object())
+        with self.assertRaises(ValueError):
+            voxel.PaletteMaterial.from_dict("bad")
+        with self.assertRaises(ValueError):
+            voxel._normalize_palette_materials("[", len(asset.palette))
+        with self.assertRaises(ValueError):
+            voxel._normalize_palette_materials("{}", len(asset.palette))
+        with self.assertRaises(ValueError):
+            asset.set_palette_materials([{}] * (len(asset.palette) + 1))
+        source_materials = [voxel.PaletteMaterial.from_preset("METAL")]
+        self.assertEqual(voxel.remap_palette_materials(source_materials, 2)[0].kind, "METAL")
+        self.assertEqual(
+            voxel.remap_palette_materials(source_materials, 2, {0: 1})[1].kind,
+            "METAL",
+        )
+        with self.assertRaises(ValueError):
+            voxel.remap_palette_materials(source_materials, True)
+        for invalid_map in ({True: 0}, {0: False}, {-1: 0}, {0: 2}):
+            self.assertEqual(voxel.remap_palette_materials(source_materials, 2, invalid_map)[0].kind, "DIFFUSE")
+        with self.assertRaises(IndexError):
+            asset.set_palette_material(len(asset.palette), voxel.PaletteMaterial())
 
     def test_typed_part_assignments_round_trip_with_asset(self):
         asset = make_asset({(0, 0, 0): 0, (1, 0, 0): 1})
@@ -578,6 +604,11 @@ class TilerTest(unittest.TestCase):
             origin=(0, 0),
         )
         settings = tiler.TilerSettings(pixel_scale=0.5, pixels_per_voxel=2)
+        transparent = (0.0, 0.0, 0.0, 0.0)
+        grouped = tiler._group_pixels(2, 2, (transparent, transparent, transparent, transparent), settings)
+        self.assertEqual(grouped[2], (transparent,))
+        winning = tiler._group_pixels(2, 2, (red, green, green, green), settings)
+        self.assertEqual(winning[2], (green,))
         projection = tiler.project_tile(tile, (0, 0, 0), settings)
         self.assertEqual(projection.dimensions, (2, 1, 1))
         self.assertEqual(projection.world_size, (1.0, 0.5, 0.5))
@@ -947,6 +978,16 @@ class EditTest(unittest.TestCase):
 class PaletteTest(unittest.TestCase):
     def test_text_json_and_source_palettes(self):
         self.assertEqual(palette.coerce_color("#f00"), (1.0, 0.0, 0.0, 1.0))
+        self.assertEqual(palette.scene_linear_to_srgb_channel(0.0), 0.0)
+        self.assertGreater(palette.scene_linear_to_srgb_channel(0.25), 0.0)
+        self.assertEqual(palette.srgb_to_scene_linear_channel(0.0), 0.0)
+        self.assertGreater(palette.srgb_to_scene_linear_channel(0.25), 0.0)
+        self.assertEqual(len(palette.scene_linear_to_srgb((0.0, 0.5, 1.0))), 4)
+        self.assertEqual(len(palette.srgb_to_scene_linear((0.0, 0.5, 1.0, 0.25))), 4)
+        with self.assertRaises(ValueError):
+            palette.scene_linear_to_srgb((0.0, 1.0))
+        with self.assertRaises(ValueError):
+            palette.srgb_to_scene_linear((0.0, 1.0))
         self.assertEqual(palette.coerce_color((255, 0, 0, 128))[3], 128 / 255.0)
         self.assertEqual(len(palette.normalize_palette(["#fff", "#fff"])), 1)
         self.assertEqual(palette.parse_hex_palette("#ff0000\n1 2 3"), [(1.0, 0.0, 0.0, 1.0), (1.0, 2 / 255, 3 / 255, 1.0)])
@@ -1355,6 +1396,16 @@ class CharacterEditorTest(unittest.TestCase):
                 settings={"bad": object()},
             )
         with self.assertRaises(ValueError):
+            character_editor.CharacterRecipe(settings={"bad": float("nan")})
+        encoded = character_editor.CharacterRecipe()
+        encoded.settings["bad"] = float("nan")
+        with self.assertRaises(ValueError):
+            encoded.encode()
+        with self.assertRaises(ValueError):
+            character_editor.CharacterRecipe(schema_version=True)
+        with self.assertRaises(ValueError):
+            character_editor.CharacterRecipe(schema_version=1.0)
+        with self.assertRaises(ValueError):
             character_editor.CharacterRecipe(
                 parts=[
                     character_editor.CharacterPart("ROOT", "a"),
@@ -1728,6 +1779,21 @@ class RigAndMCPTest(unittest.TestCase):
         result = dispatcher.dispatch({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": mcp_protocol.TOOL_DEFINITIONS[0]["name"], "arguments": {}}})
         self.assertFalse(result["result"]["isError"])
         self.assertEqual(len(calls), 1)
+        nonfinite = mcp_protocol.MCPDispatcher(
+            lambda _name, _args: {"value": float("nan")}
+        )
+        nonfinite_result = nonfinite.dispatch(
+            {
+                "jsonrpc": "2.0",
+                "id": 30,
+                "method": "tools/call",
+                "params": {
+                    "name": mcp_protocol.TOOL_DEFINITIONS[0]["name"],
+                    "arguments": {},
+                },
+            }
+        )
+        self.assertEqual(nonfinite_result["error"]["code"], -32603)
         self.assertIsNone(dispatcher.dispatch({"jsonrpc": "2.0", "method": "notifications/initialized"}))
         self.assertEqual(dispatcher.dispatch({"jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": {"uri": "voxtart://test"}})["result"]["contents"][0]["uri"], "voxtart://test")
         self.assertEqual(dispatcher.dispatch({"jsonrpc": "2.0", "id": 5, "method": "prompts/get", "params": {"name": "voxtart_create", "arguments": {"request": "make"}}})["result"]["messages"][0]["content"]["text"], "make")
@@ -4628,6 +4694,10 @@ class Sprite2DEndToEndTest(unittest.TestCase):
             sprite_sequence.SequenceFrame("", indexed)
         with self.assertRaises(TypeError):
             sprite_sequence.SequenceFrame("bad-image", object())
+        with self.assertRaises(TypeError):
+            sprite_sequence.SequenceFrame("bad-depth", indexed, depth_observation=object())
+        with self.assertRaises(TypeError):
+            sprite_sequence.SequenceFrame("bad-mask", indexed, part_mask=object())
         frame = sprite_sequence.SequenceFrame("frame", indexed)
         with self.assertRaises(ValueError):
             frame.to_view(palette=PALETTE[1:])
@@ -4711,6 +4781,12 @@ class CreatureGraphTest(unittest.TestCase):
         recipe = creature.template_recipe("BIPED")
         with self.assertRaises(ValueError):
             creature.build_voxel_asset(recipe, max_voxels=1)
+        with self.assertRaises(ValueError):
+            creature.CreatureRecipe(settings={"bad": float("nan")})
+        encoded = creature.CreatureRecipe()
+        encoded.settings["bad"] = float("nan")
+        with self.assertRaises(ValueError):
+            encoded.encode()
 
 
 class CreaturePresetTest(unittest.TestCase):
@@ -4758,6 +4834,16 @@ class CreaturePresetTest(unittest.TestCase):
             preset,
         )
         with self.assertRaises(ValueError):
+            creature_presets.CreaturePreset("BIPED", parts_pack="UNKNOWN")
+        with self.assertRaises(ValueError):
+            creature_presets.CreaturePreset("BIPED", inspector_preset="UNKNOWN")
+        with self.assertRaises(ValueError):
+            creature_presets.CreaturePreset(
+                "BIPED",
+                parts_pack="NATURAL",
+                enabled_parts=("HORNS",),
+            )
+        with self.assertRaises(ValueError):
             creature_presets.make_creature_preset(
                 "BIPED",
                 parts_pack="NATURAL",
@@ -4771,6 +4857,69 @@ class CreaturePresetTest(unittest.TestCase):
                     parts_pack="NATURAL",
                 ),
             )
+
+
+class AnyCreatureBridgeTest(unittest.TestCase):
+    def test_validation_and_stale_output_guard(self):
+        self.assertEqual(anycreature.validate_spec({"height": 1.5})["height"], 1.5)
+        with self.assertRaises(anycreature.AnyCreatureError):
+            anycreature.validate_spec({"height": float("nan")})
+        with self.assertRaises(anycreature.AnyCreatureError):
+            anycreature.validate_spec({"parts": [{}]})
+        spec = {"name": "../bad name", "height": 1.0}
+        spec_bytes = anycreature._spec_bytes(spec)
+        self.assertTrue(anycreature.safe_output_stem(spec["name"], spec_bytes).startswith("bad-name-"))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "engine-root"
+            (root / "engine").mkdir(parents=True)
+            (root / "engine" / "cli.js").write_text(
+                "import sys\nsys.exit(0)\n",
+                encoding="utf-8",
+            )
+            output = Path(directory) / "output"
+            output.mkdir()
+            stem = anycreature.safe_output_stem(spec["name"], spec_bytes)
+            glb = output / f"{stem}.glb"
+            checks = output / f"{stem}.checks.json"
+            glb.write_bytes(b"stale")
+            checks.write_text('{"passed":true}', encoding="utf-8")
+            with self.assertRaises(anycreature.AnyCreatureError):
+                anycreature.compile_spec(
+                    spec,
+                    configured_root=root,
+                    node_executable=sys.executable,
+                    output_dir=output,
+                )
+            self.assertFalse(glb.exists())
+            self.assertFalse(checks.exists())
+            glb.write_bytes(b"stale")
+            checks.write_text('{"passed":true}', encoding="utf-8")
+            with self.assertRaises(anycreature.AnyCreatureError):
+                anycreature.compile_spec(
+                    spec,
+                    configured_root=root,
+                    node_executable=str(Path(directory) / "missing-node"),
+                    output_dir=output,
+                )
+            self.assertFalse(glb.exists())
+            self.assertFalse(checks.exists())
+            (root / "engine" / "cli.js").write_text(
+                "import pathlib\n"
+                "import sys\n"
+                "glb = pathlib.Path(sys.argv[2])\n"
+                "glb.write_bytes(b'glb')\n"
+                "glb.with_name(glb.stem + '.checks.json').write_text(\n"
+                f"    'x' * {anycreature.MAX_CHECKS_BYTES + 1}, encoding='utf-8'\n"
+                ")\n",
+                encoding="utf-8",
+            )
+            with self.assertRaises(anycreature.AnyCreatureError):
+                anycreature.compile_spec(
+                    spec,
+                    configured_root=root,
+                    node_executable=sys.executable,
+                    output_dir=output,
+                )
 
 
 if __name__ == "__main__":

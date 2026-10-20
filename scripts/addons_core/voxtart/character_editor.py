@@ -50,9 +50,9 @@ def _settings(value: Any) -> dict[str, Any]:
         raise TypeError("character settings must be a mapping")
     result = {str(key): item for key, item in value.items()}
     try:
-        json.dumps(result)
+        json.dumps(result, allow_nan=False)
     except (TypeError, ValueError) as error:
-        raise ValueError("character settings must be JSON serializable") from error
+        raise ValueError("character settings must be finite JSON") from error
     return result
 
 
@@ -132,7 +132,11 @@ class CharacterRecipe:
     schema_version: int = CHARACTER_FORMAT_VERSION
 
     def __post_init__(self) -> None:
-        if self.schema_version != CHARACTER_FORMAT_VERSION:
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != CHARACTER_FORMAT_VERSION
+        ):
             raise ValueError(f"unsupported character version: {self.schema_version}")
         self.name = _text(self.name, "name", limit=128, required=True)
         if len(self.parts) > MAX_CHARACTER_PARTS:
@@ -218,7 +222,7 @@ class CharacterRecipe:
         }
 
     def encode(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "CharacterRecipe":

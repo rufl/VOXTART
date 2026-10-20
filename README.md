@@ -50,3 +50,17 @@ for file-level license metadata. Run `reuse lint` from the repository root to
 verify compliance. See [VOXTART-NOTICES.txt](VOXTART-NOTICES.txt) and
 [VOXTART-SOURCE-CODE-OFFER.txt](VOXTART-SOURCE-CODE-OFFER.txt) for attribution,
 third-party licensing, and corresponding-source details.
+
+Offline creature package
+------------------------
+
+The distributable VOXTART tree includes the dependency-free anyCreature
+engine and a Node.js runtime under `third_party/`, so the Creature chat mode
+works offline without npm or network access. Leave the anyCreature root and
+Node executable preferences blank to use the bundled components; explicit
+development overrides are supported. See
+[VOXTART-NOTICES.txt](VOXTART-NOTICES.txt),
+[LICENSES/anyCreature-MIT.txt](LICENSES/anyCreature-MIT.txt),
+[LICENSES/LicenseRef-Node.js.txt](LICENSES/LicenseRef-Node.js.txt), and
+[third_party/VOXTART-VENDOR.lock](third_party/VOXTART-VENDOR.lock) for
+credits, licenses, provenance, and checksums.

@@ -35,3 +35,21 @@ path = "assets/LICENSE"
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 VOXTART contributors"
 SPDX-License-Identifier = "CC0-1.0"
+
+[[annotations]]
+path = ["LICENSES/anyCreature-MIT.txt", "third_party/anyCreature/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Alsomind Tech Co., Ltd."
+SPDX-License-Identifier = "MIT"
+
+[[annotations]]
+path = ["LICENSES/LicenseRef-Node.js.txt", "third_party/node/LICENSE", "third_party/node/node.exe"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Node.js contributors and embedded Node.js dependency authors"
+SPDX-License-Identifier = "LicenseRef-Node.js"
+
+[[annotations]]
+path = ["third_party/node/README.txt", "third_party/VOXTART-VENDOR.lock"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 VOXTART contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"

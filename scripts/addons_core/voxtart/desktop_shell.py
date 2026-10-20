@@ -506,6 +506,7 @@ _ICON_FOR_KEY = {
     "build:optimize": "optimize",
     "build:editor": "cube",
     "chat:image": "image",
+    "chat:creature": "character",
     "paint:pick": "pick",
     "paint:paint": "paint",
     "paint:remove": "remove",
@@ -544,6 +545,7 @@ _TOOLTIP_DESCRIPTIONS = {
     "project:blocks": "Go back to your block-making workspace.",
     "project:characters": "Open character tools and animation.",
     "chat:image": "Attach a reference image for the local model.",
+    "chat:creature": "Use Creature mode to author a skinned anyCreature character.",
     "chat:send": "Send the prompt to the local model.",
     "project:layers": "Work with colors and layers.",
     "home:make": "Start with a small block world you can change.",
@@ -1128,9 +1130,9 @@ def _draw_bottom_bar(context, width: float, height: float) -> None:
 
 
 def _chat_action_at(state, width: float, height: float, x: float, y: float) -> str | None:
-    for action in ("chat:image", "chat:field", "chat:send"):
+    for action in ("chat:image", "chat:creature", "chat:field", "chat:send"):
         bounds = _shell_chat_layout(state, width, height).get(action)
-        if bounds is not None and _inside(x, y, bounds):
+        if bounds is not None and bounds[2] > bounds[0] and _inside(x, y, bounds):
             return action
     return None
 
@@ -1153,6 +1155,18 @@ def _draw_chat_prompt(state, context, width: float, height: float) -> None:
     _draw_text(status, max(panel_x + 108.0, status_x), panel_top - 17.0, 9.0, _MUTED)
     _draw_text(model_label, panel_x + 12.0, panel_top - 31.0, 9.0, _MUTED)
 
+    creature_bounds = layout["chat:creature"]
+    if creature_bounds[2] > creature_bounds[0]:
+        _draw_button(
+            state,
+            "chat:creature",
+            "Creature",
+            creature_bounds[0],
+            creature_bounds[1],
+            creature_bounds[2] - creature_bounds[0],
+            creature_bounds[3] - creature_bounds[1],
+            active=mcp.chat_creature_mode(),
+        )
     image_bounds = layout["chat:image"]
     _draw_button(
         state,
@@ -1184,7 +1198,11 @@ def _draw_chat_prompt(state, context, width: float, height: float) -> None:
     if attachment_label:
         display = f"{attachment_label}  ·  {display}" if display else attachment_label
     if not display:
-        display = "Describe what to make, edit, or inspect…"
+        display = (
+            "Describe the creature to build…"
+            if mcp.chat_creature_mode()
+            else "Describe what to make, edit, or inspect…"
+        )
         text_color = _MUTED
     else:
         text_color = _TEXT
@@ -1403,6 +1421,12 @@ class VOXTART_OT_desktop_shell(bpy.types.Operator):
             area.tag_redraw()
 
     def _activate(self, context, key: str):
+        if key == "chat:creature":
+            from . import mcp
+
+            mcp.set_chat_input_focus(False)
+            mcp.toggle_chat_creature_mode()
+            return
         scene = context.scene
         if key == "chat:image":
             from . import mcp

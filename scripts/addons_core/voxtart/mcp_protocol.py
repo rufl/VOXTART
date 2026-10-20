@@ -18,6 +18,7 @@ from typing import Any
 
 MCP_PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOL_VERSIONS = (MCP_PROTOCOL_VERSION, "2025-03-26")
+MAX_TOOL_COORDINATE = 4096
 SERVER_INFO = {
     "name": "voxtart",
     "title": "VOXTART Voxel Authoring and Animation",
@@ -46,9 +47,14 @@ class MCPToolError(Exception):
 
 
 _EMPTY_SCHEMA = {"type": "object", "properties": {}, "additionalProperties": False}
+_CELL_COORDINATE_SCHEMA = {
+    "type": "integer",
+    "minimum": -MAX_TOOL_COORDINATE,
+    "maximum": MAX_TOOL_COORDINATE,
+}
 _CELL_SCHEMA = {
     "type": "array",
-    "prefixItems": [{"type": "integer"}, {"type": "integer"}, {"type": "integer"}],
+    "prefixItems": [_CELL_COORDINATE_SCHEMA, _CELL_COORDINATE_SCHEMA, _CELL_COORDINATE_SCHEMA],
     "minItems": 3,
     "maxItems": 3,
 }
@@ -81,6 +87,46 @@ TOOL_DEFINITIONS: tuple[dict[str, Any], ...] = (
             "additionalProperties": False,
         },
         "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    },
+    {
+        "name": "voxtart_anycreature_status",
+        "title": "Inspect the anyCreature pipeline",
+        "description": "Report whether the bundled offline anyCreature Node pipeline is ready; development overrides are supported.",
+        "inputSchema": _EMPTY_SCHEMA,
+        "annotations": {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True},
+    },
+    {
+        "name": "voxtart_generate_anycreature",
+        "title": "Generate a skinned creature",
+        "description": (
+            "Compile and import a game-ready anyCreature GLB from a complete JSON spec using "
+            "the bundled offline engine. Use this for creature or character requests when the "
+            "pipeline is ready. The spec should author its own height, palette, sections, "
+            "joints, chains, attachments, mirrored limbs, volumes or named parts, and "
+            "idle/move/attack animations. Do not pass file paths or code in the spec; the "
+            "tool owns output paths."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {
+                    "type": "object",
+                    "description": (
+                        "Complete anyCreature spec JSON. Common keys are height, palette, "
+                        "sections, joints, chains, attach, mirror, volumes, parts, and animations."
+                    ),
+                    "additionalProperties": True,
+                },
+                "output_name": {
+                    "type": "string",
+                    "maxLength": 48,
+                    "description": "Optional display name used for the persistent GLB and spec files.",
+                },
+            },
+            "required": ["spec"],
+            "additionalProperties": False,
+        },
+        "annotations": {"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False},
     },
     {
         "name": "voxtart_create_box",
@@ -248,7 +294,13 @@ PROMPT_DEFINITIONS: tuple[dict[str, Any], ...] = (
 
 
 def _json_text(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
 
 
 def _rpc_result(request_id: Any, result: Any) -> dict[str, Any]:
@@ -314,8 +366,9 @@ class MCPDispatcher:
                 },
                 "serverInfo": dict(SERVER_INFO),
                 "instructions": (
-                    "VOXTART exposes bounded voxel authoring and optional humanoid animation tools. "
-                    "Mutating calls require the user to enable LLM edits in Blender."
+                    "VOXTART exposes bounded voxel authoring, a bundled offline anyCreature "
+                    "creature generator, and humanoid animation tools. Mutating calls require "
+                    "the user to enable LLM edits in Blender."
                 ),
             }
         if method == "server/discover":

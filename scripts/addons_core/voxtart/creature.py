@@ -73,9 +73,9 @@ def _settings(value: Any) -> dict[str, Any]:
         raise TypeError("creature settings must be a mapping")
     result = {str(key): item for key, item in value.items()}
     try:
-        json.dumps(result)
+        json.dumps(result, allow_nan=False)
     except (TypeError, ValueError) as error:
-        raise ValueError("creature settings must be JSON serializable") from error
+        raise ValueError("creature settings must be finite JSON") from error
     return result
 
 
@@ -289,7 +289,7 @@ class CreatureRecipe:
         }
 
     def encode(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "CreatureRecipe":

@@ -64,6 +64,35 @@ def _is_asset(obj) -> bool:
     return obj is not None and operators.ASSET_PROPERTY in obj
 
 
+def _discard_generated_object(obj) -> None:
+    """Remove a just-created object and its overlays when generation fails."""
+
+    if obj is None:
+        return
+    object_name = str(getattr(obj, "name", ""))
+    targets = []
+    for candidate in tuple(bpy.data.objects):
+        is_overlay = False
+        try:
+            is_overlay = candidate.get("voxtart_overlay_source") == object_name
+        except (AttributeError, ReferenceError, RuntimeError):
+            pass
+        if candidate is obj or getattr(candidate, "parent", None) is obj or is_overlay:
+            targets.append(candidate)
+    targets.sort(key=lambda candidate: candidate is obj)
+    for target in targets:
+        mesh = getattr(target, "data", None)
+        try:
+            bpy.data.objects.remove(target, do_unlink=True)
+        except (ReferenceError, RuntimeError):
+            continue
+        if mesh is not None and getattr(mesh, "users", 0) == 0:
+            try:
+                bpy.data.meshes.remove(mesh)
+            except (ReferenceError, RuntimeError):
+                pass
+
+
 def _record_payload(result) -> list[dict[str, object]]:
     return [record.to_dict() for record in result.joints]
 
@@ -132,27 +161,39 @@ def _generate(
         result.asset,
         backend="marching",
     )
-    _store_generated_metadata(obj, base_recipe, recipe, preset, result)
-    if save_to_gallery:
-        from .blob_gallery_ui import _gallery, _set_blob_metadata
+    gallery = None
+    entry = None
+    try:
+        _store_generated_metadata(obj, base_recipe, recipe, preset, result)
+        if save_to_gallery:
+            from .blob_gallery_ui import _gallery, _set_blob_metadata
 
-        entry = make_blob_entry(
-            result.asset,
-            recipe.name,
-            category="Creatures",
-            joints=_blob_joints(result),
-            tags=("creature", recipe.template.lower(), parts_pack.lower(), inspector_preset.lower()),
-            provenance={
-                "workflow": "voxtart_creature_builder",
-                "template": recipe.template,
-                "parts_pack": parts_pack,
-                "inspector_preset": inspector_preset,
-                "creature_format": recipe.to_dict()["format"],
-            },
-        )
-        _gallery(context).save(entry)
-        _set_blob_metadata(obj, entry)
-        scene.voxtart_blob_gallery_selected = entry.blob_id
+            entry = make_blob_entry(
+                result.asset,
+                recipe.name,
+                category="Creatures",
+                joints=_blob_joints(result),
+                tags=("creature", recipe.template.lower(), parts_pack.lower(), inspector_preset.lower()),
+                provenance={
+                    "workflow": "voxtart_creature_builder",
+                    "template": recipe.template,
+                    "parts_pack": parts_pack,
+                    "inspector_preset": inspector_preset,
+                    "creature_format": recipe.to_dict()["format"],
+                },
+            )
+            gallery = _gallery(context)
+            gallery.save(entry)
+            _set_blob_metadata(obj, entry)
+            scene.voxtart_blob_gallery_selected = entry.blob_id
+    except Exception:
+        if gallery is not None and entry is not None:
+            try:
+                gallery.remove(entry.blob_id)
+            except (OSError, RuntimeError, TypeError, ValueError):
+                pass
+        _discard_generated_object(obj)
+        raise
     return obj, base_recipe, recipe, preset, result
 
 

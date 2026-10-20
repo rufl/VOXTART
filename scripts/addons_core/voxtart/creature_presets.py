@@ -361,14 +361,33 @@ class CreaturePreset:
         template = str(self.template or "").upper()
         if template not in (*CREATURE_TEMPLATES, "CUSTOM"):
             raise ValueError(f"unsupported creature preset template: {self.template!r}")
+        parts_pack = _text(self.parts_pack, "parts pack", limit=64, required=True).upper()
+        if parts_pack not in CREATURE_PART_PACKS:
+            raise ValueError(f"unsupported creature preset parts pack: {self.parts_pack!r}")
+        inspector_preset = _text(
+            self.inspector_preset,
+            "inspector preset",
+            limit=64,
+            required=True,
+        ).upper()
+        if inspector_preset not in CREATURE_INSPECTOR_PRESETS:
+            raise ValueError(
+                f"unsupported creature inspector preset: {self.inspector_preset!r}"
+            )
         object.__setattr__(self, "template", template)
-        object.__setattr__(self, "parts_pack", _text(self.parts_pack, "parts pack", limit=64, required=True).upper())
-        object.__setattr__(self, "inspector_preset", _text(self.inspector_preset, "inspector preset", limit=64, required=True).upper())
+        object.__setattr__(self, "parts_pack", parts_pack)
+        object.__setattr__(self, "inspector_preset", inspector_preset)
         object.__setattr__(self, "name", _text(self.name, "preset name", limit=128, required=True))
         enabled = tuple(_text(item, "enabled part", limit=64, required=True).upper() for item in self.enabled_parts)
         if len(enabled) != len(set(enabled)):
             raise ValueError("creature preset enabled parts must be unique")
         object.__setattr__(self, "enabled_parts", enabled)
+        available_parts = {part.id for part in get_parts_pack(parts_pack).parts}
+        unknown = [part_id for part_id in enabled if part_id not in available_parts]
+        if unknown:
+            raise ValueError(
+                f"creature preset contains unknown parts: {', '.join(sorted(unknown))}"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         return {

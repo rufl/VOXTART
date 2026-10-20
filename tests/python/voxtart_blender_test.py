@@ -33,7 +33,7 @@ from voxtart import animation, blob_gallery_ui, bloformer_ui, character_editor_u
 from voxtart.blob_gallery import BlobGallery, BlobJoint, make_blob_entry  # noqa: E402
 from voxtart.character_editor import CharacterPart, CharacterRecipe  # noqa: E402
 from voxtart.voxel import VoxelAsset, VoxelSocket  # noqa: E402
-EXPECTED_TESTS = 35
+EXPECTED_TESTS = 36
 
 
 def _gallery_entry(name, blob_id, normal):
@@ -178,6 +178,10 @@ class BlenderRegistrationTest(unittest.TestCase):
             mcp._coerce_int(1.5, "palette_index")
         with self.assertRaises(mcp.MCPToolError):
             mcp._coerce_float(float("inf"), "grid_size")
+        with self.assertRaises(mcp.MCPToolError):
+            mcp._coerce_bool("false", "allow_protected")
+        with self.assertRaises(mcp.MCPToolError):
+            mcp._coerce_cell((mcp.MAX_TOOL_COORDINATE + 1, 0, 0))
     def test_local_chat_surface_and_reference_image_contract(self):
         manager = bpy.context.window_manager
         mcp._CHAT_HISTORY.clear()
@@ -185,6 +189,7 @@ class BlenderRegistrationTest(unittest.TestCase):
         manager.voxtart_chat_prompt = ""
         manager.voxtart_chat_transcript = ""
         manager.voxtart_chat_status = "Ready"
+        manager.voxtart_chat_creature_mode = False
         mcp.set_chat_input_focus(True)
         self.assertTrue(
             mcp.handle_chat_text_event(
@@ -200,7 +205,12 @@ class BlenderRegistrationTest(unittest.TestCase):
         self.assertEqual(manager.voxtart_chat_prompt, "")
         layout = mcp.chat_layout(1200.0, 800.0)
         self.assertAlmostEqual((layout["panel"][0] + layout["panel"][2]) * 0.5, 600.0)
+        self.assertTrue(layout["chat:creature"][2] > layout["chat:creature"][0])
         self.assertTrue(mcp.chat_model_label().startswith("LOCAL MCP"))
+        manager.voxtart_chat_creature_mode = True
+        creature_content = mcp._chat_message_content("Make a creature")
+        self.assertIn("anyCreature", creature_content)
+        manager.voxtart_chat_creature_mode = False
         temporary_path = None
         try:
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
@@ -217,9 +227,75 @@ class BlenderRegistrationTest(unittest.TestCase):
             self.assertIn("Image:", mcp.chat_attachment_label())
         finally:
             mcp._clear_chat_attachments()
+            manager.voxtart_chat_creature_mode = False
             mcp.set_chat_input_focus(False)
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
+
+    def test_chat_payload_limits_bound_history_images_and_tool_text(self):
+        previous_history_limit = mcp.MAX_CHAT_HISTORY_BYTES
+        previous_image_limit = mcp.MAX_CHAT_IMAGE_DATA_BYTES
+        mcp._CHAT_HISTORY.clear()
+        mcp._clear_chat_attachments()
+        old_user = {"role": "user", "content": "old" * 80}
+        old_assistant = {"role": "assistant", "content": "reply" * 80}
+        current_user = {"role": "user", "content": "new" * 80}
+        temporary_path = None
+        try:
+            history_size = mcp._chat_history_size([old_user, old_assistant, current_user])
+            oversized_message = {"role": "assistant", "content": "x" * 2048}
+            mcp.MAX_CHAT_HISTORY_BYTES = history_size - 1
+            for message in (old_user, old_assistant, current_user):
+                mcp._append_chat_history(message)
+            self.assertEqual(mcp._CHAT_HISTORY, [current_user])
+            with self.assertRaises(ValueError):
+                mcp._append_chat_history(oversized_message)
+            self.assertEqual(mcp._CHAT_HISTORY, [current_user])
+
+            mcp._CHAT_HISTORY.clear()
+            mcp.MAX_CHAT_HISTORY_BYTES = history_size
+            for message in (old_user, old_assistant, current_user):
+                mcp._append_chat_history(message)
+            before_failed_append = list(mcp._CHAT_HISTORY)
+            with self.assertRaises(ValueError):
+                mcp._append_chat_history(oversized_message)
+            self.assertEqual(mcp._CHAT_HISTORY, before_failed_append)
+
+            mcp.MAX_CHAT_IMAGE_DATA_BYTES = 8
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as handle:
+                temporary_path = Path(handle.name)
+                handle.write(b"123456789")
+            with self.assertRaises(ValueError):
+                mcp._attach_chat_image(str(temporary_path))
+            self.assertEqual(mcp.chat_attachment_names(), ())
+
+            truncated = mcp._truncate_chat_text("🙂" * 100, 7)
+            self.assertTrue(truncated.startswith("🙂"))
+            self.assertIn("[tool output truncated]", truncated)
+            class _OversizedResponse:
+                headers = {"Content-Length": str(mcp.MAX_CHAT_RESPONSE_BYTES + 1)}
+
+                def read(self, _limit):
+                    return b""
+
+            with self.assertRaises(ValueError):
+                mcp._read_chat_response(_OversizedResponse())
+            class _InvalidLengthResponse:
+                headers = {"Content-Length": "-1"}
+
+                def read(self, _limit):
+                    return b""
+
+            with self.assertRaises(ValueError):
+                mcp._read_chat_response(_InvalidLengthResponse())
+        finally:
+            mcp.MAX_CHAT_HISTORY_BYTES = previous_history_limit
+            mcp.MAX_CHAT_IMAGE_DATA_BYTES = previous_image_limit
+            mcp._CHAT_HISTORY.clear()
+            mcp._clear_chat_attachments()
+            if temporary_path is not None:
+                Path(temporary_path).unlink(missing_ok=True)
+
     def test_empty_asset_panels_explain_disabled_actions(self):
         from voxtart import formats_ui, goxel_ui, minecraft_ui
 
@@ -661,6 +737,25 @@ class BlenderRegistrationTest(unittest.TestCase):
                     {joint.name for joint in entries[0].joints},
                     {record["name"] for record in records},
                 )
+                failure_path = Path(directory) / "gallery-file"
+                failure_path.write_text("not a directory", encoding="utf-8")
+                failed_before = {obj.name for obj in bpy.data.objects}
+                scene.voxtart_blob_gallery_path = str(failure_path)
+                with self.assertRaises(RuntimeError):
+                    bpy.ops.voxtart.creature_generate(
+                        template="BIPED",
+                        name="Failed Creature",
+                        grid_size=1.0,
+                        parts_pack="NATURAL",
+                        inspector_preset="BALANCED",
+                        save_to_gallery=True,
+                    )
+                self.assertEqual({obj.name for obj in bpy.data.objects}, failed_before)
+                for selected in bpy.context.selected_objects:
+                    selected.select_set(False)
+                biped.select_set(True)
+                bpy.context.view_layer.objects.active = biped
+                scene.voxtart_blob_gallery_path = directory
                 self.assertEqual(
                     bpy.ops.voxtart.creature_apply_preset(
                         parts_pack="MECHANICAL",

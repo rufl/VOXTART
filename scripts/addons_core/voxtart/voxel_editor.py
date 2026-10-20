@@ -177,7 +177,7 @@ def _translate_editor_layout(layout, dx: float, dy: float):
             for entry in translated["entries"]
             if len(entry) >= 2
         )
-    for key in ("chat:image", "chat:field", "chat:send"):
+    for key in ("chat:image", "chat:creature", "chat:field", "chat:send"):
         if key in translated:
             translated[key] = _translate_editor_bounds(translated[key], dx, dy)
     return translated
@@ -1248,7 +1248,7 @@ def _editor_chat_action_at(context, event) -> str | None:
     x = float(getattr(event, "mouse_region_x", -1.0))
     y = float(getattr(event, "mouse_region_y", -1.0))
     for action, bounds in _editor_chat_layout(editor, region).items():
-        if action == "panel":
+        if action == "panel" or bounds[2] <= bounds[0]:
             continue
         if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
             return action
@@ -3203,6 +3203,11 @@ _EDITOR_CHAT_HINTS = {
         "Attach a reference image for the local model.",
         "",
     ),
+    "chat:creature": (
+        "Creature",
+        "Guide the local model to author a skinned anyCreature character.",
+        "",
+    ),
     "chat:field": (
         "Prompt",
         "Ask the local model to create or change VOXTART content.",
@@ -4555,6 +4560,9 @@ def _draw_editor_chat_prompt(editor, context) -> None:
         _draw_editor_text(label, label_x, y0 + 14.0 * scale, 11.0, _THEME["text"])
 
     draw_button("chat:image", "Image", "image", accent=bool(mcp.chat_attachment_names()))
+    creature_bounds = layout["chat:creature"]
+    if creature_bounds[2] > creature_bounds[0]:
+        draw_button("chat:creature", "Creature", "character", accent=mcp.chat_creature_mode())
     field_x, field_y, field_right, field_top = layout["chat:field"]
     focused = mcp.chat_input_focused()
     _draw_editor_panel(
@@ -4573,7 +4581,11 @@ def _draw_editor_chat_prompt(editor, context) -> None:
         display = f"{attachment_label}  ·  {display}" if display else attachment_label
     text_color = _THEME["text"]
     if not display:
-        display = "Describe what to make, edit, or inspect…"
+        display = (
+            "Describe the creature to build…"
+            if mcp.chat_creature_mode()
+            else "Describe what to make, edit, or inspect…"
+        )
         text_color = _THEME["text_muted"]
     if len(display) > 82:
         display = f"…{display[-81:]}"
@@ -6106,6 +6118,7 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
             _request_redraw(self, context, force=True)
             return {"RUNNING_MODAL"}
         if event.type == "LEFTMOUSE" and event.value == "PRESS":
+            chat_action = _editor_chat_action_at(context, event)
             popup_action = _editor_menu_action_at(context, event)
             if popup_action is None:
                 popup_action = _editor_options_action_at(context, event)
@@ -6117,7 +6130,6 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                 self._begin_panel_drag(context, event, floating_panel)
                 mcp.set_chat_input_focus(False)
                 return {"RUNNING_MODAL"}
-            chat_action = _editor_chat_action_at(context, event)
             if chat_action is not None:
                 if chat_action == "chat:field":
                     mcp.set_chat_input_focus(True)
@@ -6128,6 +6140,14 @@ class VOXTART_OT_voxel_editor(bpy.types.Operator):
                         bpy.ops.voxtart.chat_attach_image("INVOKE_DEFAULT")
                     except (AttributeError, RuntimeError):
                         self.status = "Image attachment is unavailable"
+                elif chat_action == "chat:creature":
+                    mcp.set_chat_input_focus(False)
+                    mcp.toggle_chat_creature_mode()
+                    self.status = (
+                        "Creature workflow on"
+                        if mcp.chat_creature_mode()
+                        else "Creature workflow off"
+                    )
                 else:
                     try:
                         bpy.ops.voxtart.chat_send()

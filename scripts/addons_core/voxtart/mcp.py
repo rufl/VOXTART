@@ -31,7 +31,9 @@ import bpy
 from bpy.props import BoolProperty, IntProperty, StringProperty
 from bpy_extras.io_utils import ImportHelper
 
+from . import anycreature
 from .mcp_protocol import (
+    MAX_TOOL_COORDINATE,
     MCPDispatcher,
     MCPError,
     MCPToolError,
@@ -44,11 +46,17 @@ ADDON_ID = (__package__ or "voxtart").split(".")[-1]
 MCP_PATH = "/mcp"
 MAX_HTTP_BODY = 4 * 1024 * 1024
 MAX_TOOL_VOXELS = 100_000
+MAX_CHAT_RESPONSE_BYTES = 8 * 1024 * 1024
+MAX_CHAT_TOOL_CALLS = 32
+MAX_PENDING_MAIN_CALLS = 64
 MAX_BOX_SIZE = 46
 MAX_CHAT_TRANSCRIPT = 60_000
 MAX_CHAT_IMAGES = 4
 MAX_CHAT_IMAGE_BYTES = 8 * 1024 * 1024
 CHAT_IMAGE_EXTENSIONS = frozenset({".gif", ".jpeg", ".jpg", ".png", ".webp"})
+MAX_CHAT_HISTORY_BYTES = 16 * 1024 * 1024
+MAX_CHAT_IMAGE_DATA_BYTES = 12 * 1024 * 1024
+MAX_CHAT_TOOL_TEXT_BYTES = 256 * 1024
 CHAT_BAR_HEIGHT = 56.0
 CHAT_BAR_Y = 40.0
 MUTATING_TOOLS = frozenset(
@@ -60,6 +68,7 @@ MUTATING_TOOLS = frozenset(
         "voxtart_import_animation_library",
         "voxtart_prepare_character",
         "voxtart_retarget_animation",
+        "voxtart_generate_anycreature",
     }
 )
 
@@ -111,15 +120,23 @@ def chat_layout(width: float, height: float, *, scale: float = 1.0) -> dict[str,
     inner_y = bar_y + 8.0 * scale
     inner_height = 40.0 * scale
     gap = 6.0 * scale
-    image_width = 94.0 * scale
+    image_width = 82.0 * scale
+    creature_width = 88.0 * scale if bar_width >= 360.0 * scale else 0.0
     send_width = 78.0 * scale
     image_x = bar_x + 8.0 * scale
-    field_x = image_x + image_width + gap
+    creature_x = image_x + image_width + gap
+    field_x = creature_x + creature_width + gap
     send_x = bar_x + bar_width - send_width - 8.0 * scale
     field_width = max(40.0 * scale, send_x - gap - field_x)
     return {
         "panel": (bar_x, bar_y, bar_x + bar_width, bar_y + bar_height),
         "chat:image": (image_x, inner_y, image_x + image_width, inner_y + inner_height),
+        "chat:creature": (
+            creature_x,
+            inner_y,
+            creature_x + creature_width,
+            inner_y + inner_height,
+        ),
         "chat:field": (field_x, inner_y, field_x + field_width, inner_y + inner_height),
         "chat:send": (send_x, inner_y, send_x + send_width, inner_y + inner_height),
     }
@@ -139,6 +156,33 @@ def set_chat_input_focus(focused: bool) -> None:
         pass
 
 
+def chat_creature_mode() -> bool:
+    try:
+        return bool(getattr(_window_manager(), "voxtart_chat_creature_mode", False))
+    except AttributeError:
+        return False
+
+
+def set_chat_creature_mode(enabled: bool) -> None:
+    try:
+        _window_manager().voxtart_chat_creature_mode = bool(enabled)
+    except AttributeError:
+        return
+    _set_chat_status(
+        "Creature mode · describe the creature to build"
+        if enabled
+        else "Ready"
+    )
+
+
+def toggle_chat_creature_mode() -> bool:
+    enabled = not chat_creature_mode()
+    set_chat_creature_mode(enabled)
+    return enabled
+
+
+
+
 def chat_attachment_names() -> tuple[str, ...]:
     return tuple(str(item.get("name", "")) for item in _CHAT_ATTACHMENTS if item.get("name"))
 
@@ -155,7 +199,19 @@ def chat_attachment_label() -> str:
 def chat_model_label() -> str:
     preferences = _preferences()
     model = str(getattr(preferences, "llm_model", "")).strip() if preferences else ""
-    return f"LOCAL MCP · {model[:28]}" if model else "LOCAL MCP · configure a model"
+    root = getattr(preferences, "anycreature_root", "") if preferences else ""
+    node = getattr(preferences, "anycreature_node", "") if preferences else ""
+    pipeline = anycreature.integration_status(root, node)
+    suffix = (
+        " · anyCreature offline"
+        if pipeline["offline_ready"]
+        else " · anyCreature"
+        if pipeline["available"]
+        else ""
+    )
+    if model:
+        return f"LOCAL MCP · {model[:20]}{suffix}"
+    return f"LOCAL MCP · configure a model{suffix}"
 
 
 def handle_chat_text_event(event) -> bool:
@@ -192,6 +248,12 @@ def _chat_message_content(prompt: str) -> str | list[dict[str, Any]]:
     text = str(prompt or "").strip()
     if not text:
         text = "Use the attached reference image as the starting point for a VOXTART asset."
+    if chat_creature_mode():
+        text = (
+            "Use the anyCreature creature workflow for this request when it is available. "
+            "Author a complete, original JSON creature spec and call the anyCreature tool; "
+            f"then fulfill this request: {text}"
+        )
     if not _CHAT_ATTACHMENTS:
         return text
     content: list[dict[str, Any]] = [{"type": "text", "text": text}]
@@ -221,6 +283,11 @@ def _attach_chat_image(filepath: str) -> None:
     if not mime.startswith("image/"):
         raise ValueError("reference image has an unsupported MIME type")
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    current_data = sum(len(str(item.get("data", ""))) for item in _CHAT_ATTACHMENTS)
+    if current_data + len(encoded) > MAX_CHAT_IMAGE_DATA_BYTES:
+        raise ValueError(
+            f"attached reference image data exceeds the {MAX_CHAT_IMAGE_DATA_BYTES // (1024 * 1024)} MiB limit"
+        )
     _CHAT_ATTACHMENTS.append({"name": path.name, "mime": mime, "data": encoded})
     manager = _window_manager()
     manager.voxtart_chat_attachments = ", ".join(chat_attachment_names())[:2048]
@@ -246,6 +313,63 @@ def _append_chat_transcript(role: str, text: str) -> None:
     current = str(getattr(manager, "voxtart_chat_transcript", ""))
     entry = f"{role}: {text.strip()}\n"
     manager.voxtart_chat_transcript = (current + entry)[-MAX_CHAT_TRANSCRIPT:]
+
+
+def _chat_history_size(history: list[dict[str, Any]]) -> int:
+    try:
+        encoded = json.dumps(
+            history,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as error:
+        raise ValueError("chat history contains non-JSON data") from error
+    return len(encoded)
+
+
+def _trim_chat_history() -> None:
+    while len(_CHAT_HISTORY) > 1 and _chat_history_size(_CHAT_HISTORY) > MAX_CHAT_HISTORY_BYTES:
+        next_user = next(
+            (
+                index
+                for index, message in enumerate(_CHAT_HISTORY[1:], start=1)
+                if message.get("role") == "user"
+            ),
+            None,
+        )
+        if next_user is None:
+            break
+        del _CHAT_HISTORY[:next_user]
+    if _chat_history_size(_CHAT_HISTORY) > MAX_CHAT_HISTORY_BYTES:
+        raise ValueError(
+            f"chat history exceeds the {MAX_CHAT_HISTORY_BYTES // (1024 * 1024)} MiB limit"
+        )
+
+
+def _append_chat_history(message: Mapping[str, Any]) -> None:
+    if not isinstance(message, Mapping):
+        raise TypeError("chat history messages must be objects")
+    previous = list(_CHAT_HISTORY)
+    _CHAT_HISTORY.append(dict(message))
+    try:
+        _trim_chat_history()
+    except Exception:
+        _CHAT_HISTORY[:] = previous
+        raise
+
+
+def _chat_history_snapshot() -> list[dict[str, Any]]:
+    _trim_chat_history()
+    return [dict(message) for message in _CHAT_HISTORY]
+
+
+def _truncate_chat_text(text: str, limit: int = MAX_CHAT_TOOL_TEXT_BYTES) -> str:
+    encoded = str(text or "").encode("utf-8")
+    if len(encoded) <= limit:
+        return str(text or "")
+    return encoded[:limit].decode("utf-8", errors="ignore") + "\n[tool output truncated]"
+
 
 
 def _json_safe(value: Any) -> Any:
@@ -350,6 +474,10 @@ def _coerce_cell(value: Any, field: str = "cell") -> tuple[int, int, int]:
         raise MCPToolError(f"{field} must contain exactly three integer coordinates")
     if any(isinstance(item, bool) or not isinstance(item, int) for item in value):
         raise MCPToolError(f"{field} must contain exactly three integer coordinates")
+    if any(abs(item) > MAX_TOOL_COORDINATE for item in value):
+        raise MCPToolError(
+            f"{field} coordinates must be within ±{MAX_TOOL_COORDINATE}"
+        )
     return tuple(value)  # type: ignore[return-value]
 
 
@@ -360,6 +488,11 @@ def _coerce_int(value: Any, field: str, *, minimum: int | None = None, maximum: 
         raise MCPToolError(f"{field} must be at least {minimum}")
     if maximum is not None and value > maximum:
         raise MCPToolError(f"{field} must be at most {maximum}")
+    return value
+
+def _coerce_bool(value: Any, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise MCPToolError(f"{field} must be a boolean")
     return value
 
 
@@ -397,13 +530,50 @@ def _coerce_color(value: Any) -> tuple[float, float, float, float]:
 def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, Any]) -> Any:
     if name in MUTATING_TOOLS:
         _require_edit_permission()
+    preferences = _preferences()
+    configured_root = getattr(preferences, "anycreature_root", "") if preferences else ""
+    node_executable = getattr(preferences, "anycreature_node", "") if preferences else ""
+    if name == "voxtart_anycreature_status":
+        return anycreature.integration_status(configured_root, node_executable)
+
+    if name == "voxtart_generate_anycreature":
+        spec = arguments.get("spec")
+        if not isinstance(spec, Mapping):
+            raise MCPToolError("spec must be a JSON object")
+        output_name = arguments.get("output_name")
+        if output_name is not None and not isinstance(output_name, str):
+            raise MCPToolError("output_name must be a string")
+        output_dir = str(getattr(preferences, "anycreature_output_dir", "") or "").strip()
+        if not output_dir:
+            blend_path = str(getattr(bpy.data, "filepath", "") or "").strip()
+            output_dir = (
+                str(Path(blend_path).resolve().parent / "voxtart_anycreatures")
+                if blend_path
+                else str(Path.home() / "VOXTART" / "anycreatures")
+            )
+        try:
+            return anycreature.build_and_import(
+                context,
+                spec,
+                configured_root=configured_root,
+                node_executable=node_executable,
+                output_dir=output_dir,
+                output_name=output_name,
+            )
+        except anycreature.AnyCreatureError as error:
+            raise MCPToolError(str(error)) from error
+
 
     if name == "voxtart_scene_state":
         return _scene_state(context)
 
     if name == "voxtart_asset_state":
         obj = _find_asset_object(context, arguments.get("object_name"))
-        return _asset_summary(obj, _object_asset(obj), include_voxels=bool(arguments.get("include_voxels", False)))
+        return _asset_summary(
+            obj,
+            _object_asset(obj),
+            include_voxels=_coerce_bool(arguments.get("include_voxels", False), "include_voxels"),
+        )
 
     if name == "voxtart_create_box":
         size = arguments.get("size", 1)
@@ -470,7 +640,10 @@ def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, An
         with VoxelEditTransaction(
             asset,
             protected=protected,
-            allow_protected=bool(arguments.get("allow_protected", False)),
+            allow_protected=_coerce_bool(
+                arguments.get("allow_protected", False),
+                "allow_protected",
+            ),
             operation=operation,
         ) as transaction:
             if operation == "add":
@@ -537,7 +710,11 @@ def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, An
         if mesh is None or mesh.type != "MESH":
             raise MCPToolError("object_name must identify a mesh character or the active object must be a mesh")
         try:
-            return animation.create_blockout_rig(context, mesh, bind=bool(arguments.get("bind", True)))
+            return animation.create_blockout_rig(
+                context,
+                mesh,
+                bind=_coerce_bool(arguments.get("bind", True), "bind"),
+            )
         except (RuntimeError, ValueError) as error:
             raise MCPToolError(str(error)) from error
 
@@ -563,7 +740,7 @@ def _tool_call(context: bpy.types.Context, name: str, arguments: Mapping[str, An
                 target_name=arguments.get("target_armature"),
                 action_name=arguments.get("action"),
                 backend=backend,
-                bake=bool(arguments.get("bake", True)),
+                bake=_coerce_bool(arguments.get("bake", True), "bake"),
                 mapping=mapping,
             )
         except (RuntimeError, ValueError) as error:
@@ -601,14 +778,18 @@ def _resource_data(context: bpy.types.Context, uri: str) -> Any:
         return resources
 
     if uri == "voxtart://scene":
-        return {"uri": uri, "mimeType": "application/json", "text": json.dumps(_scene_state(context), sort_keys=True)}
+        return {
+            "uri": uri,
+            "mimeType": "application/json",
+            "text": json.dumps(_scene_state(context), sort_keys=True, allow_nan=False),
+        }
     if uri == "voxtart://animation":
         from . import animation
 
         return {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(animation.animation_state(context), sort_keys=True),
+            "text": json.dumps(animation.animation_state(context), sort_keys=True, allow_nan=False),
         }
 
     prefix = "voxtart://asset/"
@@ -619,7 +800,7 @@ def _resource_data(context: bpy.types.Context, uri: str) -> Any:
         return {
             "uri": uri,
             "mimeType": "application/json",
-            "text": json.dumps(_asset_summary(obj, asset, include_voxels=True), sort_keys=True),
+            "text": json.dumps(_asset_summary(obj, asset, include_voxels=True), sort_keys=True, allow_nan=False),
         }
     raise MCPError(-32602, f"unknown VOXTART resource: {uri}")
 
@@ -629,7 +810,12 @@ class _MCPRequestHandler(http.server.BaseHTTPRequestHandler):
     server_version = "VOXTART-MCP/0.2"
 
     def _send_json(self, status: int, payload: Any) -> None:
-        encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(encoded)))
@@ -716,7 +902,7 @@ class MCPBridge:
     def __init__(self) -> None:
         self._server: http.server.ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
-        self._pending: queue.Queue[_PendingMainCall] = queue.Queue()
+        self._pending: queue.Queue[_PendingMainCall] = queue.Queue(maxsize=MAX_PENDING_MAIN_CALLS)
         self._running = False
         self._timer_registered = False
         self.port = 0
@@ -809,7 +995,12 @@ class MCPBridge:
         if not self._running:
             raise MCPToolError("VOXTART MCP server is not running")
         pending = _PendingMainCall(kind=kind, payload=payload, event=threading.Event())
-        self._pending.put(pending)
+        try:
+            self._pending.put_nowait(pending)
+        except queue.Full as error:
+            raise MCPToolError(
+                f"VOXTART MCP is busy; at most {MAX_PENDING_MAIN_CALLS} requests may wait"
+            ) from error
         if not pending.event.wait(timeout=60.0):
             raise MCPToolError("Blender did not complete the MCP request within 60 seconds")
         if pending.error is not None:
@@ -850,6 +1041,28 @@ def _openai_tools() -> list[dict[str, Any]]:
     ]
 
 
+def _read_chat_response(response) -> Any:
+    headers = getattr(response, "headers", None)
+    content_length = headers.get("Content-Length") if headers is not None else None
+    if content_length:
+        try:
+            declared_length = int(content_length)
+        except (TypeError, ValueError) as error:
+            raise ValueError("LLM response has an invalid Content-Length") from error
+        if declared_length < 0:
+            raise ValueError("LLM response has an invalid Content-Length")
+        if declared_length > MAX_CHAT_RESPONSE_BYTES:
+            raise ValueError(
+                f"LLM response exceeds the {MAX_CHAT_RESPONSE_BYTES // (1024 * 1024)} MiB limit"
+            )
+    body = response.read(MAX_CHAT_RESPONSE_BYTES + 1)
+    if len(body) > MAX_CHAT_RESPONSE_BYTES:
+        raise ValueError(
+            f"LLM response exceeds the {MAX_CHAT_RESPONSE_BYTES // (1024 * 1024)} MiB limit"
+        )
+    return json.loads(body.decode("utf-8"))
+
+
 def _chat_request(endpoint: str, model: str, api_key: str, history: list[dict[str, Any]]) -> None:
     global _CHAT_WORKER_ACTIVE
     try:
@@ -859,10 +1072,18 @@ def _chat_request(endpoint: str, model: str, api_key: str, history: list[dict[st
                 {
                     "role": "system",
                     "content": (
-                        "You are the VOXTART voxel authoring assistant. "
-                        "Use the provided MCP tools for scene changes. Keep creations bounded, "
-                        "grid-aligned, and explain the result briefly. When reference images "
-                        "are attached, use them as visual guidance rather than inventing hidden detail."
+                        "You are the VOXTART voxel and creature authoring assistant. "
+                        "Use the provided MCP tools for every scene change, keep voxel edits bounded, "
+                        "and explain results briefly. For a creature or character request, prefer the "
+                        "anyCreature pipeline: inspect its status, ask at most one concise design "
+                        "question only when a key choice is genuinely missing, then author one "
+                        "complete original JSON spec and call voxtart_generate_anycreature. Include "
+                        "a readable silhouette, named parts, and idle/move/attack intent when the "
+                        "pipeline is ready; never handwrite a GLB or invent a successful build. "
+                        "If anyCreature is unavailable, use the existing VOXTART creature or "
+                        "character tools and say which path was used. Use voxel tools for block-world "
+                        "requests. Reference images are visual guidance, not permission to invent "
+                        "hidden detail."
                     ),
                 },
                 *history,
@@ -875,12 +1096,17 @@ def _chat_request(endpoint: str, model: str, api_key: str, history: list[dict[st
             headers["Authorization"] = f"Bearer {api_key}"
         request = urllib.request.Request(
             endpoint,
-            data=json.dumps(payload).encode("utf-8"),
+            data=json.dumps(
+                payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8"),
             headers=headers,
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=120.0) as response:
-            result = json.loads(response.read().decode("utf-8"))
+            result = _read_chat_response(response)
         _CHAT_RESULTS.put(_ChatResult("response", result))
     except (OSError, urllib.error.HTTPError, json.JSONDecodeError, KeyError, TypeError, ValueError) as error:
         _CHAT_RESULTS.put(_ChatResult("error", str(error)))
@@ -910,10 +1136,11 @@ def _start_chat_request() -> None:
     with _CHAT_LOCK:
         if _CHAT_WORKER_ACTIVE:
             raise ValueError("A VOXTART chat request is already running")
+        history = _chat_history_snapshot()
         _CHAT_WORKER_ACTIVE = True
     thread = threading.Thread(
         target=_chat_request,
-        args=(endpoint, model, api_key, list(_CHAT_HISTORY)),
+        args=(endpoint, model, api_key, history),
         name="VOXTART-LLM",
         daemon=True,
     )
@@ -922,7 +1149,6 @@ def _start_chat_request() -> None:
 
 
 def _handle_chat_response(response: Mapping[str, Any]) -> None:
-    global _CHAT_HISTORY
     choices = response.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("LLM response did not contain choices")
@@ -930,9 +1156,15 @@ def _handle_chat_response(response: Mapping[str, Any]) -> None:
     if not isinstance(message, Mapping):
         raise ValueError("LLM response did not contain a chat message")
     assistant_message = dict(message)
-    _CHAT_HISTORY.append(assistant_message)
+    _append_chat_history(assistant_message)
     tool_calls = assistant_message.get("tool_calls") or []
     if tool_calls:
+        if not isinstance(tool_calls, list):
+            raise ValueError("LLM tool_calls must be an array")
+        if len(tool_calls) > MAX_CHAT_TOOL_CALLS:
+            raise ValueError(
+                f"LLM response contains more than {MAX_CHAT_TOOL_CALLS} tool calls"
+            )
         for call in tool_calls:
             if not isinstance(call, Mapping):
                 continue
@@ -954,7 +1186,8 @@ def _handle_chat_response(response: Mapping[str, Any]) -> None:
                     tool_text = str(rpc_response["error"])
             except (ValueError, TypeError, json.JSONDecodeError) as error:
                 tool_text = f"Tool call rejected: {error}"
-            _CHAT_HISTORY.append(
+            tool_text = _truncate_chat_text(tool_text)
+            _append_chat_history(
                 {
                     "role": "tool",
                     "tool_call_id": call.get("id", name),
@@ -1028,6 +1261,27 @@ class VOXTART_AddonPreferences(bpy.types.AddonPreferences):
         subtype="PASSWORD",
         default="",
     )
+    anycreature_root: StringProperty(
+        name="anyCreature root",
+        description=(
+            "Optional development override containing engine/cli.js; the bundled "
+            "engine is used when blank and VOXTART_ANYCREATURE_ROOT is also supported"
+        ),
+        subtype="DIR_PATH",
+        default="",
+    )
+    anycreature_node: StringProperty(
+        name="Node executable",
+        description="Blank uses the bundled Node.js runtime; an absolute Node 18+ path overrides it",
+        default="",
+    )
+    anycreature_output_dir: StringProperty(
+        name="Creature output folder",
+        description="Folder that retains authored specs, checks stamps, and imported GLBs",
+        subtype="DIR_PATH",
+        default="",
+    )
+
 
     def draw(self, _context):
         layout = self.layout
@@ -1038,6 +1292,13 @@ class VOXTART_AddonPreferences(bpy.types.AddonPreferences):
         layout.prop(self, "llm_endpoint")
         layout.prop(self, "llm_model")
         layout.prop(self, "llm_api_key")
+        layout.separator()
+        layout.label(text="Built-in offline anyCreature character pipeline")
+        layout.prop(self, "anycreature_root")
+        layout.prop(self, "anycreature_node")
+        layout.prop(self, "anycreature_output_dir")
+        status = anycreature.integration_status(self.anycreature_root, self.anycreature_node)
+        layout.label(text=f"Creature pipeline: {status['message']}")
         layout.label(text="The VOXTART_LLM_API_KEY environment variable overrides the stored key.")
 
 
@@ -1102,14 +1363,24 @@ class VOXTART_OT_chat_send(bpy.types.Operator):
             self.report({'ERROR'}, "Enter a prompt or attach a reference image first")
             return {'CANCELLED'}
         display_prompt = prompt or "Use the attached reference image as the starting point."
+        if chat_creature_mode():
+            display_prompt = f"Creature · {display_prompt}"
         if _CHAT_ATTACHMENTS:
             display_prompt = f"{display_prompt}  [{chat_attachment_label()}]"
-        _CHAT_HISTORY.append({"role": "user", "content": _chat_message_content(prompt)})
+        try:
+            _append_chat_history({"role": "user", "content": _chat_message_content(prompt)})
+        except (TypeError, ValueError) as error:
+            self.report({'ERROR'}, str(error))
+            return {'CANCELLED'}
         _append_chat_transcript("You", display_prompt)
         manager.voxtart_chat_prompt = ""
         _clear_chat_attachments()
         set_chat_input_focus(False)
-        _set_chat_status("Requesting through local MCP…")
+        _set_chat_status(
+            "Creature request sent through anyCreature…"
+            if chat_creature_mode()
+            else "Requesting through local MCP…"
+        )
         try:
             _start_chat_request()
         except (RuntimeError, ValueError) as error:
@@ -1150,6 +1421,7 @@ class VOXTART_OT_chat_clear(bpy.types.Operator):
         manager.voxtart_chat_prompt = ""
         manager.voxtart_chat_transcript = ""
         manager.voxtart_chat_status = "Ready"
+        manager.voxtart_chat_creature_mode = False
         set_chat_input_focus(False)
         return {'FINISHED'}
 
@@ -1198,6 +1470,13 @@ class VOXTART_PT_chat_panel(bpy.types.Panel):
             layout.prop(preferences, "llm_endpoint")
             layout.prop(preferences, "llm_model")
         layout.label(text=str(manager.voxtart_chat_status))
+        row = layout.row(align=True)
+        row.prop(manager, "voxtart_chat_creature_mode", text="Creature", toggle=True)
+        pipeline = anycreature.integration_status(
+            getattr(preferences, "anycreature_root", "") if preferences else "",
+            getattr(preferences, "anycreature_node", "") if preferences else "",
+        )
+        row.label(text=f"anyCreature: {pipeline['message']}")
         transcript = str(manager.voxtart_chat_transcript)
         if transcript:
             box = layout.box()
@@ -1240,6 +1519,11 @@ def register() -> None:
     bpy.types.WindowManager.voxtart_chat_focus = BoolProperty(
         name="Chat input focused", default=False, options={"HIDDEN"}
     )
+    bpy.types.WindowManager.voxtart_chat_creature_mode = BoolProperty(
+        name="Creature workflow",
+        description="Guide the local model toward the anyCreature character pipeline",
+        default=False,
+    )
     bpy.types.WindowManager.voxtart_chat_attachments = StringProperty(
         name="Reference images", maxlen=2048, default="", options={"HIDDEN"}
     )
@@ -1247,10 +1531,10 @@ def register() -> None:
 
 def unregister() -> None:
     _BRIDGE.stop()
-    global _CHAT_HISTORY
     _CHAT_HISTORY.clear()
     _clear_chat_attachments()
     for name in (
+        "voxtart_chat_creature_mode",
         "voxtart_chat_attachments",
         "voxtart_chat_focus",
         "voxtart_chat_status",

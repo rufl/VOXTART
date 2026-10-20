@@ -844,6 +844,7 @@ layer exposes:
 - scene and asset inspection;
 - bounded box/explicit asset creation;
 - bounded add/remove/paint/fill/flood edits;
+- optional anyCreature status, checked skinned-creature generation, and GLB import;
 - mesh rebuild;
 - animation plugin status and state inspection;
 - optional animation-library import, character preparation, and retargeting requests;
@@ -854,12 +855,35 @@ Transport errors are returned as JSON-RPC errors and expected tool failures as
 The VOXTART surface includes a centered bottom **Ask VOXTART** prompt bar.
 It sends prompts to the configured local OpenAI-compatible model endpoint with
 the same bounded MCP tools used by external clients, so a model can inspect,
-create, and edit VOXTART assets. **Image** attaches up to four local PNG, JPEG,
-WebP, or GIF references as standard multimodal data URLs; an image-only send
-uses the reference as the starting point for a voxel request.
-The editor and desktop shell's **Image**, **Prompt**, and **Send** controls
-expose compact hover cards; **Prompt** and **Send** explain the `Enter` path
-when the field is focused.
+create, and edit VOXTART assets. **Creature** switches the prompt into an
+anyCreature-first workflow: the model checks the local pipeline, asks at most
+one focused design question when necessary, authors a complete creature spec,
+and imports the checked skinned GLB through VOXTART. **Image** attaches up to
+four local PNG, JPEG, WebP, or GIF references as standard multimodal data URLs;
+an image-only send uses the reference as the starting point for a voxel or
+creature request.
+Chat payloads are bounded as well: each request keeps at most 16 MiB of JSON
+history, 12 MiB of encoded reference-image data, 256 KiB per tool result, and
+8 MiB per model response; model responses may contain at most 32 tool calls,
+and voxel tool coordinates stay within ±4096. When history is full, complete
+older turns are discarded before the current turn is retained.
+The release package includes the dependency-free MIT-licensed anyCreature
+engine v1.3.2 and a bundled Node.js v24.18.0 Windows runtime, so the
+character pipeline runs offline without npm, `node_modules`, Python, or network
+access. Leave **anyCreature root** and **Node executable** blank to use those
+bundled components. An explicit root containing `engine/cli.js` or an absolute
+Node 18+ executable remains available as a development override.
+Generated specs, checks stamps, and GLBs remain in the configured **Creature
+output folder**, or in the current blend's `voxtart_anycreatures` folder when
+none is configured; unsaved sessions use the per-user `VOXTART/anycreatures`
+folder. Checks stamps are capped at 1 MiB and generated GLBs at 128 MiB before
+import. Imported objects carry the authored spec and checks as Blender custom
+properties. Credits and exact third-party notices are in
+`VOXTART-NOTICES.txt`, `LICENSES/anyCreature-MIT.txt`,
+`LICENSES/LicenseRef-Node.js.txt`, and `third_party/VOXTART-VENDOR.lock`.
+The editor and desktop shell's **Image**, **Creature**, **Prompt**, and
+**Send** controls expose compact hover cards; **Prompt** and **Send** explain
+the `Enter` path when the field is focused.
 
 The bridge is opt-in and localhost-only. The MCP panel owns start/stop and the
 bearer-token handoff; scene mutations stay disabled until the user enables
@@ -897,12 +921,12 @@ clipboard in a second process. The GUI probe invokes the real operator in a
 containing the editor overlay and brush preview. Use `--skip-launcher` only
 when the compiled Windows launcher is unavailable.
 
-The current local regression baseline is 112 deterministic core tests, 33
+The current local regression baseline is 118 deterministic core tests, 36
 Blender-native tests, and 7 additional end-to-end Blender tests. The E2E
 performance check covers a 32³ asset, mesh rebuild, connected/flat/lasso/circle
 selection, and overlapping layer composition.
-The latest local coverage probes report 7,955/7,955 core lines (100.00%) and
-6,452/14,335 Blender-facing lines (45.01%). The latest headless performance
+The latest local coverage probes report 8,207/8,207 core lines (100.00%) and
+8,847/20,815 Blender-facing lines (42.50%). The latest headless performance
 probe reported 32³ rebuild in 584.15 ms and selection in 65.75 ms on this
 workstation.
 The CI core-coverage step enforces the 100.0% deterministic-line threshold;
@@ -914,7 +938,7 @@ read access to repository contents.
 All reusable GitHub Actions are pinned to immutable commit revisions, and
 checkout steps disable credential persistence after fetching source.
 The three direct suite entrypoints also enforce their collected-test contracts:
-112 core tests, 33 Blender-native tests, and 7 headless editor tests. A suite
+118 core tests, 36 Blender-native tests, and 7 headless editor tests. A suite
 that silently loses coverage now fails its own process before CI can publish a
 false-positive pass.
 

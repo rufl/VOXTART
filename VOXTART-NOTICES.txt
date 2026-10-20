@@ -16,7 +16,29 @@ with the runtime copyright notice at
 build/blender-5.2.2/blender-5.2.2-windows-x64/copyright.txt.
 
 The VoxTart artwork and icon assets are released under CC0 1.0 Universal;
-see LICENSES/CC0-1.0.txt (source: assets/LICENSE). Blender and
-other third-party names, logos, libraries, and assets remain subject to their
+see assets/LICENSE (packaged as LICENSES/VOXTART-ASSETS-CC0.txt). Blender
+and other third-party names, logos, libraries, and assets remain subject to
 respective copyright and trademark terms.
 User-created artwork and project files are not licensed by this notice.
+
+Embedded anyCreature engine
+---------------------------
+This package includes the dependency-free anyCreature engine v1.3.2 from
+the Ariescar/anyCreature project at commit
+88041c1efb316370dd78963f422decd854fd9067. The upstream engine copyright
+notice is Alsomind Tech Co., Ltd. and the engine is distributed under the MIT
+License. The exact license text is in LICENSES/anyCreature-MIT.txt and the
+vendored source is in third_party/anyCreature.
+
+The generated creature specs and GLBs are authored outputs of the VOXTART
+user's request. They are not automatically relicensed by the anyCreature
+notice; the user is responsible for any content and terms they add.
+
+Embedded Node.js runtime
+------------------------
+This package includes Node.js v24.18.0 for Windows x64 so the bundled
+anyCreature engine runs without network access, npm, or node_modules. Node.js
+and its embedded dependency notices are reproduced in
+LICENSES/LicenseRef-Node.js.txt and third_party/node/LICENSE. The executable
+is in third_party/node/node.exe. Its source archive, version, and SHA-256
+checksums are recorded in third_party/VOXTART-VENDOR.lock.

@@ -1,0 +1,26 @@
+# VOXTART offline vendor inventory
+# These artifacts are embedded so the packaged chatbox works without network access.
+
+[anyCreature]
+repository=https://github.com/Ariescar/anyCreature
+commit=88041c1efb316370dd78963f422decd854fd9067
+version=1.3.2
+license=MIT
+license_file=LICENSES/anyCreature-MIT.txt
+included=engine,VERSION,LICENSE,README.md,MANUAL.md,THIRD-PARTY-NOTICES.md,cards,docs,example,calibration
+excluded=harness,assets,setup scripts,git metadata
+
+[node]
+source=https://nodejs.org/dist/v24.18.0/node-v24.18.0-win-x64.zip
+version=v24.18.0
+platform=windows-x64
+sha256_archive=0ae68406b42d7725661da979b1403ec9926da205c6770827f33aac9d8f26e821
+sha256_binary=9a4eb5f1c29c6a2e93852ead46b999e284a6a5ca8bab4d4e241d587d025a52de
+license=LicenseRef-Node.js
+license_file=LICENSES/LicenseRef-Node.js.txt
+included=third_party/node/node.exe
+
+[offline_contract]
+network_runtime_dependency=false
+node_modules=false
+python_runtime_dependency=false

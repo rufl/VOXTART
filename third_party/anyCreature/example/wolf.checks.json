@@ -1,0 +1,68 @@
+{
+ "spec": "wolf.json",
+ "passed": true,
+ "checks": [
+  {
+   "name": "mesh_integrity",
+   "passed": true
+  },
+  {
+   "name": "root_containment",
+   "passed": true
+  },
+  {
+   "name": "part_attachment",
+   "passed": true
+  },
+  {
+   "name": "touch",
+   "passed": true
+  },
+  {
+   "name": "balance",
+   "passed": true
+  },
+  {
+   "name": "size",
+   "passed": true,
+   "warned": true
+  },
+  {
+   "name": "proportion",
+   "passed": true
+  },
+  {
+   "name": "limb_clearance",
+   "passed": true
+  },
+  {
+   "name": "anim_integrity",
+   "passed": true
+  },
+  {
+   "name": "attack_reach",
+   "passed": true
+  },
+  {
+   "name": "faceted_body",
+   "passed": true
+  },
+  {
+   "name": "mirror_distortion",
+   "passed": true
+  },
+  {
+   "name": "part_overlap",
+   "passed": true
+  },
+  {
+   "name": "part_seat",
+   "passed": true
+  }
+ ],
+ "blocking": [],
+ "measures": [
+  "value_order: materials by lightness, brightest first — eye 0.78 · fur_head 0.56 · fur_tail 0.56 · fur_body 0.55 · fur_paw 0.51 · fur_leg 0.46 · ear 0.46 · nose 0.19",
+  "contrast_adjacent: part \"front_paw\" (fur_paw, L 0.51) against its host \"LFront\" (fur_leg, L 0.46) — OKLab distance 0.042, under 0.10. They will read as one mass at thumbnail size. Move one of them in LIGHTNESS, which is what survives shrinking; hue alone does not."
+ ]
+}

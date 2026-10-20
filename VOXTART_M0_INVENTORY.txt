@@ -69,6 +69,10 @@ VOXTART release validation
   GPL text, notices, and source-code offer alongside the Blender runtime;
   Blender's own third-party license inventory remains under
   ``build/.../license/license.md``.
+- Offline creature vendor: the package includes anyCreature v1.3.2 and the
+  Node.js v24.18.0 Windows runtime under ``third_party``; provenance,
+  checksums, and the MIT/Node.js license notices are recorded in
+  ``third_party/VOXTART-VENDOR.lock`` and ``VOXTART-NOTICES.txt``.
 - Current local evidence: expanded core coverage 7955/7955 (100.000%) across the tracked deterministic modules, Blender-facing coverage 6452/14335 (45.01%), and headless performance at 32768 voxels with 584.15 ms rebuild and 65.75 ms selection in the latest artifact probe.
 - Core boundary validation rejects non-finite colors/scales, lossy fractional integer inputs, malformed schema versions, malformed MCP numeric arguments, invalid Minecraft world coordinates, oversized depth observations, invalid typed part assignments, and malformed mesh-guide inputs; deterministic and native regression suites cover these rejection paths.
 - Sprite2D-to-voxel phases now include strict bounded JSON depth/part observations, layered/shell/material policies, typed per-voxel part assignments, missing-only symmetry with label propagation, deterministic candidate review with structural deduplication, direct closed-mesh guide voxelization, semantic role anchors, and frame-to-frame voxel pose deltas through ``voxtart.sprite_pipeline`` and ``voxtart.sprite_sequence``.

@@ -35,12 +35,36 @@ ASSET_FILES = (
     "voxtart_icon_48.png",
     "voxtart_icon_256.png",
 )
+VENDOR_DIRECTORIES = (
+    Path("third_party") / "anyCreature",
+    Path("third_party") / "node",
+)
+VENDOR_FILES = (
+    Path("third_party") / "VOXTART-VENDOR.lock",
+)
+VENDOR_REQUIRED_FILES = (
+    Path("third_party") / "anyCreature" / "engine" / "cli.js",
+    Path("third_party") / "anyCreature" / "LICENSE",
+    Path("third_party") / "node" / "node.exe",
+    Path("third_party") / "node" / "LICENSE",
+    Path("third_party") / "VOXTART-VENDOR.lock",
+)
 LICENSE_FILES = (
     (Path("LICENSES") / "GPL-3.0-or-later.txt", Path("doc/license/GPL3-license.txt")),
     (Path("LICENSES") / "VOXTART-NOTICES.txt", Path("VOXTART-NOTICES.txt")),
     (Path("LICENSES") / "VOXTART-ASSETS-CC0.txt", Path("assets/LICENSE")),
+    (Path("LICENSES") / "anyCreature-MIT.txt", Path("LICENSES") / "anyCreature-MIT.txt"),
+    (Path("LICENSES") / "LicenseRef-Node.js.txt", Path("LICENSES") / "LicenseRef-Node.js.txt"),
     (Path("SOURCE-CODE-OFFER.txt"), Path("VOXTART-SOURCE-CODE-OFFER.txt")),
 )
+
+
+def _validate_vendor(source_root: Path) -> None:
+    missing = [str(path) for path in VENDOR_REQUIRED_FILES if not (source_root / path).is_file()]
+    if missing:
+        raise FileNotFoundError(
+            f"VOXTART offline vendor is missing required files: {', '.join(missing)}"
+        )
 
 
 def _validate_runtime(source: Path) -> None:
@@ -135,6 +159,11 @@ def assemble(
         source_root / "tests" / "python" / "voxtart_launcher_probe.py",
         output / "tests" / "python" / "voxtart_launcher_probe.py",
     )
+    _validate_vendor(source_root)
+    for relative in VENDOR_DIRECTORIES:
+        shutil.copytree(source_root / relative, output / relative)
+    for relative in VENDOR_FILES:
+        _copy_file(source_root / relative, output / relative)
 
     runtime_target = output / RUNTIME_RELATIVE
     runtime_stats = _stage_runtime(runtime_source, runtime_target, link_runtime=link_runtime)
@@ -145,13 +174,27 @@ def assemble(
         "runtime_source": str(runtime_source),
         "runtime_relative": str(RUNTIME_RELATIVE),
         "runtime": runtime_stats,
+        "offline_vendor": {
+            "anycreature_root": "third_party/anyCreature",
+            "node_executable": "third_party/node/node.exe",
+            "network_runtime_dependency": False,
+            "node_modules": False,
+            "python_runtime_dependency": False,
+        },
         "required_paths": [
             "VoxTart.exe",
             "run_voxtart.cmd",
             "LICENSES/GPL-3.0-or-later.txt",
             "LICENSES/VOXTART-NOTICES.txt",
             "LICENSES/VOXTART-ASSETS-CC0.txt",
+            "LICENSES/anyCreature-MIT.txt",
+            "LICENSES/LicenseRef-Node.js.txt",
             "SOURCE-CODE-OFFER.txt",
+            "third_party/anyCreature/engine/cli.js",
+            "third_party/anyCreature/LICENSE",
+            "third_party/node/node.exe",
+            "third_party/node/LICENSE",
+            "third_party/VOXTART-VENDOR.lock",
             "tools/brand_voxtart_runtime.py",
             "tools/voxtart_desktop_start.py",
             "tools/voxtart_preferences_init.py",
