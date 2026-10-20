@@ -27,7 +27,7 @@ This package includes the dependency-free anyCreature engine v1.3.2 from
 the Ariescar/anyCreature project at commit
 88041c1efb316370dd78963f422decd854fd9067. The upstream engine copyright
 notice is Alsomind Tech Co., Ltd. and the engine is distributed under the MIT
-License. The exact license text is in LICENSES/anyCreature-MIT.txt and the
+License. The exact license text is in LICENSES/LicenseRef-anyCreature-MIT.txt and the
 vendored source is in third_party/anyCreature.
 
 The generated creature specs and GLBs are authored outputs of the VOXTART

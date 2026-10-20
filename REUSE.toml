@@ -37,10 +37,10 @@ SPDX-FileCopyrightText = "2026 VOXTART contributors"
 SPDX-License-Identifier = "CC0-1.0"
 
 [[annotations]]
-path = ["LICENSES/anyCreature-MIT.txt", "third_party/anyCreature/**"]
+path = ["LICENSES/LicenseRef-anyCreature-MIT.txt", "third_party/anyCreature/**"]
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Alsomind Tech Co., Ltd."
-SPDX-License-Identifier = "MIT"
+SPDX-License-Identifier = "LicenseRef-anyCreature-MIT"
 
 [[annotations]]
 path = ["LICENSES/LicenseRef-Node.js.txt", "third_party/node/LICENSE", "third_party/node/node.exe"]

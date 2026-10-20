@@ -53,7 +53,7 @@ LICENSE_FILES = (
     (Path("LICENSES") / "GPL-3.0-or-later.txt", Path("doc/license/GPL3-license.txt")),
     (Path("LICENSES") / "VOXTART-NOTICES.txt", Path("VOXTART-NOTICES.txt")),
     (Path("LICENSES") / "VOXTART-ASSETS-CC0.txt", Path("assets/LICENSE")),
-    (Path("LICENSES") / "anyCreature-MIT.txt", Path("LICENSES") / "anyCreature-MIT.txt"),
+    (Path("LICENSES") / "LicenseRef-anyCreature-MIT.txt", Path("LICENSES") / "LicenseRef-anyCreature-MIT.txt"),
     (Path("LICENSES") / "LicenseRef-Node.js.txt", Path("LICENSES") / "LicenseRef-Node.js.txt"),
     (Path("SOURCE-CODE-OFFER.txt"), Path("VOXTART-SOURCE-CODE-OFFER.txt")),
 )
@@ -187,7 +187,7 @@ def assemble(
             "LICENSES/GPL-3.0-or-later.txt",
             "LICENSES/VOXTART-NOTICES.txt",
             "LICENSES/VOXTART-ASSETS-CC0.txt",
-            "LICENSES/anyCreature-MIT.txt",
+            "LICENSES/LicenseRef-anyCreature-MIT.txt",
             "LICENSES/LicenseRef-Node.js.txt",
             "SOURCE-CODE-OFFER.txt",
             "third_party/anyCreature/engine/cli.js",

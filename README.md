@@ -60,7 +60,7 @@ works offline without npm or network access. Leave the anyCreature root and
 Node executable preferences blank to use the bundled components; explicit
 development overrides are supported. See
 [VOXTART-NOTICES.txt](VOXTART-NOTICES.txt),
-[LICENSES/anyCreature-MIT.txt](LICENSES/anyCreature-MIT.txt),
+[LICENSES/LicenseRef-anyCreature-MIT.txt](LICENSES/LicenseRef-anyCreature-MIT.txt),
 [LICENSES/LicenseRef-Node.js.txt](LICENSES/LicenseRef-Node.js.txt), and
 [third_party/VOXTART-VENDOR.lock](third_party/VOXTART-VENDOR.lock) for
 credits, licenses, provenance, and checksums.
